@@ -1,4 +1,4 @@
-/// Brand tokens — Lumin design system.
+/// Brand tokens — colours, spacing, radii.
 import 'package:flutter/material.dart';
 
 class LuminColors {
@@ -16,6 +16,7 @@ class LuminColors {
   static const Color warn = Color(0xFFF59E0B);
   static const Color loss = Color(0xFFF87171);
 
+  // Pre-baked alpha (0.10 × 255 ≈ 26 = 0x1A) so it's a true compile-time const.
   static const Color cardBorder = Color(0x1A7BD3F7);
 }
 
