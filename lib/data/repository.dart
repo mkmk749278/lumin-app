@@ -278,19 +278,19 @@ class HttpRepository implements LuminRepository {
   // ---- json → mock-class adapters --------------------------------------
 
   MockSignal _signalFromJson(Map<String, dynamic> j) => MockSignal(
+        id: j['signal_id'] as String? ?? '',
         symbol: j['symbol'] as String? ?? '',
         direction: j['direction'] as String? ?? 'LONG',
+        setupName: (j['setup_class'] as String? ?? '').replaceAll('_', ' '),
+        agentName: j['agent_name'] as String? ?? '',
         entry: (j['entry'] as num?)?.toDouble() ?? 0.0,
-        stopLoss: (j['stop_loss'] as num?)?.toDouble() ?? 0.0,
+        sl: (j['stop_loss'] as num?)?.toDouble() ?? 0.0,
         tp1: (j['tp1'] as num?)?.toDouble() ?? 0.0,
         tp2: (j['tp2'] as num?)?.toDouble() ?? 0.0,
-        tp3: (j['tp3'] as num?)?.toDouble(),
+        tp3: (j['tp3'] as num?)?.toDouble() ?? 0.0,
         confidence: (j['confidence'] as num?)?.toDouble() ?? 0.0,
-        qualityTier: j['quality_tier'] as String? ?? 'B',
-        agentName: j['agent_name'] as String? ?? '',
-        setupClass: j['setup_class'] as String? ?? '',
+        tier: j['quality_tier'] as String? ?? 'B',
         status: j['status'] as String? ?? 'ACTIVE',
-        currentPrice: (j['current_price'] as num?)?.toDouble() ?? 0.0,
         pnlPct: (j['pnl_pct'] as num?)?.toDouble() ?? 0.0,
         minutesAgo: (j['minutes_ago'] as num?)?.toInt() ?? 0,
       );
