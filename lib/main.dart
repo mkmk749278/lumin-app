@@ -5,7 +5,7 @@
 /// is a single shared_preferences read, well under the first frame.
 import 'package:flutter/material.dart';
 
-import 'app_shell.dart';
+import 'app/nav_shell.dart';
 import 'data/app_config.dart';
 import 'theme.dart';
 
@@ -28,7 +28,7 @@ class LuminApp extends StatelessWidget {
         title: 'Lumin',
         debugShowCheckedModeBanner: false,
         theme: buildLuminTheme(),
-        home: const AppShell(),
+        home: const NavShell(),
       ),
     );
   }
