@@ -16,7 +16,7 @@ class LuminColors {
   static const Color warn = Color(0xFFF59E0B);
   static const Color loss = Color(0xFFF87171);
 
-  static Color cardBorder = const Color(0xFF7BD3F7).withOpacity(0.10);
+  static const Color cardBorder = Color(0x1A7BD3F7);
 }
 
 class LuminSpacing {
