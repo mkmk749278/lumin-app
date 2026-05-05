@@ -100,7 +100,7 @@ class _SignalsPageState extends State<SignalsPage> {
                   }
                   final items = snap.data ?? const <MockSignal>[];
                   if (items.isEmpty) {
-                    return _SignalsEmpty(filter: _filter);
+                    return _SignalsEmpty(filter: _filter, isLive: scope.repo.isLive);
                   }
                   return ListView.separated(
                     physics: const AlwaysScrollableScrollPhysics(
@@ -203,8 +203,9 @@ class _FilterChip extends StatelessWidget {
 }
 
 class _SignalsEmpty extends StatelessWidget {
-  const _SignalsEmpty({required this.filter});
+  const _SignalsEmpty({required this.filter, required this.isLive});
   final _SignalFilter filter;
+  final bool isLive;
 
   @override
   Widget build(BuildContext context) {
@@ -227,10 +228,12 @@ class _SignalsEmpty extends StatelessWidget {
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: LuminSpacing.xs),
-        const Text(
-          'Pull down to refresh.',
+        Text(
+          isLive
+              ? 'Engine is scanning 75 pairs.\nNew paid signals appear here when they fire.'
+              : 'Pull down to refresh.',
           textAlign: TextAlign.center,
-          style: TextStyle(color: LuminColors.textMuted, fontSize: 11),
+          style: const TextStyle(color: LuminColors.textMuted, fontSize: 11),
         ),
       ],
     );

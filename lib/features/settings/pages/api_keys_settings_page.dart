@@ -69,7 +69,7 @@ class _ApiKeysSettingsPageState extends State<ApiKeysSettingsPage> {
       body: ListView(
         physics: const BouncingScrollPhysics(),
         children: [
-          const PreviewBadge(),
+          if (!_liveMode) const PreviewBadge(),
           _backendCard(),
           const SizedBox(height: LuminSpacing.md),
           _testCard(),

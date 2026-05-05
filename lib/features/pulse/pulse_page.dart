@@ -190,7 +190,7 @@ class _RegimeAndPnlRow extends StatelessWidget {
                   ),
                   const SizedBox(height: LuminSpacing.sm),
                   Text(
-                    '${engine.regimePctTrending.toStringAsFixed(1)}% of cycles',
+                    '${engine.regimePctTrending.toStringAsFixed(1)}% trending',
                     style: const TextStyle(
                       color: LuminColors.textSecondary,
                       fontSize: 11,
