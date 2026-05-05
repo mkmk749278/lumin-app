@@ -1,12 +1,16 @@
 /// Signals — live + closed feed.
 ///
-/// Filter chips trigger a re-fetch via the repository.  Pull-to-refresh
-/// reloads.  Bottom-sheet detail unchanged from v0.0.3.
+/// Filter chips trigger a re-fetch via the repository.  When the
+/// "Closed" filter is active, a second row of sub-filter chips appears
+/// (All / TP / SL / Invalidated / Expired) and is applied client-side
+/// so we don't multiply API requests for what is essentially a status
+/// projection of the same closed-pool.
 import 'package:flutter/material.dart';
 
 import '../../data/app_config.dart';
 import '../../data/mock_data.dart';
 import '../../data/repository.dart';
+import '../../shared/format.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
 import '../../shared/widgets/preview_badge.dart';
@@ -29,6 +33,43 @@ extension _FilterStr on _SignalFilter {
       '${name[0].toUpperCase()}${name.substring(1)}';
 }
 
+enum _ClosedSubFilter { all, tp, sl, invalidated, expired }
+
+extension _SubFilterStr on _ClosedSubFilter {
+  String get label {
+    switch (this) {
+      case _ClosedSubFilter.all:
+        return 'All';
+      case _ClosedSubFilter.tp:
+        return 'TP';
+      case _ClosedSubFilter.sl:
+        return 'SL';
+      case _ClosedSubFilter.invalidated:
+        return 'Invalidated';
+      case _ClosedSubFilter.expired:
+        return 'Expired';
+    }
+  }
+}
+
+bool _matchesSubFilter(MockSignal s, _ClosedSubFilter f) {
+  switch (f) {
+    case _ClosedSubFilter.all:
+      return true;
+    case _ClosedSubFilter.tp:
+      return s.status == 'TP1_HIT' ||
+          s.status == 'TP2_HIT' ||
+          s.status == 'TP3_HIT' ||
+          s.status == 'FULL_TP_HIT';
+    case _ClosedSubFilter.sl:
+      return s.status == 'SL_HIT';
+    case _ClosedSubFilter.invalidated:
+      return s.status == 'INVALIDATED' || s.status == 'CANCELLED';
+    case _ClosedSubFilter.expired:
+      return s.status == 'EXPIRED';
+  }
+}
+
 class SignalsPage extends StatefulWidget {
   const SignalsPage({super.key});
 
@@ -38,6 +79,7 @@ class SignalsPage extends StatefulWidget {
 
 class _SignalsPageState extends State<SignalsPage> {
   _SignalFilter _filter = _SignalFilter.all;
+  _ClosedSubFilter _subFilter = _ClosedSubFilter.all;
   late Future<List<MockSignal>> _future;
   LuminRepository? _lastRepo;
 
@@ -67,8 +109,15 @@ class _SignalsPageState extends State<SignalsPage> {
     if (f == _filter) return;
     setState(() {
       _filter = f;
+      // Reset sub-filter when switching primary chip — hidden when not Closed.
+      _subFilter = _ClosedSubFilter.all;
     });
     _refetch();
+  }
+
+  void _setSubFilter(_ClosedSubFilter f) {
+    if (f == _subFilter) return;
+    setState(() => _subFilter = f);
   }
 
   @override
@@ -80,6 +129,10 @@ class _SignalsPageState extends State<SignalsPage> {
         children: [
           if (!scope.repo.isLive) const PreviewBadge(),
           _FilterRow(current: _filter, onChanged: _setFilter),
+          if (_filter == _SignalFilter.closed) ...[
+            const SizedBox(height: LuminSpacing.sm),
+            _SubFilterRow(current: _subFilter, onChanged: _setSubFilter),
+          ],
           const SizedBox(height: LuminSpacing.sm),
           Expanded(
             child: RefreshIndicator(
@@ -98,9 +151,19 @@ class _SignalsPageState extends State<SignalsPage> {
                       onRetry: _refresh,
                     );
                   }
-                  final items = snap.data ?? const <MockSignal>[];
+                  var items = snap.data ?? const <MockSignal>[];
+                  if (_filter == _SignalFilter.closed &&
+                      _subFilter != _ClosedSubFilter.all) {
+                    items = items
+                        .where((s) => _matchesSubFilter(s, _subFilter))
+                        .toList(growable: false);
+                  }
                   if (items.isEmpty) {
-                    return _SignalsEmpty(filter: _filter, isLive: scope.repo.isLive);
+                    return _SignalsEmpty(
+                      filter: _filter,
+                      subFilter: _subFilter,
+                      isLive: scope.repo.isLive,
+                    );
                   }
                   return ListView.separated(
                     physics: const AlwaysScrollableScrollPhysics(
@@ -137,7 +200,7 @@ class _FilterRow extends StatelessWidget {
       child: Row(
         children: [
           for (final f in _SignalFilter.values) ...[
-            _FilterChip(
+            _Chip(
               label: f.label,
               selected: current == f,
               onTap: () => onChanged(f),
@@ -151,16 +214,48 @@ class _FilterRow extends StatelessWidget {
   }
 }
 
-class _FilterChip extends StatelessWidget {
-  const _FilterChip({
+class _SubFilterRow extends StatelessWidget {
+  const _SubFilterRow({required this.current, required this.onChanged});
+
+  final _ClosedSubFilter current;
+  final ValueChanged<_ClosedSubFilter> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 32,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding:
+            const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
+        itemCount: _ClosedSubFilter.values.length,
+        separatorBuilder: (_, __) => const SizedBox(width: LuminSpacing.sm),
+        itemBuilder: (_, i) {
+          final f = _ClosedSubFilter.values[i];
+          return _Chip(
+            label: f.label,
+            selected: current == f,
+            onTap: () => onChanged(f),
+            compact: true,
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _Chip extends StatelessWidget {
+  const _Chip({
     required this.label,
     required this.selected,
     required this.onTap,
+    this.compact = false,
   });
 
   final String label;
   final bool selected;
   final VoidCallback onTap;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -172,9 +267,9 @@ class _FilterChip extends StatelessWidget {
         onTap: onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
-          padding: const EdgeInsets.symmetric(
-            horizontal: LuminSpacing.md,
-            vertical: LuminSpacing.xs + 2,
+          padding: EdgeInsets.symmetric(
+            horizontal: compact ? LuminSpacing.sm : LuminSpacing.md,
+            vertical: compact ? LuminSpacing.xs : LuminSpacing.xs + 2,
           ),
           decoration: BoxDecoration(
             color: selected
@@ -191,7 +286,7 @@ class _FilterChip extends StatelessWidget {
             label,
             style: TextStyle(
               color: selected ? LuminColors.accent : LuminColors.textSecondary,
-              fontSize: 12,
+              fontSize: compact ? 11 : 12,
               fontWeight: FontWeight.w500,
               letterSpacing: 0.3,
             ),
@@ -203,9 +298,33 @@ class _FilterChip extends StatelessWidget {
 }
 
 class _SignalsEmpty extends StatelessWidget {
-  const _SignalsEmpty({required this.filter, required this.isLive});
+  const _SignalsEmpty({
+    required this.filter,
+    required this.subFilter,
+    required this.isLive,
+  });
   final _SignalFilter filter;
+  final _ClosedSubFilter subFilter;
   final bool isLive;
+
+  String _heading() {
+    if (filter == _SignalFilter.open) return 'No open signals right now';
+    if (filter == _SignalFilter.closed) {
+      switch (subFilter) {
+        case _ClosedSubFilter.all:
+          return 'No closed signals yet';
+        case _ClosedSubFilter.tp:
+          return 'No TP hits yet';
+        case _ClosedSubFilter.sl:
+          return 'No SL hits yet';
+        case _ClosedSubFilter.invalidated:
+          return 'No invalidated signals';
+        case _ClosedSubFilter.expired:
+          return 'No expired signals';
+      }
+    }
+    return 'No signals yet';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -219,11 +338,7 @@ class _SignalsEmpty extends StatelessWidget {
             size: 48, color: LuminColors.textMuted),
         const SizedBox(height: LuminSpacing.md),
         Text(
-          filter == _SignalFilter.open
-              ? 'No open signals right now'
-              : filter == _SignalFilter.closed
-                  ? 'No closed signals yet'
-                  : 'No signals yet',
+          _heading(),
           style: Theme.of(context).textTheme.bodyMedium,
           textAlign: TextAlign.center,
         ),
@@ -327,20 +442,17 @@ class _SignalCard extends StatelessWidget {
       case 'TP1_HIT':
       case 'TP2_HIT':
       case 'TP3_HIT':
+      case 'FULL_TP_HIT':
         return LuminColors.success;
       case 'SL_HIT':
         return LuminColors.loss;
       case 'INVALIDATED':
+      case 'EXPIRED':
+      case 'CANCELLED':
         return LuminColors.textMuted;
       default:
         return LuminColors.accent;
     }
-  }
-
-  String _agoLabel() {
-    if (sig.minutesAgo < 60) return '${sig.minutesAgo}m';
-    if (sig.minutesAgo < 1440) return '${(sig.minutesAgo / 60).round()}h';
-    return '${(sig.minutesAgo / 1440).round()}d';
   }
 
   @override
@@ -418,27 +530,27 @@ class _SignalCard extends StatelessWidget {
               Expanded(
                 child: _PriceCol(
                   label: 'Entry',
-                  value: sig.entry.toStringAsFixed(2),
+                  value: formatPrice(sig.entry),
                 ),
               ),
               Expanded(
                 child: _PriceCol(
                   label: 'SL',
-                  value: sig.sl.toStringAsFixed(2),
+                  value: formatPrice(sig.sl),
                   color: LuminColors.loss,
                 ),
               ),
               Expanded(
                 child: _PriceCol(
                   label: 'TP1',
-                  value: sig.tp1.toStringAsFixed(2),
+                  value: formatPrice(sig.tp1),
                   color: LuminColors.success,
                 ),
               ),
               Expanded(
                 child: _PriceCol(
                   label: 'TP3',
-                  value: sig.tp3.toStringAsFixed(2),
+                  value: formatPrice(sig.tp3),
                   color: LuminColors.success,
                 ),
               ),
@@ -467,7 +579,7 @@ class _SignalCard extends StatelessWidget {
               ),
               const SizedBox(width: LuminSpacing.sm),
               Text(
-                '• ${_agoLabel()} ago',
+                '• ${formatAge(sig.minutesAgo)} ago',
                 style: const TextStyle(
                   color: LuminColors.textMuted,
                   fontSize: 11,
@@ -475,7 +587,7 @@ class _SignalCard extends StatelessWidget {
               ),
               const Spacer(),
               Text(
-                '${pnlPositive ? '+' : ''}${sig.pnlPct.toStringAsFixed(2)}%',
+                formatPct(sig.pnlPct),
                 style: TextStyle(
                   color: pnlPositive ? LuminColors.success : LuminColors.loss,
                   fontSize: 14,
@@ -534,7 +646,7 @@ class _SignalCard extends StatelessWidget {
               ),
               child: const Center(
                 child: Text(
-                  'Chart preview — coming with v0.0.8',
+                  'Chart preview — coming with v0.1.0',
                   style: TextStyle(
                     color: LuminColors.textMuted,
                     fontSize: 12,
@@ -543,7 +655,7 @@ class _SignalCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: LuminSpacing.lg),
-            _DetailRow('TP2', sig.tp2.toStringAsFixed(2)),
+            _DetailRow('TP2', formatPrice(sig.tp2)),
             _DetailRow('Confidence',
                 '${sig.confidence.toStringAsFixed(1)} (${sig.tier})'),
             _DetailRow('Status', sig.status),

@@ -54,14 +54,28 @@ class AgentStat {
     required this.attempts,
     required this.generated,
     required this.noSignal,
+    this.closedToday = 0,
+    this.tpHits = 0,
+    this.slHits = 0,
+    this.invalidated = 0,
+    this.lastSignalAgeMinutes,
   });
   final String evaluator;
   final String setupClass;
   final String displayName;
   final bool enabled;
+  // Telemetry counters (reset per scan-cycle window):
   final int attempts;
   final int generated;
   final int noSignal;
+  // Lifecycle counters (rolling 24h):
+  final int closedToday;
+  final int tpHits;
+  final int slHits;
+  final int invalidated;
+  // Minutes since this agent's most recent emission, or null if it has
+  // never fired since the engine's history window started.
+  final int? lastSignalAgeMinutes;
 
   factory AgentStat.fromJson(Map<String, dynamic> j) => AgentStat(
         evaluator: j['evaluator'] as String? ?? '',
@@ -71,6 +85,11 @@ class AgentStat {
         attempts: (j['attempts'] as num?)?.toInt() ?? 0,
         generated: (j['generated'] as num?)?.toInt() ?? 0,
         noSignal: (j['no_signal'] as num?)?.toInt() ?? 0,
+        closedToday: (j['closed_today'] as num?)?.toInt() ?? 0,
+        tpHits: (j['tp_hits'] as num?)?.toInt() ?? 0,
+        slHits: (j['sl_hits'] as num?)?.toInt() ?? 0,
+        invalidated: (j['invalidated'] as num?)?.toInt() ?? 0,
+        lastSignalAgeMinutes: (j['last_signal_age_minutes'] as num?)?.toInt(),
       );
 }
 
@@ -79,9 +98,16 @@ abstract class LuminRepository {
   bool get isLive;
 
   Future<MockEngineSnapshot> fetchPulse();
-  Future<List<MockSignal>> fetchSignals({String status = 'all', int limit = 50});
+  Future<List<MockSignal>> fetchSignals({
+    String status = 'all',
+    int limit = 50,
+    String? setupClass,
+  });
   Future<List<MockPosition>> fetchPositions();
-  Future<List<MockActivityEvent>> fetchActivity({int limit = 50});
+  Future<List<MockActivityEvent>> fetchActivity({
+    int limit = 50,
+    String? setupClass,
+  });
   Future<AutoModeStatus> fetchAutoMode();
   Future<AutoModeStatus> setAutoMode(String mode);
   Future<List<AgentStat>> fetchAgents();
@@ -102,8 +128,13 @@ class MockRepository implements LuminRepository {
   Future<MockEngineSnapshot> fetchPulse() async => mockEngine;
 
   @override
-  Future<List<MockSignal>> fetchSignals(
-      {String status = 'all', int limit = 50}) async {
+  Future<List<MockSignal>> fetchSignals({
+    String status = 'all',
+    int limit = 50,
+    String? setupClass,
+  }) async {
+    // setupClass is ignored in mock mode — the 4-signal fixture isn't
+    // worth filtering and Live mode is the canonical path for drill-down.
     final all = mockSignals;
     Iterable<MockSignal> filtered;
     switch (status) {
@@ -123,7 +154,10 @@ class MockRepository implements LuminRepository {
   Future<List<MockPosition>> fetchPositions() async => mockPositions;
 
   @override
-  Future<List<MockActivityEvent>> fetchActivity({int limit = 50}) async =>
+  Future<List<MockActivityEvent>> fetchActivity({
+    int limit = 50,
+    String? setupClass,
+  }) async =>
       mockActivity.take(limit).toList();
 
   @override
@@ -154,8 +188,8 @@ class MockRepository implements LuminRepository {
 
   @override
   Future<List<AgentStat>> fetchAgents() async {
-    // Synthesise from mockSignals' setup_class distribution so the Agents
-    // tab still renders something sensible offline.
+    // Synthesise 14 agents with zero lifecycle counters — preview mode
+    // doesn't simulate fired-signal history.
     final names = <String, String>{
       'SR_FLIP_RETEST': 'The Architect',
       'LIQUIDITY_SWEEP_REVERSAL': 'The Counter-Puncher',
@@ -222,10 +256,17 @@ class HttpRepository implements LuminRepository {
   }
 
   @override
-  Future<List<MockSignal>> fetchSignals(
-      {String status = 'all', int limit = 50}) async {
-    final j = (await client
-        .get('/api/signals', query: {'status': status, 'limit': limit})) as Map<String, dynamic>;
+  Future<List<MockSignal>> fetchSignals({
+    String status = 'all',
+    int limit = 50,
+    String? setupClass,
+  }) async {
+    final query = <String, dynamic>{'status': status, 'limit': limit};
+    if (setupClass != null && setupClass.isNotEmpty) {
+      query['setup_class'] = setupClass;
+    }
+    final j = (await client.get('/api/signals', query: query))
+        as Map<String, dynamic>;
     final items = (j['items'] as List? ?? []).cast<Map<String, dynamic>>();
     return items.map(_signalFromJson).toList();
   }
@@ -238,8 +279,15 @@ class HttpRepository implements LuminRepository {
   }
 
   @override
-  Future<List<MockActivityEvent>> fetchActivity({int limit = 50}) async {
-    final j = (await client.get('/api/activity', query: {'limit': limit}))
+  Future<List<MockActivityEvent>> fetchActivity({
+    int limit = 50,
+    String? setupClass,
+  }) async {
+    final query = <String, dynamic>{'limit': limit};
+    if (setupClass != null && setupClass.isNotEmpty) {
+      query['setup_class'] = setupClass;
+    }
+    final j = (await client.get('/api/activity', query: query))
         as Map<String, dynamic>;
     final items = (j['items'] as List? ?? []).cast<Map<String, dynamic>>();
     return items.map(_activityFromJson).toList();
