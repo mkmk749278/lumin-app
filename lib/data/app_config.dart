@@ -1,17 +1,17 @@
 /// App-wide config + repository provider.
 ///
-/// Holds three knobs:
+/// Two knobs only:
 ///   * dataSource — 'mock' (offline) or 'live' (HTTP backend)
 ///   * apiBaseUrl — e.g. https://api.luminapp.org
-///   * apiAuthToken — Bearer token for the live API
 ///
-/// Persisted via ``shared_preferences`` so the user's selection survives
-/// app restarts.  Exposed to the widget tree through ``AppConfigScope``;
-/// every page reads its repository via ``AppConfigScope.of(context).repo``.
+/// No bearer token field — the app authenticates anonymously on first
+/// launch via ``/api/auth/anonymous`` and silently refreshes/re-mints
+/// thereafter.  Server-side secret rotations are invisible to the user.
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api_client.dart';
+import 'auth_service.dart';
 import 'repository.dart';
 
 enum DataSource { mock, live }
@@ -20,37 +20,31 @@ class AppConfig {
   AppConfig({
     required this.dataSource,
     required this.apiBaseUrl,
-    required this.apiAuthToken,
   });
 
   final DataSource dataSource;
   final String apiBaseUrl;
-  final String apiAuthToken;
 
   AppConfig copyWith({
     DataSource? dataSource,
     String? apiBaseUrl,
-    String? apiAuthToken,
   }) =>
       AppConfig(
         dataSource: dataSource ?? this.dataSource,
         apiBaseUrl: apiBaseUrl ?? this.apiBaseUrl,
-        apiAuthToken: apiAuthToken ?? this.apiAuthToken,
       );
 
   static const _kSource = 'lumin.dataSource';
   static const _kBaseUrl = 'lumin.apiBaseUrl';
-  static const _kToken = 'lumin.apiAuthToken';
 
   static const defaultBaseUrl = 'https://api.luminapp.org';
 
   static Future<AppConfig> load() async {
     final p = await SharedPreferences.getInstance();
-    final raw = p.getString(_kSource) ?? 'mock';
+    final raw = p.getString(_kSource) ?? 'live';
     return AppConfig(
-      dataSource: raw == 'live' ? DataSource.live : DataSource.mock,
+      dataSource: raw == 'mock' ? DataSource.mock : DataSource.live,
       apiBaseUrl: p.getString(_kBaseUrl) ?? defaultBaseUrl,
-      apiAuthToken: p.getString(_kToken) ?? '',
     );
   }
 
@@ -58,7 +52,6 @@ class AppConfig {
     final p = await SharedPreferences.getInstance();
     await p.setString(_kSource, dataSource == DataSource.live ? 'live' : 'mock');
     await p.setString(_kBaseUrl, apiBaseUrl);
-    await p.setString(_kToken, apiAuthToken);
   }
 }
 
@@ -86,9 +79,11 @@ class AppConfigScope extends StatefulWidget {
 class _AppConfigScopeState extends State<AppConfigScope> {
   late AppConfig _config = widget.initial;
   late LuminRepository _repo = _buildRepo(_config);
+  AuthService? _auth;
 
   AppConfig get config => _config;
   LuminRepository get repo => _repo;
+  AuthService? get auth => _auth;
 
   Future<void> update(AppConfig next) async {
     setState(() {
@@ -98,13 +93,21 @@ class _AppConfigScopeState extends State<AppConfigScope> {
     await next.save();
   }
 
+  /// Hard reset — wipes the on-device JWT.  Next API call will mint
+  /// fresh anonymously.
+  Future<void> resetConnection() async {
+    await _auth?.signOut();
+  }
+
   LuminRepository _buildRepo(AppConfig c) {
     if (c.dataSource == DataSource.live && c.apiBaseUrl.isNotEmpty) {
+      _auth = AuthService(baseUrl: c.apiBaseUrl);
       return HttpRepository(LuminApiClient(
         baseUrl: c.apiBaseUrl,
-        authToken: c.apiAuthToken,
+        auth: _auth!,
       ));
     }
+    _auth = null;
     return const MockRepository();
   }
 
@@ -123,6 +126,5 @@ class _InheritedConfig extends InheritedWidget {
   @override
   bool updateShouldNotify(_InheritedConfig oldWidget) =>
       oldWidget.state._config.dataSource != state._config.dataSource ||
-      oldWidget.state._config.apiBaseUrl != state._config.apiBaseUrl ||
-      oldWidget.state._config.apiAuthToken != state._config.apiAuthToken;
+      oldWidget.state._config.apiBaseUrl != state._config.apiBaseUrl;
 }

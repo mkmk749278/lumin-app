@@ -1,13 +1,17 @@
 /// API keys + backend connection.
 ///
-/// v0.0.5 expansion: in addition to Binance API keys, this page now controls
-/// the data source the entire app talks to.  Toggle Mock ↔ Live, set the
-/// FastAPI base URL, paste the bearer token issued by `setup-vps-api.sh`,
-/// and tap "Test connection" to verify before saving.
+/// Backend connection is now zero-config: the app authenticates anonymously
+/// on first launch and silently refreshes thereafter.  This page only
+/// exposes Mock/Live toggle, base URL (rarely changed), connection status,
+/// and a "Reset connection" button that wipes the on-device JWT (mostly a
+/// debugging aid — the next API call re-mints automatically anyway).
+///
+/// Binance API keys are unchanged — separate concern, not Lumin auth.
 import 'package:flutter/material.dart';
 
 import '../../../data/api_client.dart';
 import '../../../data/app_config.dart';
+import '../../../data/auth_service.dart';
 import '../../../shared/tokens.dart';
 import '../../../shared/widgets/lumin_card.dart';
 import '../../../shared/widgets/preview_badge.dart';
@@ -26,11 +30,9 @@ class _ApiKeysSettingsPageState extends State<ApiKeysSettingsPage> {
   bool _showBinanceSecret = false;
   bool _testnet = false;
 
-  // Lumin backend.
+  // Lumin backend — only base URL is user-editable.
   late final TextEditingController _baseUrlCtl;
-  late final TextEditingController _tokenCtl;
-  bool _showToken = false;
-  bool _liveMode = false;
+  bool _liveMode = true;
 
   String? _testResult;
   bool _testing = false;
@@ -40,7 +42,6 @@ class _ApiKeysSettingsPageState extends State<ApiKeysSettingsPage> {
     super.initState();
     final cfg = AppConfigScope.of(context).config;
     _baseUrlCtl = TextEditingController(text: cfg.apiBaseUrl);
-    _tokenCtl = TextEditingController(text: cfg.apiAuthToken);
     _liveMode = cfg.dataSource == DataSource.live;
   }
 
@@ -49,7 +50,6 @@ class _ApiKeysSettingsPageState extends State<ApiKeysSettingsPage> {
     _binanceKeyCtl.dispose();
     _binanceSecretCtl.dispose();
     _baseUrlCtl.dispose();
-    _tokenCtl.dispose();
     super.dispose();
   }
 
@@ -74,6 +74,8 @@ class _ApiKeysSettingsPageState extends State<ApiKeysSettingsPage> {
           const SizedBox(height: LuminSpacing.md),
           _testCard(),
           const SizedBox(height: LuminSpacing.md),
+          _resetCard(),
+          const SizedBox(height: LuminSpacing.md),
           _binanceCard(),
           const SizedBox(height: LuminSpacing.md),
           _envCard(),
@@ -86,7 +88,7 @@ class _ApiKeysSettingsPageState extends State<ApiKeysSettingsPage> {
   }
 
   // ------------------------------------------------------------------
-  // Lumin backend (data source toggle + base URL + token)
+  // Lumin backend (Mock/Live + base URL only — auth is automatic)
   // ------------------------------------------------------------------
 
   Widget _backendCard() {
@@ -123,7 +125,7 @@ class _ApiKeysSettingsPageState extends State<ApiKeysSettingsPage> {
                       const SizedBox(height: 2),
                       Text(
                         _liveMode
-                            ? 'Calls FastAPI backend at the URL below'
+                            ? 'Auto-authenticated. No setup needed.'
                             : 'Reads built-in sample data — works offline',
                         style: const TextStyle(
                           color: LuminColors.textSecondary,
@@ -150,25 +152,6 @@ class _ApiKeysSettingsPageState extends State<ApiKeysSettingsPage> {
               keyboardType: TextInputType.url,
               style: const TextStyle(color: LuminColors.textPrimary, fontSize: 13),
               decoration: _inputDecoration('https://api.luminapp.org'),
-            ),
-            const SizedBox(height: LuminSpacing.md),
-            _label('Bearer token'),
-            TextField(
-              controller: _tokenCtl,
-              enabled: _liveMode,
-              obscureText: !_showToken,
-              autocorrect: false,
-              style: const TextStyle(color: LuminColors.textPrimary, fontSize: 13),
-              decoration: _inputDecoration('Paste token from setup-vps-api.sh').copyWith(
-                suffixIcon: IconButton(
-                  icon: Icon(
-                    _showToken ? Icons.visibility_off : Icons.visibility,
-                    color: LuminColors.textMuted,
-                    size: 18,
-                  ),
-                  onPressed: () => setState(() => _showToken = !_showToken),
-                ),
-              ),
             ),
           ],
         ),
@@ -246,9 +229,50 @@ class _ApiKeysSettingsPageState extends State<ApiKeysSettingsPage> {
     );
   }
 
+  Widget _resetCard() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
+      child: LuminCard(
+        child: Row(
+          children: [
+            const Icon(Icons.refresh, color: LuminColors.textMuted, size: 18),
+            const SizedBox(width: LuminSpacing.md),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Reset connection',
+                    style: TextStyle(
+                      color: LuminColors.textPrimary,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  SizedBox(height: 2),
+                  Text(
+                    'Wipes the cached auth token. Next request re-authenticates.',
+                    style: TextStyle(
+                      color: LuminColors.textSecondary,
+                      fontSize: 11,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            TextButton(
+              onPressed: _liveMode ? _resetConnection : null,
+              child: const Text('Reset'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _runTest() async {
     final url = _baseUrlCtl.text.trim();
-    final token = _tokenCtl.text.trim();
     if (url.isEmpty) {
       setState(() => _testResult = 'ERR: enter a base URL');
       return;
@@ -257,28 +281,23 @@ class _ApiKeysSettingsPageState extends State<ApiKeysSettingsPage> {
       _testing = true;
       _testResult = null;
     });
-    final client = LuminApiClient(baseUrl: url, authToken: token);
+    final auth = AuthService(baseUrl: url);
+    final client = LuminApiClient(baseUrl: url, auth: auth);
     try {
-      // Health is unauthenticated — confirms basic reachability.
-      final health = await client.get('/api/health');
-      if (health is! Map || health['ok'] != true) {
+      final pulse = await client.get('/api/pulse');
+      if (pulse is! Map) {
         if (!mounted) return;
         setState(() {
           _testing = false;
-          _testResult = 'ERR: unexpected /api/health response';
+          _testResult = 'ERR: unexpected /api/pulse response';
         });
         return;
-      }
-      // Pulse requires auth — confirms the bearer token works.
-      if (token.isNotEmpty) {
-        await client.get('/api/pulse');
       }
       if (!mounted) return;
       setState(() {
         _testing = false;
-        _testResult = token.isEmpty
-            ? 'OK — health 200 (no auth tested; paste a token to verify)'
-            : 'OK — health 200, pulse 200 (auth works)';
+        _testResult =
+            'OK — auto-authenticated. Engine ${pulse['status']}, regime ${pulse['regime']}.';
       });
     } on ApiError catch (e) {
       if (!mounted) return;
@@ -292,11 +311,25 @@ class _ApiKeysSettingsPageState extends State<ApiKeysSettingsPage> {
         _testing = false;
         _testResult = 'ERR: $e';
       });
+    } finally {
+      client.dispose();
+      auth.dispose();
     }
   }
 
+  Future<void> _resetConnection() async {
+    await AppConfigScope.of(context).resetConnection();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Connection reset. Next request will re-authenticate.'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
   // ------------------------------------------------------------------
-  // Binance (unchanged from v0.0.4 — session-only)
+  // Binance (unchanged — session-only)
   // ------------------------------------------------------------------
 
   Widget _binanceCard() {
@@ -489,24 +522,14 @@ class _ApiKeysSettingsPageState extends State<ApiKeysSettingsPage> {
     final next = scope.config.copyWith(
       dataSource: _liveMode ? DataSource.live : DataSource.mock,
       apiBaseUrl: _baseUrlCtl.text.trim(),
-      apiAuthToken: _tokenCtl.text.trim(),
     );
     await scope.update(next);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          _liveMode
-              ? 'Saved — app now reads from $_baseUrlText'
-              : 'Saved — app now uses mock data',
-        ),
-        duration: const Duration(seconds: 2),
+      const SnackBar(
+        content: Text('Saved'),
+        duration: Duration(seconds: 2),
       ),
     );
-  }
-
-  String get _baseUrlText {
-    final v = _baseUrlCtl.text.trim();
-    return v.isEmpty ? 'mock' : v;
   }
 }
