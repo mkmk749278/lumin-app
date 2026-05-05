@@ -47,6 +47,17 @@ jobs:
             echo "android/ exists — skipping scaffolding"
           fi
 
+      - name: Inject INTERNET permission into release manifest
+        run: |
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          if ! grep -q "android.permission.INTERNET" "$MANIFEST"; then
+            sed -i "s|<application|<uses-permission android:name=\"android.permission.INTERNET\" />\n    <application|" "$MANIFEST"
+            echo "Added INTERNET permission"
+          else
+            echo "INTERNET permission already present"
+          fi
+          grep INTERNET "$MANIFEST" || (echo "FAIL: missing" && exit 1)
+
       - name: Get dependencies
         run: flutter pub get
 
