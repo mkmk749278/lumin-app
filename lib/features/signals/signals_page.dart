@@ -1,17 +1,33 @@
 /// Signals — live + closed feed.
 ///
-/// Filter chips (All / Open / Closed) toggle the visible subset.  Each
-/// signal renders as a card with symbol, direction, agent, entry/SL/TP,
-/// confidence tier, and live PnL.  Tap → detail bottom sheet (placeholder
-/// for now; real chart preview lands when backend ships).
+/// Filter chips trigger a re-fetch via the repository.  Pull-to-refresh
+/// reloads.  Bottom-sheet detail unchanged from v0.0.3.
 import 'package:flutter/material.dart';
 
+import '../../data/app_config.dart';
 import '../../data/mock_data.dart';
+import '../../data/repository.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
 import '../../shared/widgets/preview_badge.dart';
 
 enum _SignalFilter { all, open, closed }
+
+extension _FilterStr on _SignalFilter {
+  String get apiValue {
+    switch (this) {
+      case _SignalFilter.open:
+        return 'open';
+      case _SignalFilter.closed:
+        return 'closed';
+      case _SignalFilter.all:
+        return 'all';
+    }
+  }
+
+  String get label =>
+      '${name[0].toUpperCase()}${name.substring(1)}';
+}
 
 class SignalsPage extends StatefulWidget {
   const SignalsPage({super.key});
@@ -22,48 +38,86 @@ class SignalsPage extends StatefulWidget {
 
 class _SignalsPageState extends State<SignalsPage> {
   _SignalFilter _filter = _SignalFilter.all;
+  late Future<List<MockSignal>> _future;
+  LuminRepository? _lastRepo;
 
-  bool _isOpen(MockSignal s) => s.status == 'ACTIVE';
-
-  List<MockSignal> get _filtered {
-    switch (_filter) {
-      case _SignalFilter.open:
-        return mockSignals.where(_isOpen).toList();
-      case _SignalFilter.closed:
-        return mockSignals.where((s) => !_isOpen(s)).toList();
-      case _SignalFilter.all:
-        return mockSignals;
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final repo = AppConfigScope.of(context).repo;
+    if (repo != _lastRepo) {
+      _lastRepo = repo;
+      _refetch();
     }
+  }
+
+  void _refetch() {
+    final repo = AppConfigScope.of(context).repo;
+    setState(() {
+      _future = repo.fetchSignals(status: _filter.apiValue, limit: 100);
+    });
+  }
+
+  Future<void> _refresh() async {
+    _refetch();
+    await _future;
+  }
+
+  void _setFilter(_SignalFilter f) {
+    if (f == _filter) return;
+    setState(() {
+      _filter = f;
+    });
+    _refetch();
   }
 
   @override
   Widget build(BuildContext context) {
-    final filtered = _filtered;
+    final scope = AppConfigScope.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('Signals')),
       body: Column(
         children: [
-          const PreviewBadge(),
-          _FilterRow(
-            current: _filter,
-            onChanged: (f) => setState(() => _filter = f),
-          ),
+          if (!scope.repo.isLive) const PreviewBadge(),
+          _FilterRow(current: _filter, onChanged: _setFilter),
           const SizedBox(height: LuminSpacing.sm),
-          if (filtered.isEmpty)
-            _EmptyState(filter: _filter)
-          else
-            Expanded(
-              child: ListView.separated(
-                physics: const BouncingScrollPhysics(),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: LuminSpacing.lg,
-                ),
-                itemCount: filtered.length,
-                separatorBuilder: (_, __) =>
-                    const SizedBox(height: LuminSpacing.md),
-                itemBuilder: (_, i) => _SignalCard(sig: filtered[i]),
+          Expanded(
+            child: RefreshIndicator(
+              color: LuminColors.accent,
+              onRefresh: _refresh,
+              child: FutureBuilder<List<MockSignal>>(
+                future: _future,
+                builder: (context, snap) {
+                  if (snap.connectionState == ConnectionState.waiting &&
+                      !snap.hasData) {
+                    return const _SignalsLoading();
+                  }
+                  if (snap.hasError) {
+                    return _SignalsError(
+                      error: snap.error.toString(),
+                      onRetry: _refresh,
+                    );
+                  }
+                  final items = snap.data ?? const <MockSignal>[];
+                  if (items.isEmpty) {
+                    return _SignalsEmpty(filter: _filter);
+                  }
+                  return ListView.separated(
+                    physics: const AlwaysScrollableScrollPhysics(
+                      parent: BouncingScrollPhysics(),
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: LuminSpacing.lg,
+                    ),
+                    itemCount: items.length,
+                    separatorBuilder: (_, __) =>
+                        const SizedBox(height: LuminSpacing.md),
+                    itemBuilder: (_, i) => _SignalCard(sig: items[i]),
+                  );
+                },
               ),
             ),
+          ),
         ],
       ),
     );
@@ -84,7 +138,7 @@ class _FilterRow extends StatelessWidget {
         children: [
           for (final f in _SignalFilter.values) ...[
             _FilterChip(
-              label: f.name[0].toUpperCase() + f.name.substring(1),
+              label: f.label,
               selected: current == f,
               onTap: () => onChanged(f),
             ),
@@ -148,36 +202,115 @@ class _FilterChip extends StatelessWidget {
   }
 }
 
-class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.filter});
+class _SignalsEmpty extends StatelessWidget {
+  const _SignalsEmpty({required this.filter});
   final _SignalFilter filter;
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(LuminSpacing.xl),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(
-                Icons.inbox_outlined,
-                size: 48,
-                color: LuminColors.textMuted,
-              ),
-              const SizedBox(height: LuminSpacing.md),
-              Text(
-                filter == _SignalFilter.open
-                    ? 'No open signals right now'
-                    : 'No closed signals yet',
-                style: Theme.of(context).textTheme.bodyMedium,
-                textAlign: TextAlign.center,
-              ),
-            ],
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(
+        parent: BouncingScrollPhysics(),
+      ),
+      children: [
+        const SizedBox(height: LuminSpacing.xxl),
+        const Icon(Icons.inbox_outlined,
+            size: 48, color: LuminColors.textMuted),
+        const SizedBox(height: LuminSpacing.md),
+        Text(
+          filter == _SignalFilter.open
+              ? 'No open signals right now'
+              : filter == _SignalFilter.closed
+                  ? 'No closed signals yet'
+                  : 'No signals yet',
+          style: Theme.of(context).textTheme.bodyMedium,
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: LuminSpacing.xs),
+        const Text(
+          'Pull down to refresh.',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: LuminColors.textMuted, fontSize: 11),
+        ),
+      ],
+    );
+  }
+}
+
+class _SignalsLoading extends StatelessWidget {
+  const _SignalsLoading();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(
+        parent: BouncingScrollPhysics(),
+      ),
+      children: const [
+        SizedBox(height: LuminSpacing.xxl),
+        Center(
+          child: SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: LuminColors.accent,
+            ),
           ),
         ),
+      ],
+    );
+  }
+}
+
+class _SignalsError extends StatelessWidget {
+  const _SignalsError({required this.error, required this.onRetry});
+  final String error;
+  final Future<void> Function() onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(
+        parent: BouncingScrollPhysics(),
       ),
+      padding: const EdgeInsets.all(LuminSpacing.lg),
+      children: [
+        const SizedBox(height: LuminSpacing.xxl),
+        const Icon(Icons.cloud_off, color: LuminColors.loss, size: 40),
+        const SizedBox(height: LuminSpacing.md),
+        const Text(
+          'Could not load signals',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: LuminColors.textPrimary,
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: LuminSpacing.sm),
+        Text(
+          error,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: LuminColors.textSecondary,
+            fontSize: 11,
+            height: 1.4,
+          ),
+        ),
+        const SizedBox(height: LuminSpacing.md),
+        Center(
+          child: FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: LuminColors.accent,
+              foregroundColor: LuminColors.bgDeep,
+            ),
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh, size: 18),
+            label: const Text('Retry'),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -216,7 +349,6 @@ class _SignalCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header row.
           Row(
             children: [
               Text(
@@ -270,7 +402,6 @@ class _SignalCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: LuminSpacing.xs),
-          // Agent + setup
           Text(
             '${sig.agentName} • ${sig.setupName}',
             style: const TextStyle(
@@ -279,7 +410,6 @@ class _SignalCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: LuminSpacing.md),
-          // Price levels row.
           Row(
             children: [
               Expanded(
@@ -312,7 +442,6 @@ class _SignalCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: LuminSpacing.md),
-          // Status footer.
           Row(
             children: [
               Container(
@@ -345,8 +474,7 @@ class _SignalCard extends StatelessWidget {
               Text(
                 '${pnlPositive ? '+' : ''}${sig.pnlPct.toStringAsFixed(2)}%',
                 style: TextStyle(
-                  color:
-                      pnlPositive ? LuminColors.success : LuminColors.loss,
+                  color: pnlPositive ? LuminColors.success : LuminColors.loss,
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
                 ),
@@ -403,7 +531,7 @@ class _SignalCard extends StatelessWidget {
               ),
               child: const Center(
                 child: Text(
-                  'Chart preview — coming with backend',
+                  'Chart preview — coming with v0.0.8',
                   style: TextStyle(
                     color: LuminColors.textMuted,
                     fontSize: 12,

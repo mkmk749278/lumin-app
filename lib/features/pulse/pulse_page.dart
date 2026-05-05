@@ -1,45 +1,119 @@
 /// Pulse — engine status dashboard.
 ///
-/// Real-looking dashboard built against [mockEngine] + [mockSignals].
-/// When the FastAPI backend lands, swap the mock-data imports for a
-/// repository call — UI components don't change.
+/// FutureBuilder against the live repo (or MockRepository when offline).
+/// Pull-to-refresh re-fetches; tier-conditional rendering hooks added so
+/// v0.0.8+ can hide paid-only widgets without restructuring the page.
 import 'package:flutter/material.dart';
 
+import '../../data/app_config.dart';
 import '../../data/mock_data.dart';
+import '../../data/repository.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
 import '../../shared/widgets/preview_badge.dart';
 import '../../shared/widgets/stat_pill.dart';
 
-class PulsePage extends StatelessWidget {
+class _PulseBundle {
+  const _PulseBundle({required this.engine, required this.recent});
+  final MockEngineSnapshot engine;
+  final List<MockSignal> recent;
+}
+
+class PulsePage extends StatefulWidget {
   const PulsePage({super.key});
 
   @override
+  State<PulsePage> createState() => _PulsePageState();
+}
+
+class _PulsePageState extends State<PulsePage> {
+  late Future<_PulseBundle> _future;
+  LuminRepository? _lastRepo;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final repo = AppConfigScope.of(context).repo;
+    if (repo != _lastRepo) {
+      _lastRepo = repo;
+      _future = _load(repo);
+    }
+  }
+
+  Future<_PulseBundle> _load(LuminRepository repo) async {
+    final results = await Future.wait([
+      repo.fetchPulse(),
+      repo.fetchSignals(status: 'all', limit: 3),
+    ]);
+    return _PulseBundle(
+      engine: results[0] as MockEngineSnapshot,
+      recent: (results[1] as List).cast<MockSignal>(),
+    );
+  }
+
+  Future<void> _refresh() async {
+    final repo = AppConfigScope.of(context).repo;
+    setState(() => _future = _load(repo));
+    await _future;
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final scope = AppConfigScope.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('Pulse')),
-      body: ListView(
-        physics: const BouncingScrollPhysics(),
-        children: [
-          const PreviewBadge(),
-          _EngineStatusCard(),
-          const SizedBox(height: LuminSpacing.md),
-          _RegimeAndPnlRow(),
-          const SizedBox(height: LuminSpacing.md),
-          _DailyLossBudgetCard(),
-          const SizedBox(height: LuminSpacing.md),
-          _RecentSignalsCard(),
-          const SizedBox(height: LuminSpacing.xl),
-        ],
+      body: RefreshIndicator(
+        color: LuminColors.accent,
+        onRefresh: _refresh,
+        child: FutureBuilder<_PulseBundle>(
+          future: _future,
+          builder: (context, snap) {
+            if (snap.connectionState == ConnectionState.waiting &&
+                !snap.hasData) {
+              return const _PulseSkeleton();
+            }
+            if (snap.hasError) {
+              return _ErrorView(
+                error: snap.error.toString(),
+                onRetry: _refresh,
+                isLive: scope.repo.isLive,
+              );
+            }
+            final data = snap.data!;
+            return ListView(
+              physics: const AlwaysScrollableScrollPhysics(
+                parent: BouncingScrollPhysics(),
+              ),
+              children: [
+                if (!scope.repo.isLive) const PreviewBadge(),
+                _EngineStatusCard(engine: data.engine),
+                const SizedBox(height: LuminSpacing.md),
+                _RegimeAndPnlRow(engine: data.engine),
+                const SizedBox(height: LuminSpacing.md),
+                _DailyLossBudgetCard(engine: data.engine),
+                const SizedBox(height: LuminSpacing.md),
+                _RecentSignalsCard(recent: data.recent),
+                const SizedBox(height: LuminSpacing.xl),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
 }
 
+// ---------------------------------------------------------------------------
+// Cards (data-driven via constructor)
+// ---------------------------------------------------------------------------
+
 class _EngineStatusCard extends StatelessWidget {
+  const _EngineStatusCard({required this.engine});
+  final MockEngineSnapshot engine;
+
   @override
   Widget build(BuildContext context) {
-    final isHealthy = mockEngine.status == 'Healthy';
+    final isHealthy = engine.status == 'Healthy';
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
       child: LuminCard(
@@ -66,7 +140,7 @@ class _EngineStatusCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Engine ${mockEngine.status.toLowerCase()}',
+                    'Engine ${engine.status.toLowerCase()}',
                     style: const TextStyle(
                       color: LuminColors.textPrimary,
                       fontSize: 16,
@@ -75,7 +149,7 @@ class _EngineStatusCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    'Up ${mockEngine.uptime} • scanning 75 pairs',
+                    'Up ${engine.uptime} • scanning 75 pairs',
                     style: const TextStyle(
                       color: LuminColors.textSecondary,
                       fontSize: 12,
@@ -84,11 +158,7 @@ class _EngineStatusCard extends StatelessWidget {
                 ],
               ),
             ),
-            const Icon(
-              Icons.flash_on,
-              color: LuminColors.accent,
-              size: 18,
-            ),
+            const Icon(Icons.flash_on, color: LuminColors.accent, size: 18),
           ],
         ),
       ),
@@ -97,9 +167,12 @@ class _EngineStatusCard extends StatelessWidget {
 }
 
 class _RegimeAndPnlRow extends StatelessWidget {
+  const _RegimeAndPnlRow({required this.engine});
+  final MockEngineSnapshot engine;
+
   @override
   Widget build(BuildContext context) {
-    final pnlPositive = mockEngine.todayPnlUsd >= 0;
+    final pnlPositive = engine.todayPnlUsd >= 0;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
       child: Row(
@@ -111,13 +184,13 @@ class _RegimeAndPnlRow extends StatelessWidget {
                 children: [
                   StatPill(
                     label: 'Regime',
-                    value: mockEngine.regime,
+                    value: engine.regime,
                     icon: Icons.bar_chart_outlined,
                     valueColor: LuminColors.accent,
                   ),
                   const SizedBox(height: LuminSpacing.sm),
                   Text(
-                    '${mockEngine.regimePctTrending.toStringAsFixed(1)}% of cycles',
+                    '${engine.regimePctTrending.toStringAsFixed(1)}% of cycles',
                     style: const TextStyle(
                       color: LuminColors.textSecondary,
                       fontSize: 11,
@@ -136,16 +209,17 @@ class _RegimeAndPnlRow extends StatelessWidget {
                   StatPill(
                     label: "Today's P&L",
                     value:
-                        '${pnlPositive ? '+' : ''}\$${mockEngine.todayPnlUsd.toStringAsFixed(2)}',
-                    valueColor:
-                        pnlPositive ? LuminColors.success : LuminColors.loss,
+                        '${pnlPositive ? '+' : ''}\$${engine.todayPnlUsd.toStringAsFixed(2)}',
+                    valueColor: pnlPositive
+                        ? LuminColors.success
+                        : LuminColors.loss,
                     icon: pnlPositive
                         ? Icons.trending_up
                         : Icons.trending_down,
                   ),
                   const SizedBox(height: LuminSpacing.sm),
                   Text(
-                    '${pnlPositive ? '+' : ''}${mockEngine.todayPnlPct.toStringAsFixed(2)}% on margin',
+                    '${pnlPositive ? '+' : ''}${engine.todayPnlPct.toStringAsFixed(2)}% on margin',
                     style: const TextStyle(
                       color: LuminColors.textSecondary,
                       fontSize: 11,
@@ -162,10 +236,13 @@ class _RegimeAndPnlRow extends StatelessWidget {
 }
 
 class _DailyLossBudgetCard extends StatelessWidget {
+  const _DailyLossBudgetCard({required this.engine});
+  final MockEngineSnapshot engine;
+
   @override
   Widget build(BuildContext context) {
-    final used = mockEngine.dailyLossUsedUsd.abs();
-    final budget = mockEngine.dailyLossBudgetUsd;
+    final used = engine.dailyLossUsedUsd.abs();
+    final budget = engine.dailyLossBudgetUsd;
     final pct = budget == 0 ? 0.0 : (used / budget).clamp(0.0, 1.0);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
@@ -232,9 +309,11 @@ class _DailyLossBudgetCard extends StatelessWidget {
 }
 
 class _RecentSignalsCard extends StatelessWidget {
+  const _RecentSignalsCard({required this.recent});
+  final List<MockSignal> recent;
+
   @override
   Widget build(BuildContext context) {
-    final recent = mockSignals.take(3).toList();
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
       child: LuminCard(
@@ -257,7 +336,21 @@ class _RecentSignalsCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: LuminSpacing.md),
-            for (final sig in recent) _RecentSignalRow(sig: sig),
+            if (recent.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: LuminSpacing.lg),
+                child: Center(
+                  child: Text(
+                    'No signals yet',
+                    style: TextStyle(
+                      color: LuminColors.textMuted,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              )
+            else
+              for (final sig in recent) _RecentSignalRow(sig: sig),
           ],
         ),
       ),
@@ -364,6 +457,110 @@ class _RecentSignalRow extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Loading + error views (shared across pages)
+// ---------------------------------------------------------------------------
+
+class _PulseSkeleton extends StatelessWidget {
+  const _PulseSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(
+        parent: BouncingScrollPhysics(),
+      ),
+      children: const [
+        SizedBox(height: LuminSpacing.xxl),
+        Center(
+          child: SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: LuminColors.accent,
+            ),
+          ),
+        ),
+        SizedBox(height: LuminSpacing.md),
+        Center(
+          child: Text(
+            'Connecting to engine…',
+            style: TextStyle(color: LuminColors.textSecondary, fontSize: 12),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ErrorView extends StatelessWidget {
+  const _ErrorView({
+    required this.error,
+    required this.onRetry,
+    required this.isLive,
+  });
+  final String error;
+  final Future<void> Function() onRetry;
+  final bool isLive;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(
+        parent: BouncingScrollPhysics(),
+      ),
+      padding: const EdgeInsets.all(LuminSpacing.lg),
+      children: [
+        const SizedBox(height: LuminSpacing.xxl),
+        const Icon(Icons.cloud_off, color: LuminColors.loss, size: 48),
+        const SizedBox(height: LuminSpacing.md),
+        const Text(
+          'Could not reach engine',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: LuminColors.textPrimary,
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: LuminSpacing.sm),
+        Text(
+          error,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: LuminColors.textSecondary,
+            fontSize: 12,
+            height: 1.4,
+          ),
+        ),
+        const SizedBox(height: LuminSpacing.lg),
+        Center(
+          child: FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: LuminColors.accent,
+              foregroundColor: LuminColors.bgDeep,
+            ),
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh, size: 18),
+            label: const Text('Retry'),
+          ),
+        ),
+        if (isLive) ...[
+          const SizedBox(height: LuminSpacing.sm),
+          const Center(
+            child: Text(
+              'Pull down to refresh, or check Menu → API keys.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: LuminColors.textMuted, fontSize: 11),
+            ),
+          ),
+        ],
+      ],
     );
   }
 }

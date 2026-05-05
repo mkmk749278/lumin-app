@@ -1,14 +1,29 @@
 /// Trade — auto-execution control + activity log.
 ///
-/// Live / Demo mode toggle at the top, open positions list, and a
-/// time-ordered activity log of opens / TP hits / SL hits / invalidations.
-/// Wires to `/api/auto-mode` + `/api/trades` once the backend ships.
+/// FutureBuilder against the live repo.  Mode toggle calls
+/// ``repo.setAutoMode(...)`` against the engine; on success the page
+/// refetches positions and activity.  The engine refuses mode changes
+/// with open positions or missing creds — those refusals surface as a
+/// SnackBar with the engine's reason.
 import 'package:flutter/material.dart';
 
+import '../../data/app_config.dart';
 import '../../data/mock_data.dart';
+import '../../data/repository.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
 import '../../shared/widgets/preview_badge.dart';
+
+class _TradeBundle {
+  const _TradeBundle({
+    required this.autoMode,
+    required this.positions,
+    required this.activity,
+  });
+  final AutoModeStatus autoMode;
+  final List<MockPosition> positions;
+  final List<MockActivityEvent> activity;
+}
 
 class TradePage extends StatefulWidget {
   const TradePage({super.key});
@@ -18,36 +33,144 @@ class TradePage extends StatefulWidget {
 }
 
 class _TradePageState extends State<TradePage> {
-  // 0 = Off, 1 = Paper, 2 = Live
-  int _mode = 1;
+  late Future<_TradeBundle> _future;
+  LuminRepository? _lastRepo;
+  bool _switchingMode = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final repo = AppConfigScope.of(context).repo;
+    if (repo != _lastRepo) {
+      _lastRepo = repo;
+      _future = _load(repo);
+    }
+  }
+
+  Future<_TradeBundle> _load(LuminRepository repo) async {
+    final results = await Future.wait([
+      repo.fetchAutoMode(),
+      repo.fetchPositions(),
+      repo.fetchActivity(limit: 30),
+    ]);
+    return _TradeBundle(
+      autoMode: results[0] as AutoModeStatus,
+      positions: (results[1] as List).cast<MockPosition>(),
+      activity: (results[2] as List).cast<MockActivityEvent>(),
+    );
+  }
+
+  Future<void> _refresh() async {
+    final repo = AppConfigScope.of(context).repo;
+    setState(() => _future = _load(repo));
+    await _future;
+  }
+
+  Future<void> _changeMode(String newMode) async {
+    if (_switchingMode) return;
+    final repo = AppConfigScope.of(context).repo;
+    setState(() => _switchingMode = true);
+    try {
+      await repo.setAutoMode(newMode);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Mode → ${newMode.toUpperCase()}'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      await _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Refused: $e'),
+          duration: const Duration(seconds: 4),
+          backgroundColor: LuminColors.loss,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _switchingMode = false);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final scope = AppConfigScope.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('Trade')),
-      body: ListView(
-        physics: const BouncingScrollPhysics(),
-        children: [
-          const PreviewBadge(),
-          _ModeToggle(
-            mode: _mode,
-            onChanged: (m) => setState(() => _mode = m),
-          ),
-          const SizedBox(height: LuminSpacing.md),
-          _OpenPositionsCard(),
-          const SizedBox(height: LuminSpacing.md),
-          _ActivityCard(),
-          const SizedBox(height: LuminSpacing.xl),
-        ],
+      body: RefreshIndicator(
+        color: LuminColors.accent,
+        onRefresh: _refresh,
+        child: FutureBuilder<_TradeBundle>(
+          future: _future,
+          builder: (context, snap) {
+            if (snap.connectionState == ConnectionState.waiting &&
+                !snap.hasData) {
+              return const _TradeLoading();
+            }
+            if (snap.hasError) {
+              return _TradeError(error: snap.error.toString(), onRetry: _refresh);
+            }
+            final data = snap.data!;
+            return ListView(
+              physics: const AlwaysScrollableScrollPhysics(
+                parent: BouncingScrollPhysics(),
+              ),
+              children: [
+                if (!scope.repo.isLive) const PreviewBadge(),
+                _ModeToggle(
+                  mode: _modeIndex(data.autoMode.mode),
+                  switching: _switchingMode,
+                  onChanged: (i) => _changeMode(_modeName(i)),
+                ),
+                const SizedBox(height: LuminSpacing.md),
+                _OpenPositionsCard(positions: data.positions),
+                const SizedBox(height: LuminSpacing.md),
+                _ActivityCard(events: data.activity),
+                const SizedBox(height: LuminSpacing.xl),
+              ],
+            );
+          },
+        ),
       ),
     );
+  }
+
+  static int _modeIndex(String mode) {
+    switch (mode) {
+      case 'paper':
+        return 1;
+      case 'live':
+        return 2;
+      default:
+        return 0;
+    }
+  }
+
+  static String _modeName(int idx) {
+    switch (idx) {
+      case 1:
+        return 'paper';
+      case 2:
+        return 'live';
+      default:
+        return 'off';
+    }
   }
 }
 
 class _ModeToggle extends StatelessWidget {
-  const _ModeToggle({required this.mode, required this.onChanged});
+  const _ModeToggle({
+    required this.mode,
+    required this.switching,
+    required this.onChanged,
+  });
 
   final int mode;
+  final bool switching;
   final ValueChanged<int> onChanged;
 
   static const _labels = ['Off', 'Paper', 'Live'];
@@ -78,14 +201,29 @@ class _ModeToggle extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'AUTO-EXECUTION MODE',
-              style: TextStyle(
-                color: LuminColors.textMuted,
-                fontSize: 10,
-                letterSpacing: 1.2,
-                fontWeight: FontWeight.w600,
-              ),
+            Row(
+              children: [
+                const Text(
+                  'AUTO-EXECUTION MODE',
+                  style: TextStyle(
+                    color: LuminColors.textMuted,
+                    fontSize: 10,
+                    letterSpacing: 1.2,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (switching) ...[
+                  const SizedBox(width: LuminSpacing.sm),
+                  const SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.5,
+                      color: LuminColors.accent,
+                    ),
+                  ),
+                ],
+              ],
             ),
             const SizedBox(height: LuminSpacing.md),
             Row(
@@ -97,7 +235,7 @@ class _ModeToggle extends StatelessWidget {
                       icon: _icons[i],
                       selected: mode == i,
                       color: _modeColor(i),
-                      onTap: () => onChanged(i),
+                      onTap: switching ? null : () => onChanged(i),
                     ),
                   ),
                   if (i < 2) const SizedBox(width: LuminSpacing.sm),
@@ -145,10 +283,11 @@ class _ModeButton extends StatelessWidget {
   final IconData icon;
   final bool selected;
   final Color color;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
+    final disabled = onTap == null;
     return Material(
       color: Colors.transparent,
       borderRadius: BorderRadius.circular(LuminRadii.md),
@@ -165,25 +304,28 @@ class _ModeButton extends StatelessWidget {
               color: selected ? color.withOpacity(0.50) : LuminColors.cardBorder,
             ),
           ),
-          child: Column(
-            children: [
-              Icon(
-                icon,
-                color: selected ? color : LuminColors.textSecondary,
-                size: 22,
-              ),
-              const SizedBox(height: LuminSpacing.xs),
-              Text(
-                label,
-                style: TextStyle(
+          child: Opacity(
+            opacity: disabled ? 0.6 : 1.0,
+            child: Column(
+              children: [
+                Icon(
+                  icon,
                   color: selected ? color : LuminColors.textSecondary,
-                  fontSize: 12,
-                  fontWeight:
-                      selected ? FontWeight.w600 : FontWeight.w500,
-                  letterSpacing: 0.3,
+                  size: 22,
                 ),
-              ),
-            ],
+                const SizedBox(height: LuminSpacing.xs),
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: selected ? color : LuminColors.textSecondary,
+                    fontSize: 12,
+                    fontWeight:
+                        selected ? FontWeight.w600 : FontWeight.w500,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -192,6 +334,9 @@ class _ModeButton extends StatelessWidget {
 }
 
 class _OpenPositionsCard extends StatelessWidget {
+  const _OpenPositionsCard({required this.positions});
+  final List<MockPosition> positions;
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -217,7 +362,7 @@ class _OpenPositionsCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: LuminSpacing.md),
-            if (mockPositions.isEmpty)
+            if (positions.isEmpty)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: LuminSpacing.lg),
                 child: Center(
@@ -231,9 +376,9 @@ class _OpenPositionsCard extends StatelessWidget {
                 ),
               )
             else
-              for (int i = 0; i < mockPositions.length; i++) ...[
-                _PositionRow(p: mockPositions[i]),
-                if (i < mockPositions.length - 1)
+              for (int i = 0; i < positions.length; i++) ...[
+                _PositionRow(p: positions[i]),
+                if (i < positions.length - 1)
                   const Divider(
                     color: LuminColors.cardBorder,
                     height: LuminSpacing.lg,
@@ -322,6 +467,9 @@ class _PositionRow extends StatelessWidget {
 }
 
 class _ActivityCard extends StatelessWidget {
+  const _ActivityCard({required this.events});
+  final List<MockActivityEvent> events;
+
   String _agoLabel(int m) {
     if (m < 60) return '${m}m';
     if (m < 1440) return '${(m / 60).round()}h';
@@ -353,14 +501,28 @@ class _ActivityCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: LuminSpacing.md),
-            for (int i = 0; i < mockActivity.length; i++) ...[
-              _ActivityRow(
-                event: mockActivity[i],
-                ago: _agoLabel(mockActivity[i].minutesAgo),
-              ),
-              if (i < mockActivity.length - 1)
-                const SizedBox(height: LuminSpacing.md),
-            ],
+            if (events.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: LuminSpacing.lg),
+                child: Center(
+                  child: Text(
+                    'No activity yet',
+                    style: TextStyle(
+                      color: LuminColors.textMuted,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              )
+            else
+              for (int i = 0; i < events.length; i++) ...[
+                _ActivityRow(
+                  event: events[i],
+                  ago: _agoLabel(events[i].minutesAgo),
+                ),
+                if (i < events.length - 1)
+                  const SizedBox(height: LuminSpacing.md),
+              ],
           ],
         ),
       ),
@@ -425,6 +587,84 @@ class _ActivityRow extends StatelessWidget {
           style: const TextStyle(
             color: LuminColors.textMuted,
             fontSize: 11,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _TradeLoading extends StatelessWidget {
+  const _TradeLoading();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(
+        parent: BouncingScrollPhysics(),
+      ),
+      children: const [
+        SizedBox(height: LuminSpacing.xxl),
+        Center(
+          child: SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: LuminColors.accent,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _TradeError extends StatelessWidget {
+  const _TradeError({required this.error, required this.onRetry});
+  final String error;
+  final Future<void> Function() onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(
+        parent: BouncingScrollPhysics(),
+      ),
+      padding: const EdgeInsets.all(LuminSpacing.lg),
+      children: [
+        const SizedBox(height: LuminSpacing.xxl),
+        const Icon(Icons.cloud_off, color: LuminColors.loss, size: 40),
+        const SizedBox(height: LuminSpacing.md),
+        const Text(
+          'Could not load Trade state',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: LuminColors.textPrimary,
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: LuminSpacing.sm),
+        Text(
+          error,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: LuminColors.textSecondary,
+            fontSize: 11,
+            height: 1.4,
+          ),
+        ),
+        const SizedBox(height: LuminSpacing.md),
+        Center(
+          child: FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: LuminColors.accent,
+              foregroundColor: LuminColors.bgDeep,
+            ),
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh, size: 18),
+            label: const Text('Retry'),
           ),
         ),
       ],

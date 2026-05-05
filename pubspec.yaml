@@ -1,7 +1,7 @@
 name: lumin
 description: "Lumin — AI Crypto Trading. Mobile app for 360 Crypto Eye signals."
 publish_to: "none"
-version: 0.0.6+6
+version: 0.0.7+7
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
