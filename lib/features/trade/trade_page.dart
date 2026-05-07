@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import '../../data/app_config.dart';
 import '../../data/mock_data.dart';
 import '../../data/repository.dart';
+import '../../shared/format.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
 import '../../shared/widgets/preview_badge.dart';
@@ -126,6 +127,8 @@ class _TradePageState extends State<TradePage> {
                   switching: _switchingMode,
                   onChanged: (i) => _changeMode(_modeName(i)),
                 ),
+                const SizedBox(height: LuminSpacing.md),
+                _ModePnlCard(autoMode: data.autoMode),
                 const SizedBox(height: LuminSpacing.md),
                 _OpenPositionsCard(positions: data.positions),
                 const SizedBox(height: LuminSpacing.md),
@@ -328,6 +331,215 @@ class _ModeButton extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Mode-aware Today's P&L card.
+///
+/// Doctrine 2026-05-07: when the user selects PAPER mode the displayed PnL
+/// must reflect the paper-trade ledger; LIVE mode → real-broker realised
+/// PnL.  OFF mode → no trades are tracked, so the card shows a prompt to
+/// switch rather than a misleading $0.00.
+///
+/// The backend already routes ``daily_pnl_usd`` through whichever broker
+/// (PaperOrderManager or live OrderManager) is wired for the current mode,
+/// so the value is correct out of the box — the card just labels it
+/// appropriately and surfaces the equity / simulated-paper-total context
+/// that subscribers asked for.
+class _ModePnlCard extends StatelessWidget {
+  const _ModePnlCard({required this.autoMode});
+  final AutoModeStatus autoMode;
+
+  @override
+  Widget build(BuildContext context) {
+    final mode = autoMode.mode;
+    if (mode == 'off') {
+      return _OffStateCard();
+    }
+    final isPaper = mode == 'paper';
+    final pnl = autoMode.dailyPnlUsd;
+    final positive = pnl >= 0;
+    final accent = positive ? LuminColors.success : LuminColors.loss;
+    final label = isPaper ? "PAPER P&L TODAY" : "LIVE P&L TODAY";
+    final subtitle = isPaper
+        ? 'Paper sim — zero risk, mirrors live execution'
+        : 'Realised on Binance Futures';
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
+      child: LuminCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  isPaper ? Icons.science_outlined : Icons.bolt,
+                  size: 16,
+                  color: isPaper ? LuminColors.warn : LuminColors.loss,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: LuminColors.textMuted,
+                    fontSize: 10,
+                    letterSpacing: 1.2,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const Spacer(),
+                Icon(
+                  positive ? Icons.trending_up : Icons.trending_down,
+                  size: 18,
+                  color: accent,
+                ),
+              ],
+            ),
+            const SizedBox(height: LuminSpacing.sm),
+            Text(
+              formatPnl(pnl),
+              style: TextStyle(
+                color: accent,
+                fontSize: 28,
+                fontWeight: FontWeight.w700,
+                letterSpacing: -0.5,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              '${positive ? '+' : ''}${autoMode.dailyLossPct.toStringAsFixed(2)}% on equity',
+              style: TextStyle(
+                color: accent.withOpacity(0.85),
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: LuminSpacing.md),
+            const Divider(color: LuminColors.cardBorder, height: 1),
+            const SizedBox(height: LuminSpacing.sm),
+            _MetaRow(
+              label: 'Equity',
+              value: '\$${autoMode.currentEquityUsd.toStringAsFixed(2)}',
+            ),
+            _MetaRow(
+              label: 'Open positions',
+              value: autoMode.openPositions.toString(),
+            ),
+            if (isPaper && autoMode.simulatedPnlUsd != null)
+              _MetaRow(
+                label: 'Paper total since boot',
+                value: formatPnl(autoMode.simulatedPnlUsd!),
+                valueColor: autoMode.simulatedPnlUsd! >= 0
+                    ? LuminColors.success
+                    : LuminColors.loss,
+              ),
+            if (autoMode.dailyKillTripped)
+              const Padding(
+                padding: EdgeInsets.only(top: LuminSpacing.sm),
+                child: Text(
+                  '⚠️  Daily-loss kill tripped — auto-trade halted',
+                  style: TextStyle(
+                    color: LuminColors.loss,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            const SizedBox(height: 4),
+            Text(
+              subtitle,
+              style: const TextStyle(
+                color: LuminColors.textSecondary,
+                fontSize: 11,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _OffStateCard extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
+      child: LuminCard(
+        child: Row(
+          children: [
+            const Icon(
+              Icons.power_settings_new,
+              size: 22,
+              color: LuminColors.textMuted,
+            ),
+            const SizedBox(width: LuminSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Text(
+                    'Auto-trade is off',
+                    style: TextStyle(
+                      color: LuminColors.textPrimary,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  SizedBox(height: 2),
+                  Text(
+                    'No trades tracked. Switch to Paper to simulate fills against live signals, or Live to trade with real funds.',
+                    style: TextStyle(
+                      color: LuminColors.textSecondary,
+                      fontSize: 11,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MetaRow extends StatelessWidget {
+  const _MetaRow({
+    required this.label,
+    required this.value,
+    this.valueColor,
+  });
+  final String label;
+  final String value;
+  final Color? valueColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              color: LuminColors.textSecondary,
+              fontSize: 11,
+            ),
+          ),
+          const Spacer(),
+          Text(
+            value,
+            style: TextStyle(
+              color: valueColor ?? LuminColors.textPrimary,
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
       ),
     );
   }
