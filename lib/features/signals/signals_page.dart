@@ -586,6 +586,18 @@ class _SignalCard extends StatelessWidget {
                 ),
               ),
               const Spacer(),
+              if (sig.currentPrice > 0) ...[
+                Text(
+                  formatPrice(sig.currentPrice),
+                  style: const TextStyle(
+                    color: LuminColors.textPrimary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: -0.3,
+                  ),
+                ),
+                const SizedBox(width: LuminSpacing.sm),
+              ],
               Text(
                 formatPct(sig.pnlPct),
                 style: TextStyle(
@@ -664,9 +676,12 @@ class _SignalCard extends StatelessWidget {
               const SizedBox(height: LuminSpacing.md),
             ],
             _DetailRow('Entry', formatPrice(sig.entry)),
+            if (sig.currentPrice > 0)
+              _DetailRow('Current', formatPrice(sig.currentPrice)),
             _DetailRow('SL', formatPrice(sig.sl)),
             _DetailRow('TP1', formatPrice(sig.tp1)),
             _DetailRow('TP2', formatPrice(sig.tp2)),
+            _DetailRow('PnL', formatPct(sig.pnlPct)),
             _DetailRow('Confidence',
                 '${sig.confidence.toStringAsFixed(1)} (${sig.tier})'),
             _DetailRow('Status', sig.status),

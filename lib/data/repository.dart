@@ -98,6 +98,7 @@ abstract class LuminRepository {
   bool get isLive;
 
   Future<MockEngineSnapshot> fetchPulse();
+  Future<List<MockTicker>> fetchTickers();
   Future<List<MockSignal>> fetchSignals({
     String status = 'all',
     int limit = 50,
@@ -126,6 +127,9 @@ class MockRepository implements LuminRepository {
 
   @override
   Future<MockEngineSnapshot> fetchPulse() async => mockEngine;
+
+  @override
+  Future<List<MockTicker>> fetchTickers() async => mockTickers;
 
   @override
   Future<List<MockSignal>> fetchSignals({
@@ -188,7 +192,7 @@ class MockRepository implements LuminRepository {
 
   @override
   Future<List<AgentStat>> fetchAgents() async {
-    // Synthesise 14 agents with zero lifecycle counters — preview mode
+    // Synthesise 15 agents with zero lifecycle counters — preview mode
     // doesn't simulate fired-signal history.
     final names = <String, String>{
       'SR_FLIP_RETEST': 'The Architect',
@@ -205,6 +209,7 @@ class MockRepository implements LuminRepository {
       'TREND_PULLBACK_EMA': 'The Pullback Sniper',
       'POST_DISPLACEMENT_CONTINUATION': 'The Aftermath Trader',
       'OPENING_RANGE_BREAKOUT': 'The Range Breaker',
+      'MA_CROSS_TREND_SHIFT': 'The Trend Shifter',
     };
     return names.entries
         .map((e) => AgentStat(
@@ -253,6 +258,20 @@ class HttpRepository implements LuminRepository {
       signalsToday: (j['signals_today'] as num?)?.toInt() ?? 0,
       uptime: _formatUptime((j['uptime_seconds'] as num?)?.toDouble() ?? 0.0),
     );
+  }
+
+  @override
+  Future<List<MockTicker>> fetchTickers() async {
+    final j =
+        (await client.get('/api/pulse/tickers')) as Map<String, dynamic>;
+    final items = (j['items'] as List? ?? []).cast<Map<String, dynamic>>();
+    return items
+        .map((m) => MockTicker(
+              symbol: m['symbol'] as String? ?? '',
+              price: (m['price'] as num?)?.toDouble() ?? 0.0,
+              changePct24h: (m['change_pct_24h'] as num?)?.toDouble() ?? 0.0,
+            ))
+        .toList();
   }
 
   @override
@@ -341,6 +360,7 @@ class HttpRepository implements LuminRepository {
         status: j['status'] as String? ?? 'ACTIVE',
         pnlPct: (j['pnl_pct'] as num?)?.toDouble() ?? 0.0,
         minutesAgo: (j['minutes_ago'] as num?)?.toInt() ?? 0,
+        currentPrice: (j['current_price'] as num?)?.toDouble() ?? 0.0,
         preTpTriggerPrice:
             (j['pre_tp_trigger_price'] as num?)?.toDouble() ?? 0.0,
         preTpThresholdPct:

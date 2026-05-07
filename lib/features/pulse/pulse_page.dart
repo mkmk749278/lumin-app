@@ -8,15 +8,21 @@ import 'package:flutter/material.dart';
 import '../../data/app_config.dart';
 import '../../data/mock_data.dart';
 import '../../data/repository.dart';
+import '../../shared/format.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
 import '../../shared/widgets/preview_badge.dart';
 import '../../shared/widgets/stat_pill.dart';
 
 class _PulseBundle {
-  const _PulseBundle({required this.engine, required this.recent});
+  const _PulseBundle({
+    required this.engine,
+    required this.recent,
+    required this.tickers,
+  });
   final MockEngineSnapshot engine;
   final List<MockSignal> recent;
+  final List<MockTicker> tickers;
 }
 
 class PulsePage extends StatefulWidget {
@@ -44,10 +50,15 @@ class _PulsePageState extends State<PulsePage> {
     final results = await Future.wait([
       repo.fetchPulse(),
       repo.fetchSignals(status: 'all', limit: 3),
+      // Tickers can fail or come back empty (e.g. early boot before the
+      // historical-data store is seeded).  Catch + return an empty list so
+      // a missing strip never blocks the rest of the Pulse page.
+      repo.fetchTickers().catchError((_) => <MockTicker>[]),
     ]);
     return _PulseBundle(
       engine: results[0] as MockEngineSnapshot,
       recent: (results[1] as List).cast<MockSignal>(),
+      tickers: (results[2] as List).cast<MockTicker>(),
     );
   }
 
@@ -92,6 +103,10 @@ class _PulsePageState extends State<PulsePage> {
                 const SizedBox(height: LuminSpacing.md),
                 _DailyLossBudgetCard(engine: data.engine),
                 const SizedBox(height: LuminSpacing.md),
+                if (data.tickers.isNotEmpty) ...[
+                  _TopPairTickerStrip(tickers: data.tickers),
+                  const SizedBox(height: LuminSpacing.md),
+                ],
                 _RecentSignalsCard(recent: data.recent),
                 const SizedBox(height: LuminSpacing.xl),
               ],
@@ -303,6 +318,112 @@ class _DailyLossBudgetCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _TopPairTickerStrip extends StatelessWidget {
+  const _TopPairTickerStrip({required this.tickers});
+  final List<MockTicker> tickers;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
+      child: LuminCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.only(left: 4, bottom: LuminSpacing.sm),
+              child: Text(
+                'Top pairs',
+                style: TextStyle(
+                  color: LuminColors.textSecondary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.4,
+                ),
+              ),
+            ),
+            SizedBox(
+              height: 56,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                itemCount: tickers.length,
+                separatorBuilder: (_, __) =>
+                    const SizedBox(width: LuminSpacing.md),
+                itemBuilder: (_, i) => _TickerPill(ticker: tickers[i]),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TickerPill extends StatelessWidget {
+  const _TickerPill({required this.ticker});
+  final MockTicker ticker;
+
+  @override
+  Widget build(BuildContext context) {
+    final positive = ticker.changePct24h >= 0;
+    final color = positive ? LuminColors.success : LuminColors.loss;
+    // Strip the "USDT" suffix for a cleaner pill.
+    final label = ticker.symbol.endsWith('USDT')
+        ? ticker.symbol.substring(0, ticker.symbol.length - 4)
+        : ticker.symbol;
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: LuminSpacing.md,
+        vertical: 6,
+      ),
+      decoration: BoxDecoration(
+        color: LuminColors.bgElevated,
+        borderRadius: BorderRadius.circular(LuminRadii.sm),
+        border: Border.all(color: LuminColors.cardBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              color: LuminColors.textPrimary,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.3,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Row(
+            children: [
+              Text(
+                formatPrice(ticker.price),
+                style: const TextStyle(
+                  color: LuminColors.textPrimary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  letterSpacing: -0.3,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                formatPct(ticker.changePct24h, decimals: 2),
+                style: TextStyle(
+                  color: color,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
