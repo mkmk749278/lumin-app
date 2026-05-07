@@ -63,6 +63,9 @@ class MockSignal {
     required this.status,
     required this.pnlPct,
     required this.minutesAgo,
+    this.preTpTriggerPrice = 0.0,
+    this.preTpThresholdPct = 0.0,
+    this.preTpHit = false,
   });
 
   final String id;
@@ -80,6 +83,13 @@ class MockSignal {
   final String status; // ACTIVE / TP1_HIT / TP2_HIT / TP3_HIT / SL_HIT / INVALIDATED
   final double pnlPct;
   final int minutesAgo;
+  // Pre-TP grab — Phase A target price + threshold % stamped at dispatch.
+  // Centerpiece of the scalp signal display: clears trigger → SL ratchets to
+  // breakeven, full TP ladder still open.  Doctrine update 2026-05-07:
+  // TP3 dropped from dispatch display, Pre-TP promoted in its place.
+  final double preTpTriggerPrice;
+  final double preTpThresholdPct;
+  final bool preTpHit;
 }
 
 const List<MockSignal> mockSignals = [

@@ -341,6 +341,11 @@ class HttpRepository implements LuminRepository {
         status: j['status'] as String? ?? 'ACTIVE',
         pnlPct: (j['pnl_pct'] as num?)?.toDouble() ?? 0.0,
         minutesAgo: (j['minutes_ago'] as num?)?.toInt() ?? 0,
+        preTpTriggerPrice:
+            (j['pre_tp_trigger_price'] as num?)?.toDouble() ?? 0.0,
+        preTpThresholdPct:
+            (j['pre_tp_threshold_pct'] as num?)?.toDouble() ?? 0.0,
+        preTpHit: j['pre_tp_hit'] as bool? ?? false,
       );
 
   MockPosition _positionFromJson(Map<String, dynamic> j) => MockPosition(

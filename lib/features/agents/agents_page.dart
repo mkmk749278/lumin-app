@@ -1,4 +1,4 @@
-/// Agents — 14 evaluator personas + per-agent drill-down.
+/// Agents — 15 evaluator personas + per-agent drill-down.
 ///
 /// The detail bottom sheet fetches that agent's lifecycle stats and
 /// recent signals from the live engine (or mock repo offline) so users
@@ -70,7 +70,7 @@ class AgentsPage extends StatelessWidget {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: LuminColors.bgCard,
-        title: const Text("Lumin's 14 AI agents"),
+        title: Text("Lumin's ${kAgents.length} AI agents"),
         content: const Text(
           "Each agent corresponds to one of the engine's evaluator paths. "
           'They scan 75 USDT-M futures pairs continuously, looking for their '

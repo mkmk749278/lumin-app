@@ -549,8 +549,8 @@ class _SignalCard extends StatelessWidget {
               ),
               Expanded(
                 child: _PriceCol(
-                  label: 'TP3',
-                  value: formatPrice(sig.tp3),
+                  label: 'TP2',
+                  value: formatPrice(sig.tp2),
                   color: LuminColors.success,
                 ),
               ),
@@ -655,12 +655,79 @@ class _SignalCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: LuminSpacing.lg),
+            // Pre-TP centerpiece — shown when the engine stamped a trigger
+            // at dispatch (B11 fee-aware doctrine).  Doctrine 2026-05-07:
+            // Pre-TP is the primary scalp outcome; subscribers see it
+            // before the TP ladder.
+            if (sig.preTpTriggerPrice > 0) ...[
+              _PreTpCard(sig: sig),
+              const SizedBox(height: LuminSpacing.md),
+            ],
+            _DetailRow('Entry', formatPrice(sig.entry)),
+            _DetailRow('SL', formatPrice(sig.sl)),
+            _DetailRow('TP1', formatPrice(sig.tp1)),
             _DetailRow('TP2', formatPrice(sig.tp2)),
             _DetailRow('Confidence',
                 '${sig.confidence.toStringAsFixed(1)} (${sig.tier})'),
             _DetailRow('Status', sig.status),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Pre-TP centerpiece card — banked-state highlight or stamped-target.
+class _PreTpCard extends StatelessWidget {
+  const _PreTpCard({required this.sig});
+  final MockSignal sig;
+
+  @override
+  Widget build(BuildContext context) {
+    final banked = sig.preTpHit;
+    final accent = banked ? LuminColors.success : LuminColors.accent;
+    final title = banked ? '⚡ Pre-TP Banked' : '⚡ Pre-TP Target';
+    final priceLine = formatPrice(sig.preTpTriggerPrice);
+    final pctLine =
+        '+${sig.preTpThresholdPct.toStringAsFixed(2)}% raw → SL ratchets to breakeven';
+    return Container(
+      padding: const EdgeInsets.all(LuminSpacing.md),
+      decoration: BoxDecoration(
+        color: accent.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(LuminRadii.md),
+        border: Border.all(color: accent.withOpacity(0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: TextStyle(
+              color: accent,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.4,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            priceLine,
+            style: const TextStyle(
+              color: LuminColors.textPrimary,
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              letterSpacing: -0.4,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            pctLine,
+            style: const TextStyle(
+              color: LuminColors.textSecondary,
+              fontSize: 11,
+            ),
+          ),
+        ],
       ),
     );
   }
