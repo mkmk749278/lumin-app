@@ -63,6 +63,7 @@ class MockSignal {
     required this.status,
     required this.pnlPct,
     required this.minutesAgo,
+    this.currentPrice = 0.0,
     this.preTpTriggerPrice = 0.0,
     this.preTpThresholdPct = 0.0,
     this.preTpHit = false,
@@ -83,6 +84,9 @@ class MockSignal {
   final String status; // ACTIVE / TP1_HIT / TP2_HIT / TP3_HIT / SL_HIT / INVALIDATED
   final double pnlPct;
   final int minutesAgo;
+  /// Last-known mark price.  Populated from the live engine snapshot —
+  /// 0.0 when offline / mock data.
+  final double currentPrice;
   // Pre-TP grab — Phase A target price + threshold % stamped at dispatch.
   // Centerpiece of the scalp signal display: clears trigger → SL ratchets to
   // breakeven, full TP ladder still open.  Doctrine update 2026-05-07:
@@ -250,4 +254,27 @@ const mockActivity = <MockActivityEvent>[
     minutesAgo: 880,
     color: Color(0xFF4ADE80),
   ),
+];
+
+// ---------------------------------------------------------------------------
+// MockTicker — top-pair live-price strip on the Pulse tab.
+// ---------------------------------------------------------------------------
+
+class MockTicker {
+  const MockTicker({
+    required this.symbol,
+    required this.price,
+    required this.changePct24h,
+  });
+  final String symbol;
+  final double price;
+  final double changePct24h;
+}
+
+const List<MockTicker> mockTickers = [
+  MockTicker(symbol: 'BTCUSDT', price: 78240.0, changePct24h: 1.87),
+  MockTicker(symbol: 'ETHUSDT', price: 2329.0, changePct24h: 1.26),
+  MockTicker(symbol: 'SOLUSDT', price: 148.40, changePct24h: -1.07),
+  MockTicker(symbol: 'BNBUSDT', price: 628.50, changePct24h: 0.45),
+  MockTicker(symbol: 'XRPUSDT', price: 0.5821, changePct24h: -0.62),
 ];
