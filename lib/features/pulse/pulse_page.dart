@@ -12,7 +12,6 @@ import '../../shared/format.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
 import '../../shared/widgets/preview_badge.dart';
-import '../../shared/widgets/stat_pill.dart';
 
 class _PulseBundle {
   const _PulseBundle({
@@ -99,7 +98,9 @@ class _PulsePageState extends State<PulsePage> {
                 if (!scope.repo.isLive) const PreviewBadge(),
                 _EngineStatusCard(engine: data.engine),
                 const SizedBox(height: LuminSpacing.md),
-                _RegimeAndPnlRow(engine: data.engine),
+                _RegimeBar(engine: data.engine),
+                const SizedBox(height: LuminSpacing.md),
+                _TodayPnlCard(engine: data.engine),
                 const SizedBox(height: LuminSpacing.md),
                 _DailyLossBudgetCard(engine: data.engine),
                 const SizedBox(height: LuminSpacing.md),
@@ -181,70 +182,213 @@ class _EngineStatusCard extends StatelessWidget {
   }
 }
 
-class _RegimeAndPnlRow extends StatelessWidget {
-  const _RegimeAndPnlRow({required this.engine});
+/// Horizontal regime bar — five segments (one per regime), the active one
+/// glows in its semantic accent.  Drops the previous "X% trending" subtitle
+/// (the engine still hardcodes that field to 0 in `build_pulse`) and gives
+/// subscribers an at-a-glance read of the current market state.
+class _RegimeBar extends StatelessWidget {
+  const _RegimeBar({required this.engine});
+  final MockEngineSnapshot engine;
+
+  static const _segments = <String>[
+    'TRENDING_UP',
+    'RANGING',
+    'QUIET',
+    'VOLATILE',
+    'TRENDING_DOWN',
+  ];
+
+  static Color _colorFor(String regime) {
+    switch (regime) {
+      case 'TRENDING_UP':
+        return LuminColors.success;
+      case 'TRENDING_DOWN':
+        return LuminColors.loss;
+      case 'RANGING':
+        return LuminColors.accent;
+      case 'VOLATILE':
+        return LuminColors.warn;
+      case 'QUIET':
+      default:
+        return LuminColors.textMuted;
+    }
+  }
+
+  static String _labelFor(String regime) {
+    switch (regime) {
+      case 'TRENDING_UP':
+        return 'Trend ↑';
+      case 'TRENDING_DOWN':
+        return 'Trend ↓';
+      case 'RANGING':
+        return 'Range';
+      case 'VOLATILE':
+        return 'Volatile';
+      case 'QUIET':
+      default:
+        return 'Quiet';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final activeColor = _colorFor(engine.regime);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
+      child: LuminCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.bar_chart_outlined, size: 16, color: activeColor),
+                const SizedBox(width: 6),
+                const Text(
+                  'Regime',
+                  style: TextStyle(
+                    color: LuminColors.textMuted,
+                    fontSize: 10,
+                    letterSpacing: 1.2,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  _labelFor(engine.regime).toUpperCase(),
+                  style: TextStyle(
+                    color: activeColor,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.4,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: LuminSpacing.sm),
+            Row(
+              children: List.generate(_segments.length, (i) {
+                final regime = _segments[i];
+                final active = regime == engine.regime;
+                final c = _colorFor(regime);
+                return Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(
+                      right: i == _segments.length - 1 ? 0 : 4,
+                    ),
+                    child: Column(
+                      children: [
+                        Container(
+                          height: 6,
+                          decoration: BoxDecoration(
+                            color: active ? c : c.withOpacity(0.18),
+                            borderRadius: BorderRadius.circular(3),
+                            boxShadow: active
+                                ? [
+                                    BoxShadow(
+                                      color: c.withOpacity(0.5),
+                                      blurRadius: 6,
+                                      spreadRadius: 0,
+                                    ),
+                                  ]
+                                : null,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _labelFor(regime),
+                          style: TextStyle(
+                            color: active ? c : LuminColors.textMuted,
+                            fontSize: 9,
+                            fontWeight:
+                                active ? FontWeight.w700 : FontWeight.w500,
+                            letterSpacing: 0.3,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Today's P&L — promoted from a half-row stat to a full-width card now
+/// that the regime bar takes the row above.  Reads cleaner and gives the
+/// number the prominence the audit asked for.
+class _TodayPnlCard extends StatelessWidget {
+  const _TodayPnlCard({required this.engine});
   final MockEngineSnapshot engine;
 
   @override
   Widget build(BuildContext context) {
-    final pnlPositive = engine.todayPnlUsd >= 0;
+    final positive = engine.todayPnlUsd >= 0;
+    final color = positive ? LuminColors.success : LuminColors.loss;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
-      child: Row(
-        children: [
-          Expanded(
-            child: LuminCard(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  StatPill(
-                    label: 'Regime',
-                    value: engine.regime,
-                    icon: Icons.bar_chart_outlined,
-                    valueColor: LuminColors.accent,
-                  ),
-                  const SizedBox(height: LuminSpacing.sm),
-                  Text(
-                    '${engine.regimePctTrending.toStringAsFixed(1)}% trending',
-                    style: const TextStyle(
-                      color: LuminColors.textSecondary,
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
-              ),
+      child: LuminCard(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Icon(
+              positive ? Icons.trending_up : Icons.trending_down,
+              size: 22,
+              color: color,
             ),
-          ),
-          const SizedBox(width: LuminSpacing.md),
-          Expanded(
-            child: LuminCard(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  StatPill(
-                    label: "Today's P&L",
-                    value:
-                        '${pnlPositive ? '+' : ''}\$${engine.todayPnlUsd.toStringAsFixed(2)}',
-                    valueColor: pnlPositive
-                        ? LuminColors.success
-                        : LuminColors.loss,
-                    icon: pnlPositive
-                        ? Icons.trending_up
-                        : Icons.trending_down,
+            const SizedBox(width: LuminSpacing.md),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
+                Text(
+                  "TODAY'S P&L",
+                  style: TextStyle(
+                    color: LuminColors.textMuted,
+                    fontSize: 10,
+                    letterSpacing: 1.2,
+                    fontWeight: FontWeight.w600,
                   ),
-                  const SizedBox(height: LuminSpacing.sm),
-                  Text(
-                    '${pnlPositive ? '+' : ''}${engine.todayPnlPct.toStringAsFixed(2)}% on margin',
-                    style: const TextStyle(
-                      color: LuminColors.textSecondary,
-                      fontSize: 11,
-                    ),
+                ),
+                SizedBox(height: 2),
+                Text(
+                  'Realised across paper / live trades',
+                  style: TextStyle(
+                    color: LuminColors.textSecondary,
+                    fontSize: 11,
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ),
-        ],
+            const Spacer(),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  '${positive ? '+' : ''}\$${engine.todayPnlUsd.toStringAsFixed(2)}',
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -0.5,
+                  ),
+                ),
+                Text(
+                  '${positive ? '+' : ''}${engine.todayPnlPct.toStringAsFixed(2)}% on margin',
+                  style: TextStyle(
+                    color: color.withOpacity(0.85),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
