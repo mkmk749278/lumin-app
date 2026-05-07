@@ -10,7 +10,7 @@ import '../../../shared/widgets/lumin_card.dart';
 class AboutPage extends StatelessWidget {
   const AboutPage({super.key});
 
-  static const _version = '0.0.8';
+  static const _version = '0.0.10';
   static const _build = 'live';
 
   @override
@@ -240,7 +240,7 @@ class AboutPage extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
       child: Text(
         '© 2026 360 Crypto Eye.  All rights reserved.\n'
-        'Made for scalpers, with the 14-evaluator engine.',
+        'Made for scalpers, with the 15-evaluator engine.',
         textAlign: TextAlign.center,
         style: TextStyle(
           color: LuminColors.textMuted.withOpacity(0.75),

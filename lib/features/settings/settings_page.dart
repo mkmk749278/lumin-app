@@ -56,7 +56,7 @@ class SettingsPage extends StatelessWidget {
               _Row(
                 icon: Icons.psychology_outlined,
                 label: 'Agents',
-                subtitle: '14 evaluators — per-agent toggles',
+                subtitle: '15 evaluators — per-agent toggles',
                 onTap: () => _push(context, const AgentsSettingsPage()),
               ),
               _Row(

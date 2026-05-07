@@ -1,6 +1,6 @@
 /// Agents settings — per-evaluator enable/disable toggles.
 ///
-/// 14 evaluator paths, each owned by an agent persona.  Disabling an agent
+/// 15 evaluator paths, each owned by an agent persona.  Disabling an agent
 /// suppresses its setup at the channel-router level (no Telegram dispatch,
 /// no auto-trade entry).  Mirrors `config.AGENT_ENABLED_*` flags.
 import 'package:flutter/material.dart';
@@ -102,7 +102,7 @@ class _AgentsSettingsPageState extends State<AgentsSettingsPage> {
                   ),
                   SizedBox(height: 2),
                   Text(
-                    'of 14 evaluators',
+                    'of 15 evaluators',
                     style: TextStyle(
                       color: LuminColors.textSecondary,
                       fontSize: 11,

@@ -67,7 +67,7 @@ class SubscriptionPage extends StatelessWidget {
             ),
             SizedBox(height: LuminSpacing.xs),
             Text(
-              'Full 14-evaluator paid signals.  Real-time Telegram dispatch.  '
+              'Full 15-evaluator paid signals.  Real-time Telegram dispatch.  '
               'Auto-trade unlock.',
               style: TextStyle(
                 color: LuminColors.textSecondary,
@@ -99,7 +99,7 @@ class SubscriptionPage extends StatelessWidget {
             ),
             const SizedBox(height: LuminSpacing.md),
             _featureRow('Watchlist signals (free channel)', true, true),
-            _featureRow('Paid signals — 14 evaluators', false, true),
+            _featureRow('Paid signals — 15 evaluators', false, true),
             _featureRow('Real-time Telegram dispatch', false, true),
             _featureRow('Pre-TP grab + auto-breakeven', false, true),
             _featureRow('In-app auto-trade (Paper)', false, true),
