@@ -427,6 +427,23 @@ class _ModePnlCard extends StatelessWidget {
               label: 'Open positions',
               value: autoMode.openPositions.toString(),
             ),
+            // Weekly + monthly aggregates from the persistent ledger
+            // (engine PR #338).  Both default to 0.0 on pre-#338
+            // backends so the row always renders.
+            _MetaRow(
+              label: 'Weekly P&L',
+              value: formatPnl(autoMode.weeklyPnlUsd),
+              valueColor: autoMode.weeklyPnlUsd >= 0
+                  ? LuminColors.success
+                  : LuminColors.loss,
+            ),
+            _MetaRow(
+              label: 'Monthly P&L',
+              value: formatPnl(autoMode.monthlyPnlUsd),
+              valueColor: autoMode.monthlyPnlUsd >= 0
+                  ? LuminColors.success
+                  : LuminColors.loss,
+            ),
             if (isPaper && autoMode.simulatedPnlUsd != null)
               _MetaRow(
                 label: 'Paper total since boot',
