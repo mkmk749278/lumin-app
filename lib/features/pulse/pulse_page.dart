@@ -18,10 +18,12 @@ class _PulseBundle {
     required this.engine,
     required this.recent,
     required this.tickers,
+    required this.pnlHistory,
   });
   final MockEngineSnapshot engine;
   final List<MockSignal> recent;
   final List<MockTicker> tickers;
+  final PnlHistory pnlHistory;
 }
 
 class PulsePage extends StatefulWidget {
@@ -53,11 +55,24 @@ class _PulsePageState extends State<PulsePage> {
       // historical-data store is seeded).  Catch + return an empty list so
       // a missing strip never blocks the rest of the Pulse page.
       repo.fetchTickers().catchError((_) => <MockTicker>[]),
+      // PnL history powers the dashboard chart + weekly/monthly cards.
+      // On a pre-engine-#338 backend this 404s; catch + return an empty
+      // history so older deployments still render the page.
+      repo.fetchPnlHistory(days: 30).catchError(
+            (_) => const PnlHistory(
+              mode: 'off',
+              days: 30,
+              items: <PnlPoint>[],
+              weeklyPnlUsd: 0.0,
+              monthlyPnlUsd: 0.0,
+            ),
+          ),
     ]);
     return _PulseBundle(
       engine: results[0] as MockEngineSnapshot,
       recent: (results[1] as List).cast<MockSignal>(),
       tickers: (results[2] as List).cast<MockTicker>(),
+      pnlHistory: results[3] as PnlHistory,
     );
   }
 
@@ -101,6 +116,8 @@ class _PulsePageState extends State<PulsePage> {
                 _RegimeBar(engine: data.engine),
                 const SizedBox(height: LuminSpacing.md),
                 _TodayPnlCard(engine: data.engine),
+                const SizedBox(height: LuminSpacing.md),
+                _PnlChartCard(history: data.pnlHistory),
                 const SizedBox(height: LuminSpacing.md),
                 _DailyLossBudgetCard(engine: data.engine),
                 const SizedBox(height: LuminSpacing.md),
@@ -465,6 +482,213 @@ class _DailyLossBudgetCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 30-day P&L chart + weekly/monthly summary header.
+///
+/// Owner audit (2026-05-08): "Daily, Weekly and monthly PnL along Daily PnL
+/// Chat".  Sources from the engine's persistent ``pnl_history.json`` ledger
+/// via the ``/api/pnl/history`` endpoint (engine PR #338).
+class _PnlChartCard extends StatelessWidget {
+  const _PnlChartCard({required this.history});
+  final PnlHistory history;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasData = history.items.any((p) => p.pnlUsd != 0.0);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
+      child: LuminCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: const [
+                Icon(Icons.show_chart, size: 16, color: LuminColors.accent),
+                SizedBox(width: 6),
+                Text(
+                  'P&L — LAST 30 DAYS',
+                  style: TextStyle(
+                    color: LuminColors.textMuted,
+                    fontSize: 10,
+                    letterSpacing: 1.2,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: LuminSpacing.sm),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: _PnlAggregateCell(
+                    label: 'Weekly',
+                    value: history.weeklyPnlUsd,
+                    subtitle: 'Last 7 days',
+                  ),
+                ),
+                Expanded(
+                  child: _PnlAggregateCell(
+                    label: 'Monthly',
+                    value: history.monthlyPnlUsd,
+                    subtitle: 'Last 30 days',
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: LuminSpacing.md),
+            SizedBox(
+              height: 90,
+              child: hasData
+                  ? CustomPaint(
+                      painter: _PnlBarChartPainter(items: history.items),
+                      child: const SizedBox.expand(),
+                    )
+                  : const _PnlChartEmptyState(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PnlAggregateCell extends StatelessWidget {
+  const _PnlAggregateCell({
+    required this.label,
+    required this.value,
+    required this.subtitle,
+  });
+  final String label;
+  final double value;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final positive = value >= 0;
+    final color = positive ? LuminColors.success : LuminColors.loss;
+    final formatted =
+        '${positive ? '+' : ''}\$${value.toStringAsFixed(2)}';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: LuminColors.textSecondary,
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          formatted,
+          style: TextStyle(
+            color: color,
+            fontSize: 17,
+            fontWeight: FontWeight.w700,
+            letterSpacing: -0.4,
+          ),
+        ),
+        Text(
+          subtitle,
+          style: const TextStyle(
+            color: LuminColors.textMuted,
+            fontSize: 10,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PnlChartEmptyState extends StatelessWidget {
+  const _PnlChartEmptyState();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: LuminColors.bgElevated.withOpacity(0.5),
+        borderRadius: BorderRadius.circular(LuminRadii.sm),
+      ),
+      alignment: Alignment.center,
+      child: const Text(
+        'No closed trades in the last 30 days yet.',
+        style: TextStyle(
+          color: LuminColors.textMuted,
+          fontSize: 11,
+        ),
+      ),
+    );
+  }
+}
+
+/// Custom-painted bar chart — one bar per UTC day.  Wins green, losses
+/// red, zero days a thin baseline tick so subscribers can read the
+/// trade cadence at a glance.
+class _PnlBarChartPainter extends CustomPainter {
+  _PnlBarChartPainter({required this.items});
+  final List<PnlPoint> items;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (items.isEmpty) return;
+    final maxAbs = items
+        .map((p) => p.pnlUsd.abs())
+        .fold<double>(0.0, (a, b) => a > b ? a : b);
+    if (maxAbs == 0.0) return;
+
+    final n = items.length;
+    final spacing = 2.0;
+    final usable = size.width - spacing * (n - 1);
+    final barWidth = usable / n;
+    final centerY = size.height / 2;
+    final maxBarHeight = size.height / 2 - 4;
+
+    final winPaint = Paint()..color = LuminColors.success;
+    final lossPaint = Paint()..color = LuminColors.loss;
+    final zeroPaint = Paint()
+      ..color = LuminColors.textMuted.withOpacity(0.35);
+    final axisPaint = Paint()
+      ..color = LuminColors.cardBorder
+      ..strokeWidth = 1;
+
+    // Faint horizontal axis at zero.
+    canvas.drawLine(
+      Offset(0, centerY),
+      Offset(size.width, centerY),
+      axisPaint,
+    );
+
+    for (int i = 0; i < n; i++) {
+      final p = items[i];
+      final x = i * (barWidth + spacing);
+      if (p.pnlUsd == 0.0) {
+        // Zero-day tick — keeps the x-axis cadence readable.
+        canvas.drawRect(
+          Rect.fromLTWH(x, centerY - 0.5, barWidth, 1.0),
+          zeroPaint,
+        );
+        continue;
+      }
+      final h = (p.pnlUsd.abs() / maxAbs) * maxBarHeight;
+      final paint = p.pnlUsd > 0 ? winPaint : lossPaint;
+      final y = p.pnlUsd > 0 ? centerY - h : centerY;
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(x, y, barWidth, h),
+          const Radius.circular(1.5),
+        ),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _PnlBarChartPainter old) =>
+      old.items != items;
 }
 
 class _TopPairTickerStrip extends StatelessWidget {

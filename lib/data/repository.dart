@@ -21,6 +21,8 @@ class AutoModeStatus {
     required this.manualPaused,
     required this.currentEquityUsd,
     this.simulatedPnlUsd,
+    this.weeklyPnlUsd = 0.0,
+    this.monthlyPnlUsd = 0.0,
   });
 
   final String mode;
@@ -31,6 +33,13 @@ class AutoModeStatus {
   final bool manualPaused;
   final double currentEquityUsd;
   final double? simulatedPnlUsd;
+  /// Realised PnL over the last 7 UTC days, sourced from the engine's
+  /// persistent daily ledger (engine PR #338).  Default 0.0 on clean
+  /// install / pre-#338 backends so the UI can render zeros without
+  /// conditional null handling.
+  final double weeklyPnlUsd;
+  /// Realised PnL over the last 30 UTC days (rolling).
+  final double monthlyPnlUsd;
 
   factory AutoModeStatus.fromJson(Map<String, dynamic> j) => AutoModeStatus(
         mode: j['mode'] as String,
@@ -42,7 +51,32 @@ class AutoModeStatus {
         currentEquityUsd:
             (j['current_equity_usd'] as num?)?.toDouble() ?? 0.0,
         simulatedPnlUsd: (j['simulated_pnl_usd'] as num?)?.toDouble(),
+        weeklyPnlUsd: (j['weekly_pnl_usd'] as num?)?.toDouble() ?? 0.0,
+        monthlyPnlUsd: (j['monthly_pnl_usd'] as num?)?.toDouble() ?? 0.0,
       );
+}
+
+/// One day's bucket from the persistent PnL ledger.  Used by the chart
+/// widget on Pulse.
+class PnlPoint {
+  const PnlPoint({required this.date, required this.pnlUsd});
+  final String date;  // ISO YYYY-MM-DD
+  final double pnlUsd;
+}
+
+class PnlHistory {
+  const PnlHistory({
+    required this.mode,
+    required this.days,
+    required this.items,
+    required this.weeklyPnlUsd,
+    required this.monthlyPnlUsd,
+  });
+  final String mode;
+  final int days;
+  final List<PnlPoint> items;
+  final double weeklyPnlUsd;
+  final double monthlyPnlUsd;
 }
 
 class AgentStat {
@@ -112,6 +146,12 @@ abstract class LuminRepository {
   Future<AutoModeStatus> fetchAutoMode();
   Future<AutoModeStatus> setAutoMode(String mode);
   Future<List<AgentStat>> fetchAgents();
+  /// Daily-bucketed realised PnL series + rolling aggregates (last
+  /// ``days`` UTC days, default 30).  Powers the dashboard chart and
+  /// the weekly / monthly summary cards.  ``mode`` defaults to the
+  /// engine's current auto-execution mode; pass an explicit value to
+  /// view the opposite ledger (paper history while in live, etc.).
+  Future<PnlHistory> fetchPnlHistory({int days = 30, String? mode});
   Future<bool> healthCheck();
 }
 
@@ -189,6 +229,42 @@ class MockRepository implements LuminRepository {
         manualPaused: false,
         currentEquityUsd: 1000.0,
       );
+
+  @override
+  Future<PnlHistory> fetchPnlHistory({int days = 30, String? mode}) async {
+    // Synthesise a realistic-looking 30-day series so the chart widget
+    // has something to render in offline / preview mode.  Pattern: a
+    // few wins, a few losses, with a slight positive drift.  No live
+    // engine is necessary to demo the surface.
+    final now = DateTime.now().toUtc();
+    final series = <PnlPoint>[];
+    final pattern = <double>[
+      0, 0, 4.2, 0, -2.1, 0, 8.5, 0, 0, -1.8,
+      3.7, 0, 0, 6.0, -4.2, 0, 0, 2.1, 5.8, 0,
+      0, -3.1, 0, 7.2, 0, 0, 1.5, -1.9, 0, 4.0,
+    ];
+    for (int offset = days - 1; offset >= 0; offset--) {
+      final date = now.subtract(Duration(days: offset));
+      final iso =
+          '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+      final v = offset < pattern.length ? pattern[pattern.length - 1 - offset] : 0.0;
+      series.add(PnlPoint(date: iso, pnlUsd: v));
+    }
+    final weekly = series
+        .skip(series.length - 7)
+        .map((p) => p.pnlUsd)
+        .fold<double>(0.0, (a, b) => a + b);
+    final monthly = series
+        .map((p) => p.pnlUsd)
+        .fold<double>(0.0, (a, b) => a + b);
+    return PnlHistory(
+      mode: mode ?? 'paper',
+      days: days,
+      items: series,
+      weeklyPnlUsd: weekly,
+      monthlyPnlUsd: monthly,
+    );
+  }
 
   @override
   Future<List<AgentStat>> fetchAgents() async {
@@ -323,6 +399,29 @@ class HttpRepository implements LuminRepository {
     await client.post('/api/auto-mode', body: {'mode': mode});
     // Re-fetch so the UI sees the post-change risk-gate state in one shot.
     return fetchAutoMode();
+  }
+
+  @override
+  Future<PnlHistory> fetchPnlHistory({int days = 30, String? mode}) async {
+    final query = <String, dynamic>{'days': days};
+    if (mode != null && mode.isNotEmpty) {
+      query['mode'] = mode;
+    }
+    final j =
+        (await client.get('/api/pnl/history', query: query)) as Map<String, dynamic>;
+    final items = (j['items'] as List? ?? []).cast<Map<String, dynamic>>();
+    return PnlHistory(
+      mode: j['mode'] as String? ?? 'off',
+      days: (j['days'] as num?)?.toInt() ?? days,
+      items: items
+          .map((m) => PnlPoint(
+                date: m['date'] as String? ?? '',
+                pnlUsd: (m['pnl_usd'] as num?)?.toDouble() ?? 0.0,
+              ))
+          .toList(),
+      weeklyPnlUsd: (j['weekly_pnl_usd'] as num?)?.toDouble() ?? 0.0,
+      monthlyPnlUsd: (j['monthly_pnl_usd'] as num?)?.toDouble() ?? 0.0,
+    );
   }
 
   @override
