@@ -367,7 +367,10 @@ class MockRepository implements LuminRepository {
 
   // Pre-TP settings — mock returns a minimal default view; PUT round-trips
   // the partial payload so previews behave realistically without a backend.
-  PretpSettings _mockPretp = const PretpSettings(
+  // ``static`` because ``MockRepository`` declares a ``const`` constructor
+  // (used at ``app_config.dart:111`` as ``const MockRepository()``); a non-
+  // final instance field would make the class not const-constructable.
+  static PretpSettings _mockPretp = const PretpSettings(
     enabled: true,
     regimeAllowlist: ['QUIET', 'RANGING', 'VOLATILE'],
     thresholdPct: 0.35,
