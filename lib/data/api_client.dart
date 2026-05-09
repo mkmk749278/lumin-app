@@ -79,6 +79,14 @@ class LuminApiClient {
     });
   }
 
+  Future<dynamic> put(String path, {Object? body}) async {
+    final encoded = body == null ? null : jsonEncode(body);
+    return _request(() async {
+      final h = await _headers();
+      return _http.put(_uri(path), headers: h, body: encoded);
+    });
+  }
+
   Future<dynamic> _request(Future<http.Response> Function() send) async {
     int attempt = 0;
     bool authRetried = false;
