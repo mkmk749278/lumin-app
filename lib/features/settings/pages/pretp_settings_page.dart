@@ -2,12 +2,23 @@
 ///
 /// Pre-TP grab moves SL to breakeven once price has captured a configurable
 /// fraction of the path to TP1 (covers fees + safety margin).  This page
-/// exposes the knobs that the engine reads from `config.PRE_TP_*`.
+/// loads the engine's resolved view from ``GET /api/settings/pretp`` and
+/// persists user toggles via ``PUT`` on save.
 import 'package:flutter/material.dart';
 
+import '../../../data/api_client.dart';
+import '../../../data/app_config.dart';
+import '../../../data/repository.dart';
 import '../../../shared/tokens.dart';
 import '../../../shared/widgets/lumin_card.dart';
 import '../../../shared/widgets/preview_badge.dart';
+
+/// UI-side regime buckets.  The backend uses 5 labels (TRENDING_UP /
+/// TRENDING_DOWN / RANGING / VOLATILE / QUIET); the page collapses them
+/// into 3 buckets so the toggles match the user's mental model.  The
+/// backend accepts UI tokens directly and expands them on read.
+const _kTrendingTokens = {'TRENDING_UP', 'TRENDING_DOWN'};
+const _kChoppyTokens = {'VOLATILE', 'QUIET'};
 
 class PreTpSettingsPage extends StatefulWidget {
   const PreTpSettingsPage({super.key});
@@ -17,17 +28,19 @@ class PreTpSettingsPage extends StatefulWidget {
 }
 
 class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
+  // Local edit state — populated from ``fetchPretpSettings`` on init,
+  // mutated by user toggles, written back via ``updatePretpSettings``.
   bool _enabled = true;
-  double _grabPct = 0.50;     // fraction of TP1 distance
-  double _atrMult = 0.30;     // ATR-floor multiplier
-  double _feeFloor = 0.12;    // % — minimum profit before BE move
+  double _grabPct = 0.50;
+  double _atrMult = 0.30;
+  double _feeFloor = 0.12;
 
-  // Regime allowlist
   bool _regimeTrending = true;
   bool _regimeRanging = true;
   bool _regimeChoppy = false;
 
-  // Setup blacklist (false = blacklisted)
+  // Setup allowlist — defaults shown until backend wiring lands.
+  // Engine read-path is pending; values still round-trip via PUT.
   final Map<String, bool> _setups = {
     'TPE (Trend Pullback)': true,
     'DIV_CONT (Divergence)': true,
@@ -45,33 +58,207 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
     'ORB (Opening Range)': false,
   };
 
+  bool _loaded = false;
+  bool _saving = false;
+  String? _loadError;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_loaded) {
+      _load();
+    }
+  }
+
+  Future<void> _load() async {
+    final repo = AppConfigScope.of(context).repo;
+    try {
+      final s = await repo.fetchPretpSettings();
+      if (!mounted) return;
+      setState(() {
+        _enabled = s.enabled ?? _enabled;
+        _atrMult = s.atrMultiplier ?? _atrMult;
+        _feeFloor = s.feeFloorPct ?? _feeFloor;
+        if (s.regimeAllowlist != null) {
+          final tokens = s.regimeAllowlist!.toSet();
+          _regimeTrending = tokens.intersection(_kTrendingTokens).isNotEmpty;
+          _regimeRanging = tokens.contains('RANGING');
+          _regimeChoppy = tokens.intersection(_kChoppyTokens).isNotEmpty;
+        }
+        if (s.setupAllowlist != null) {
+          // The backend allowlist uses canonical setup_class names;
+          // the UI's labels carry parenthetical descriptions.  Match
+          // by the leading token before the space.
+          final allowed = s.setupAllowlist!.toSet();
+          for (final key in _setups.keys.toList()) {
+            final token = key.split(' ').first;
+            // Map UI token → backend canonical name.  Conservative: only
+            // flip OFF when explicitly absent from the server allowlist;
+            // unknown server tokens keep the UI default.
+            final mapped = _uiTokenToBackend[token] ?? token;
+            if (allowed.isNotEmpty) {
+              _setups[key] = allowed.contains(mapped);
+            }
+          }
+        }
+        _loaded = true;
+        _loadError = null;
+      });
+    } on ApiError catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loaded = true;
+        _loadError = e.message;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loaded = true;
+        _loadError = '$e';
+      });
+    }
+  }
+
+  Future<void> _save() async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    final repo = AppConfigScope.of(context).repo;
+    final regimeAllowlist = <String>[
+      if (_regimeTrending) ...['TRENDING_UP', 'TRENDING_DOWN'],
+      if (_regimeRanging) 'RANGING',
+      if (_regimeChoppy) ...['VOLATILE', 'QUIET'],
+    ];
+    final setupAllowlist = <String>[
+      for (final entry in _setups.entries)
+        if (entry.value)
+          _uiTokenToBackend[entry.key.split(' ').first] ??
+              entry.key.split(' ').first,
+    ];
+    final partial = PretpSettings(
+      enabled: _enabled,
+      regimeAllowlist: regimeAllowlist,
+      setupAllowlist: setupAllowlist,
+      atrMultiplier: _atrMult,
+      feeFloorPct: _feeFloor,
+    );
+    try {
+      await repo.updatePretpSettings(partial);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Pre-TP settings saved'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } on ApiError catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Save failed: ${e.message}'),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Save failed: $e'),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final scope = AppConfigScope.of(context);
+    final isLive = scope.repo.isLive;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Pre-TP grab'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.check),
-            onPressed: _save,
-            tooltip: 'Save',
+          if (_saving)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 14),
+              child: SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            )
+          else
+            IconButton(
+              icon: const Icon(Icons.check),
+              onPressed: _loaded && _loadError == null ? _save : null,
+              tooltip: 'Save',
+            ),
+        ],
+      ),
+      body: _bodyFor(isLive),
+    );
+  }
+
+  Widget _bodyFor(bool isLive) {
+    if (!_loaded) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_loadError != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(LuminSpacing.lg),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.cloud_off, color: LuminColors.textMuted, size: 36),
+              const SizedBox(height: LuminSpacing.md),
+              Text(
+                'Could not load settings',
+                style: const TextStyle(
+                  color: LuminColors.textPrimary,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _loadError!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: LuminColors.textSecondary,
+                  fontSize: 12,
+                ),
+              ),
+              const SizedBox(height: LuminSpacing.md),
+              OutlinedButton(
+                onPressed: () {
+                  setState(() {
+                    _loaded = false;
+                    _loadError = null;
+                  });
+                  _load();
+                },
+                child: const Text('Retry'),
+              ),
+            ],
           ),
-        ],
-      ),
-      body: ListView(
-        physics: const BouncingScrollPhysics(),
-        children: [
-          const PreviewBadge(),
-          _masterCard(),
-          const SizedBox(height: LuminSpacing.md),
-          _thresholdsCard(),
-          const SizedBox(height: LuminSpacing.md),
-          _regimeCard(),
-          const SizedBox(height: LuminSpacing.md),
-          _setupsCard(),
-          const SizedBox(height: LuminSpacing.xl),
-        ],
-      ),
+        ),
+      );
+    }
+    return ListView(
+      physics: const BouncingScrollPhysics(),
+      children: [
+        if (!isLive) const PreviewBadge(),
+        _masterCard(),
+        const SizedBox(height: LuminSpacing.md),
+        _thresholdsCard(),
+        const SizedBox(height: LuminSpacing.md),
+        _regimeCard(),
+        const SizedBox(height: LuminSpacing.md),
+        _setupsCard(),
+        const SizedBox(height: LuminSpacing.xl),
+      ],
     );
   }
 
@@ -315,13 +502,25 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
       ),
     );
   }
-
-  void _save() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Saved (session only — backend wiring pending)'),
-        duration: Duration(seconds: 2),
-      ),
-    );
-  }
 }
+
+/// UI label tokens → backend ``setup_class`` canonical names.  The page
+/// labels carry parenthetical descriptions ("TPE (Trend Pullback)") so
+/// we strip to the leading token before lookup.
+const Map<String, String> _uiTokenToBackend = {
+  'TPE': 'TREND_PULLBACK_EMA',
+  'DIV_CONT': 'DIVERGENCE_CONTINUATION',
+  'CLS': 'CONTINUATION_LIQUIDITY_SWEEP',
+  'PDC': 'POST_DISPLACEMENT_CONTINUATION',
+  'WHALE': 'WHALE_MOMENTUM',
+  'FUNDING': 'FUNDING_EXTREME_SIGNAL',
+  'LIQ_REVERSAL': 'LIQUIDATION_REVERSAL',
+  'LSR': 'LIQUIDITY_SWEEP_REVERSAL',
+  'FAR': 'FAILED_AUCTION_RECLAIM',
+  'SR_FLIP': 'SR_FLIP_RETEST',
+  'QCB': 'QUIET_COMPRESSION_BREAK',
+  'VSB': 'VOLUME_SURGE_BREAKOUT',
+  'BDS': 'BREAKDOWN_SHORT',
+  'ORB': 'OPENING_RANGE_BREAKOUT',
+  'MA_CROSS': 'MA_CROSS_TREND_SHIFT',
+};

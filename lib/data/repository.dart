@@ -127,6 +127,65 @@ class AgentStat {
       );
 }
 
+/// Pre-TP grab settings — backend ``GET / PUT /api/settings/pretp``.
+///
+/// All fields nullable on PUT — the backend merges a partial payload into
+/// the stored state, so a one-toggle change doesn't wipe the others.  GET
+/// returns the engine's resolved view (user overrides where set, config
+/// defaults otherwise) so the page renders live state without a separate
+/// "defaults" call.
+class PretpSettings {
+  const PretpSettings({
+    this.enabled,
+    this.regimeAllowlist,
+    this.setupAllowlist,
+    this.thresholdPct,
+    this.atrMultiplier,
+    this.feeFloorPct,
+    this.minAgeSec,
+    this.maxAgeSec,
+  });
+
+  final bool? enabled;
+  final List<String>? regimeAllowlist;
+  final List<String>? setupAllowlist;
+  final double? thresholdPct;
+  final double? atrMultiplier;
+  final double? feeFloorPct;
+  final int? minAgeSec;
+  final int? maxAgeSec;
+
+  factory PretpSettings.fromJson(Map<String, dynamic> j) => PretpSettings(
+        enabled: j['enabled'] as bool?,
+        regimeAllowlist: (j['regime_allowlist'] as List?)
+            ?.map((e) => e.toString())
+            .toList(),
+        setupAllowlist: (j['setup_allowlist'] as List?)
+            ?.map((e) => e.toString())
+            .toList(),
+        thresholdPct: (j['threshold_pct'] as num?)?.toDouble(),
+        atrMultiplier: (j['atr_multiplier'] as num?)?.toDouble(),
+        feeFloorPct: (j['fee_floor_pct'] as num?)?.toDouble(),
+        minAgeSec: (j['min_age_sec'] as num?)?.toInt(),
+        maxAgeSec: (j['max_age_sec'] as num?)?.toInt(),
+      );
+
+  /// Serialise only the non-null fields so a partial PUT doesn't wipe
+  /// settings the user didn't touch.
+  Map<String, dynamic> toJsonPartial() {
+    final out = <String, dynamic>{};
+    if (enabled != null) out['enabled'] = enabled;
+    if (regimeAllowlist != null) out['regime_allowlist'] = regimeAllowlist;
+    if (setupAllowlist != null) out['setup_allowlist'] = setupAllowlist;
+    if (thresholdPct != null) out['threshold_pct'] = thresholdPct;
+    if (atrMultiplier != null) out['atr_multiplier'] = atrMultiplier;
+    if (feeFloorPct != null) out['fee_floor_pct'] = feeFloorPct;
+    if (minAgeSec != null) out['min_age_sec'] = minAgeSec;
+    if (maxAgeSec != null) out['max_age_sec'] = maxAgeSec;
+    return out;
+  }
+}
+
 abstract class LuminRepository {
   /// True when the underlying source is the live engine (vs. mocks).
   bool get isLive;
@@ -152,6 +211,9 @@ abstract class LuminRepository {
   /// engine's current auto-execution mode; pass an explicit value to
   /// view the opposite ledger (paper history while in live, etc.).
   Future<PnlHistory> fetchPnlHistory({int days = 30, String? mode});
+  /// Pre-TP grab settings page — load + persist user overrides.
+  Future<PretpSettings> fetchPretpSettings();
+  Future<PretpSettings> updatePretpSettings(PretpSettings partial);
   Future<bool> healthCheck();
 }
 
@@ -302,6 +364,39 @@ class MockRepository implements LuminRepository {
 
   @override
   Future<bool> healthCheck() async => true;
+
+  // Pre-TP settings — mock returns a minimal default view; PUT round-trips
+  // the partial payload so previews behave realistically without a backend.
+  // ``static`` because ``MockRepository`` declares a ``const`` constructor
+  // (used at ``app_config.dart:111`` as ``const MockRepository()``); a non-
+  // final instance field would make the class not const-constructable.
+  static PretpSettings _mockPretp = const PretpSettings(
+    enabled: true,
+    regimeAllowlist: ['QUIET', 'RANGING', 'VOLATILE'],
+    thresholdPct: 0.35,
+    atrMultiplier: 0.5,
+    feeFloorPct: 0.20,
+    minAgeSec: 30,
+    maxAgeSec: 1800,
+  );
+
+  @override
+  Future<PretpSettings> fetchPretpSettings() async => _mockPretp;
+
+  @override
+  Future<PretpSettings> updatePretpSettings(PretpSettings partial) async {
+    _mockPretp = PretpSettings(
+      enabled: partial.enabled ?? _mockPretp.enabled,
+      regimeAllowlist: partial.regimeAllowlist ?? _mockPretp.regimeAllowlist,
+      setupAllowlist: partial.setupAllowlist ?? _mockPretp.setupAllowlist,
+      thresholdPct: partial.thresholdPct ?? _mockPretp.thresholdPct,
+      atrMultiplier: partial.atrMultiplier ?? _mockPretp.atrMultiplier,
+      feeFloorPct: partial.feeFloorPct ?? _mockPretp.feeFloorPct,
+      minAgeSec: partial.minAgeSec ?? _mockPretp.minAgeSec,
+      maxAgeSec: partial.maxAgeSec ?? _mockPretp.maxAgeSec,
+    );
+    return _mockPretp;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -439,6 +534,21 @@ class HttpRepository implements LuminRepository {
     } catch (_) {
       return false;
     }
+  }
+
+  @override
+  Future<PretpSettings> fetchPretpSettings() async {
+    final j = (await client.get('/api/settings/pretp')) as Map<String, dynamic>;
+    return PretpSettings.fromJson(j);
+  }
+
+  @override
+  Future<PretpSettings> updatePretpSettings(PretpSettings partial) async {
+    final j = (await client.put(
+      '/api/settings/pretp',
+      body: partial.toJsonPartial(),
+    )) as Map<String, dynamic>;
+    return PretpSettings.fromJson(j);
   }
 
   // ---- json → mock-class adapters --------------------------------------
