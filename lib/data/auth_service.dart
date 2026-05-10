@@ -143,6 +143,37 @@ class AuthService {
   /// for CI / manual testing without a working OTP delivery stack.
   Future<void> mintAnonymous() => _mintAnonymous();
 
+  /// Sign in with the engine's static ``API_AUTH_TOKEN``.  This is the
+  /// owner-only bypass: the engine treats this exact bearer string as
+  /// ``tier=owner`` (PR #355).  Validates by hitting an authenticated
+  /// endpoint (`/api/pulse`); on success persists the token to secure
+  /// storage with a long expiry so subsequent API calls just work.
+  ///
+  /// Owner uses this on first launch to skip the phone-OTP flow
+  /// entirely.  If the engine rotates the static token, the next
+  /// refresh attempt will 401 and the user will be punted back to
+  /// signin — same path as a normal session expiry.
+  Future<void> signInWithAdminToken(String token) async {
+    final uri = Uri.parse('${_trimSlash(baseUrl)}/api/pulse');
+    final resp = await _client
+        .get(uri, headers: {'Authorization': 'Bearer $token'})
+        .timeout(const Duration(seconds: 8));
+    if (resp.statusCode != 200) {
+      throw AuthError(
+        'admin-token signin failed (${resp.statusCode}): '
+        '${_decodeDetail(resp.body)}',
+      );
+    }
+    // Static token has no expiry server-side; pick a long window so the
+    // refresh path (which would 401 against a non-JWT bearer) doesn't
+    // fire during normal use.  If the token is ever rotated, the next
+    // 401 from any API call clears the cache via handleUnauthorized.
+    await _persist(_CachedToken(
+      token: token,
+      expiresAt: DateTime.now().add(const Duration(days: 365)),
+    ));
+  }
+
   /// Phase 2 — phone-OTP signin, step 1.  Asks the engine to send a
   /// 6-digit code to ``phone`` (E.164).  Returns the channel used so
   /// the caller can render the right hint ("check WhatsApp" vs "check

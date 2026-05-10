@@ -29,13 +29,16 @@ class PhoneSignInPage extends StatefulWidget {
 
 class _PhoneSignInPageState extends State<PhoneSignInPage> {
   final _phoneCtl = TextEditingController();
+  final _adminTokenCtl = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _busy = false;
+  bool _adminPanelOpen = false;
   String? _error;
 
   @override
   void dispose() {
     _phoneCtl.dispose();
+    _adminTokenCtl.dispose();
     super.dispose();
   }
 
@@ -112,6 +115,39 @@ class _PhoneSignInPageState extends State<PhoneSignInPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = 'Anonymous mint failed: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _signInWithAdminToken() async {
+    final token = _adminTokenCtl.text.trim();
+    if (token.isEmpty) {
+      setState(() => _error = 'Paste the engine\'s API_AUTH_TOKEN');
+      return;
+    }
+    final auth = AppConfigScope.of(context).auth;
+    if (auth == null) {
+      setState(() => _error = 'Live backend not configured.');
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await auth.signInWithAdminToken(token);
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const NavShell()),
+        (_) => false,
+      );
+    } on AuthError catch (e) {
+      if (!mounted) return;
+      setState(() => _error = e.message);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = 'Token signin failed: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -219,6 +255,8 @@ class _PhoneSignInPageState extends State<PhoneSignInPage> {
                           ),
                         ),
                 ),
+                const SizedBox(height: LuminSpacing.lg),
+                _ownerAdminTokenPanel(),
                 const Spacer(),
                 if (kDebugMode)
                   TextButton(
@@ -235,6 +273,88 @@ class _PhoneSignInPageState extends State<PhoneSignInPage> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  /// Owner-only bypass: paste the engine's static ``API_AUTH_TOKEN`` and
+  /// skip phone-OTP entirely.  Engine grants ``tier=owner`` for this
+  /// exact bearer string (PR #355).  Collapsible because it's only
+  /// relevant to the one operator on the system; testers see the
+  /// phone field and ignore this section.
+  Widget _ownerAdminTokenPanel() {
+    return LuminCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: () => setState(() => _adminPanelOpen = !_adminPanelOpen),
+            borderRadius: BorderRadius.circular(LuminRadii.sm),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.admin_panel_settings_outlined,
+                  color: LuminColors.textMuted,
+                  size: 16,
+                ),
+                const SizedBox(width: LuminSpacing.sm),
+                const Expanded(
+                  child: Text(
+                    'Sign in with admin token (owner)',
+                    style: TextStyle(
+                      color: LuminColors.textSecondary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+                Icon(
+                  _adminPanelOpen
+                      ? Icons.keyboard_arrow_up
+                      : Icons.keyboard_arrow_down,
+                  color: LuminColors.textMuted,
+                  size: 18,
+                ),
+              ],
+            ),
+          ),
+          if (_adminPanelOpen) ...[
+            const SizedBox(height: LuminSpacing.md),
+            TextField(
+              controller: _adminTokenCtl,
+              autocorrect: false,
+              obscureText: true,
+              enableSuggestions: false,
+              style: const TextStyle(
+                color: LuminColors.textPrimary,
+                fontSize: 13,
+              ),
+              decoration: _inputDecoration('API_AUTH_TOKEN'),
+            ),
+            const SizedBox(height: LuminSpacing.sm),
+            SizedBox(
+              width: double.infinity,
+              child: TextButton(
+                style: TextButton.styleFrom(
+                  backgroundColor: LuminColors.bgElevated,
+                  foregroundColor: LuminColors.accent,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(LuminRadii.sm),
+                  ),
+                ),
+                onPressed: _busy ? null : _signInWithAdminToken,
+                child: const Text(
+                  'Sign in',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
