@@ -18,6 +18,12 @@ jobs:
     name: Build signed APK
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Needed for the auto-release step at the end (creates a GitHub
+    # Release tagged v{run_number} on every main push so the in-app
+    # updater can pick it up).  ``contents: write`` is the only elevated
+    # permission required; everything else stays at the default read.
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
@@ -58,6 +64,17 @@ jobs:
           fi
           grep INTERNET "$MANIFEST" || (echo "FAIL: missing" && exit 1)
 
+      - name: Inject REQUEST_INSTALL_PACKAGES permission for in-app updater
+        run: |
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          if ! grep -q "android.permission.REQUEST_INSTALL_PACKAGES" "$MANIFEST"; then
+            sed -i "s|<application|<uses-permission android:name=\"android.permission.REQUEST_INSTALL_PACKAGES\" />\n    <application|" "$MANIFEST"
+            echo "Added REQUEST_INSTALL_PACKAGES permission"
+          else
+            echo "REQUEST_INSTALL_PACKAGES permission already present"
+          fi
+          grep REQUEST_INSTALL_PACKAGES "$MANIFEST" || (echo "FAIL: missing" && exit 1)
+
       - name: Get dependencies
         run: flutter pub get
 
@@ -92,10 +109,32 @@ jobs:
           path: build/app/outputs/flutter-apk/lumin-*.apk
           retention-days: 30
 
-      - name: Attach APK to GitHub Release
+      - name: Attach APK to existing GitHub Release (manual release event)
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
           files: build/app/outputs/flutter-apk/lumin-*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Auto-create GitHub Release for in-app updater (main push only)
+        # Every push to main produces an immutable release tagged
+        # ``v{run_number}``.  The Lumin app polls
+        # ``/repos/{owner}/{repo}/releases/latest`` and surfaces an
+        # update banner when the latest tag's build number exceeds the
+        # installed PackageInfo.buildNumber.  Skips on PR builds (no
+        # write perms, would 403) and on the manual ``release`` event
+        # (handled by the step above).
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: v${{ github.run_number }}
+          body: |
+            Auto-build #${{ github.run_number }} from ${{ github.sha }}.
+
+            Commit: ${{ github.event.head_commit.message }}
+          files: build/app/outputs/flutter-apk/lumin-*.apk
+          make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
