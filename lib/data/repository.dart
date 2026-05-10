@@ -186,6 +186,46 @@ class PretpSettings {
   }
 }
 
+/// Auto-trade settings — backend ``GET / PUT /api/settings/auto-trade``.
+///
+/// Bundles execution mode + sizing knobs into one round-trip so the
+/// settings page renders the whole live state without separate calls.
+/// All fields nullable on PUT.  Server clamps ``leverageCap`` to 30
+/// (B12 hard cap) and rejects out-of-range values with 422.
+class AutoTradeSettings {
+  const AutoTradeSettings({
+    this.mode,
+    this.positionSizePct,
+    this.leverageCap,
+    this.maxConcurrentPositions,
+  });
+
+  /// "off" | "paper" | "live".
+  final String? mode;
+  final double? positionSizePct;
+  final double? leverageCap;
+  final int? maxConcurrentPositions;
+
+  factory AutoTradeSettings.fromJson(Map<String, dynamic> j) => AutoTradeSettings(
+        mode: j['mode'] as String?,
+        positionSizePct: (j['position_size_pct'] as num?)?.toDouble(),
+        leverageCap: (j['leverage_cap'] as num?)?.toDouble(),
+        maxConcurrentPositions:
+            (j['max_concurrent_positions'] as num?)?.toInt(),
+      );
+
+  Map<String, dynamic> toJsonPartial() {
+    final out = <String, dynamic>{};
+    if (mode != null) out['mode'] = mode;
+    if (positionSizePct != null) out['position_size_pct'] = positionSizePct;
+    if (leverageCap != null) out['leverage_cap'] = leverageCap;
+    if (maxConcurrentPositions != null) {
+      out['max_concurrent_positions'] = maxConcurrentPositions;
+    }
+    return out;
+  }
+}
+
 abstract class LuminRepository {
   /// True when the underlying source is the live engine (vs. mocks).
   bool get isLive;
@@ -214,6 +254,9 @@ abstract class LuminRepository {
   /// Pre-TP grab settings page — load + persist user overrides.
   Future<PretpSettings> fetchPretpSettings();
   Future<PretpSettings> updatePretpSettings(PretpSettings partial);
+  /// Auto-trade settings page — load + persist execution mode + sizing.
+  Future<AutoTradeSettings> fetchAutoTradeSettings();
+  Future<AutoTradeSettings> updateAutoTradeSettings(AutoTradeSettings partial);
   Future<bool> healthCheck();
 }
 
@@ -397,6 +440,33 @@ class MockRepository implements LuminRepository {
     );
     return _mockPretp;
   }
+
+  // Auto-trade settings — same static-field pattern as ``_mockPretp`` so the
+  // class stays const-constructable.
+  static AutoTradeSettings _mockAutoTrade = const AutoTradeSettings(
+    mode: 'paper',
+    positionSizePct: 2.0,
+    leverageCap: 10.0,
+    maxConcurrentPositions: 3,
+  );
+
+  @override
+  Future<AutoTradeSettings> fetchAutoTradeSettings() async => _mockAutoTrade;
+
+  @override
+  Future<AutoTradeSettings> updateAutoTradeSettings(
+    AutoTradeSettings partial,
+  ) async {
+    _mockAutoTrade = AutoTradeSettings(
+      mode: partial.mode ?? _mockAutoTrade.mode,
+      positionSizePct:
+          partial.positionSizePct ?? _mockAutoTrade.positionSizePct,
+      leverageCap: partial.leverageCap ?? _mockAutoTrade.leverageCap,
+      maxConcurrentPositions: partial.maxConcurrentPositions ??
+          _mockAutoTrade.maxConcurrentPositions,
+    );
+    return _mockAutoTrade;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -549,6 +619,23 @@ class HttpRepository implements LuminRepository {
       body: partial.toJsonPartial(),
     )) as Map<String, dynamic>;
     return PretpSettings.fromJson(j);
+  }
+
+  @override
+  Future<AutoTradeSettings> fetchAutoTradeSettings() async {
+    final j = (await client.get('/api/settings/auto-trade')) as Map<String, dynamic>;
+    return AutoTradeSettings.fromJson(j);
+  }
+
+  @override
+  Future<AutoTradeSettings> updateAutoTradeSettings(
+    AutoTradeSettings partial,
+  ) async {
+    final j = (await client.put(
+      '/api/settings/auto-trade',
+      body: partial.toJsonPartial(),
+    )) as Map<String, dynamic>;
+    return AutoTradeSettings.fromJson(j);
   }
 
   // ---- json → mock-class adapters --------------------------------------
