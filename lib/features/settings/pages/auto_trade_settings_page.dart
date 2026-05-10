@@ -1,11 +1,14 @@
 /// Auto-trade settings — execution-mode + sizing controls.
 ///
-/// Mirrors the Trade tab's mode toggle (Off / Paper / Live) but adds the
-/// sizing dials that the Trade tab doesn't expose: position-size %, leverage
-/// cap, and max concurrent positions. State is session-only until the
-/// backend wires up `/api/auto-mode`.
+/// Loads the engine's effective state from ``GET /api/settings/auto-trade``
+/// on init and persists changes via ``PUT`` on save.  Mode change routes
+/// through the same engine path as the Trade tab's mode toggle so flipping
+/// from this page actually switches the engine's auto-execution mode.
 import 'package:flutter/material.dart';
 
+import '../../../data/api_client.dart';
+import '../../../data/app_config.dart';
+import '../../../data/repository.dart';
 import '../../../shared/tokens.dart';
 import '../../../shared/widgets/lumin_card.dart';
 import '../../../shared/widgets/preview_badge.dart';
@@ -18,37 +21,183 @@ class AutoTradeSettingsPage extends StatefulWidget {
 }
 
 class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
-  // 0 = Off, 1 = Paper, 2 = Live
+  // 0 = Off, 1 = Paper, 2 = Live — local UI representation.
   int _mode = 1;
-  double _positionSizePct = 2.0; // % of equity per trade
+  double _positionSizePct = 2.0;
   double _leverageCap = 10.0;     // 1x..30x — B12 hard cap
   int _maxConcurrent = 3;
 
+  bool _loaded = false;
+  bool _saving = false;
+  String? _loadError;
+
+  static const _kModeIndexToString = {0: 'off', 1: 'paper', 2: 'live'};
+  static const _kModeStringToIndex = {'off': 0, 'paper': 1, 'live': 2};
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_loaded) {
+      _load();
+    }
+  }
+
+  Future<void> _load() async {
+    final repo = AppConfigScope.of(context).repo;
+    try {
+      final s = await repo.fetchAutoTradeSettings();
+      if (!mounted) return;
+      setState(() {
+        if (s.mode != null) {
+          _mode = _kModeStringToIndex[s.mode!.toLowerCase()] ?? _mode;
+        }
+        _positionSizePct = s.positionSizePct ?? _positionSizePct;
+        _leverageCap = s.leverageCap ?? _leverageCap;
+        _maxConcurrent = s.maxConcurrentPositions ?? _maxConcurrent;
+        _loaded = true;
+        _loadError = null;
+      });
+    } on ApiError catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loaded = true;
+        _loadError = e.message;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loaded = true;
+        _loadError = '$e';
+      });
+    }
+  }
+
+  Future<void> _save() async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    final repo = AppConfigScope.of(context).repo;
+    final partial = AutoTradeSettings(
+      mode: _kModeIndexToString[_mode],
+      positionSizePct: _positionSizePct,
+      leverageCap: _leverageCap,
+      maxConcurrentPositions: _maxConcurrent,
+    );
+    try {
+      await repo.updateAutoTradeSettings(partial);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Auto-trade settings saved'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } on ApiError catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Save failed: ${e.message}'),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Save failed: $e'),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final scope = AppConfigScope.of(context);
+    final isLive = scope.repo.isLive;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Auto-trade'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.check),
-            onPressed: _save,
-            tooltip: 'Save',
+          if (_saving)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 14),
+              child: SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            )
+          else
+            IconButton(
+              icon: const Icon(Icons.check),
+              onPressed: _loaded && _loadError == null ? _save : null,
+              tooltip: 'Save',
+            ),
+        ],
+      ),
+      body: _bodyFor(isLive),
+    );
+  }
+
+  Widget _bodyFor(bool isLive) {
+    if (!_loaded) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_loadError != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(LuminSpacing.lg),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.cloud_off, color: LuminColors.textMuted, size: 36),
+              const SizedBox(height: LuminSpacing.md),
+              const Text(
+                'Could not load settings',
+                style: TextStyle(
+                  color: LuminColors.textPrimary,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _loadError!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: LuminColors.textSecondary,
+                  fontSize: 12,
+                ),
+              ),
+              const SizedBox(height: LuminSpacing.md),
+              OutlinedButton(
+                onPressed: () {
+                  setState(() {
+                    _loaded = false;
+                    _loadError = null;
+                  });
+                  _load();
+                },
+                child: const Text('Retry'),
+              ),
+            ],
           ),
-        ],
-      ),
-      body: ListView(
-        physics: const BouncingScrollPhysics(),
-        children: [
-          const PreviewBadge(),
-          _modeCard(),
-          const SizedBox(height: LuminSpacing.md),
-          _sizingCard(),
-          const SizedBox(height: LuminSpacing.md),
-          _safetyNote(),
-          const SizedBox(height: LuminSpacing.xl),
-        ],
-      ),
+        ),
+      );
+    }
+    return ListView(
+      physics: const BouncingScrollPhysics(),
+      children: [
+        if (!isLive) const PreviewBadge(),
+        _modeCard(),
+        const SizedBox(height: LuminSpacing.md),
+        _sizingCard(),
+        const SizedBox(height: LuminSpacing.md),
+        _safetyNote(),
+        const SizedBox(height: LuminSpacing.xl),
+      ],
     );
   }
 
@@ -269,15 +418,6 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  void _save() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Saved (session only — backend wiring pending)'),
-        duration: Duration(seconds: 2),
       ),
     );
   }
