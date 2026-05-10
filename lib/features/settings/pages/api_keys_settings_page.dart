@@ -1,17 +1,19 @@
 /// API keys + backend connection.
 ///
-/// Backend connection is now zero-config: the app authenticates anonymously
-/// on first launch and silently refreshes thereafter.  This page only
-/// exposes Mock/Live toggle, base URL (rarely changed), connection status,
-/// and a "Reset connection" button that wipes the on-device JWT (mostly a
-/// debugging aid — the next API call re-mints automatically anyway).
+/// Phase 2: backend connection is phone-OTP authenticated.  This page
+/// exposes Mock/Live toggle, base URL (rarely changed), connection
+/// reachability test (hits the unauthenticated ``/api/health``), and a
+/// "Sign out" button that wipes the on-device JWT and routes the user
+/// back to the phone-signin page.
 ///
 /// Binance API keys are unchanged — separate concern, not Lumin auth.
-import 'package:flutter/material.dart';
+import 'dart:convert';
 
-import '../../../data/api_client.dart';
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+
 import '../../../data/app_config.dart';
-import '../../../data/auth_service.dart';
+import '../../../features/auth/pages/phone_signin_page.dart';
 import '../../../shared/tokens.dart';
 import '../../../shared/widgets/lumin_card.dart';
 import '../../../shared/widgets/preview_badge.dart';
@@ -242,7 +244,7 @@ class _ApiKeysSettingsPageState extends State<ApiKeysSettingsPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Reset connection',
+                    'Sign out',
                     style: TextStyle(
                       color: LuminColors.textPrimary,
                       fontSize: 14,
@@ -251,7 +253,7 @@ class _ApiKeysSettingsPageState extends State<ApiKeysSettingsPage> {
                   ),
                   SizedBox(height: 2),
                   Text(
-                    'Wipes the cached auth token. Next request re-authenticates.',
+                    'Wipes the cached auth token and returns to phone signin.',
                     style: TextStyle(
                       color: LuminColors.textSecondary,
                       fontSize: 11,
@@ -263,7 +265,7 @@ class _ApiKeysSettingsPageState extends State<ApiKeysSettingsPage> {
             ),
             TextButton(
               onPressed: _liveMode ? _resetConnection : null,
-              child: const Text('Reset'),
+              child: const Text('Sign out'),
             ),
           ],
         ),
@@ -281,29 +283,37 @@ class _ApiKeysSettingsPageState extends State<ApiKeysSettingsPage> {
       _testing = true;
       _testResult = null;
     });
-    final auth = AuthService(baseUrl: url);
-    final client = LuminApiClient(baseUrl: url, auth: auth);
+    // Phase 2: test against ``/api/health`` rather than ``/api/pulse`` so
+    // the user can verify reachability *before* phone-signin completes.
+    // /api/health is unauthenticated by design (Docker / k8s probe path);
+    // /api/pulse now requires a valid JWT, which a not-yet-signed-in
+    // user wouldn't have.
+    final httpClient = http.Client();
     try {
-      final pulse = await client.get('/api/pulse');
-      if (pulse is! Map) {
-        if (!mounted) return;
+      final uri = Uri.parse('${_trimSlash(url)}/api/health');
+      final resp = await httpClient
+          .get(uri, headers: const {'Accept': 'application/json'})
+          .timeout(const Duration(seconds: 8));
+      if (!mounted) return;
+      if (resp.statusCode != 200) {
         setState(() {
           _testing = false;
-          _testResult = 'ERR: unexpected /api/pulse response';
+          _testResult = 'ERR: /api/health returned ${resp.statusCode}';
         });
         return;
       }
-      if (!mounted) return;
+      final body = jsonDecode(resp.body);
+      if (body is! Map) {
+        setState(() {
+          _testing = false;
+          _testResult = 'ERR: unexpected /api/health response';
+        });
+        return;
+      }
       setState(() {
         _testing = false;
         _testResult =
-            'OK — auto-authenticated. Engine ${pulse['status']}, regime ${pulse['regime']}.';
-      });
-    } on ApiError catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _testing = false;
-        _testResult = 'ERR: ${e.message}';
+            'OK — engine v${body['version']}, uptime ${(body['uptime_seconds'] as num).toInt()}s.';
       });
     } catch (e) {
       if (!mounted) return;
@@ -312,19 +322,21 @@ class _ApiKeysSettingsPageState extends State<ApiKeysSettingsPage> {
         _testResult = 'ERR: $e';
       });
     } finally {
-      client.dispose();
-      auth.dispose();
+      httpClient.close();
     }
   }
+
+  static String _trimSlash(String s) =>
+      s.endsWith('/') ? s.substring(0, s.length - 1) : s;
 
   Future<void> _resetConnection() async {
     await AppConfigScope.of(context).resetConnection();
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Connection reset. Next request will re-authenticate.'),
-        duration: Duration(seconds: 2),
-      ),
+    // Phase 2: cleared token → punt back to phone-signin so the user
+    // gets a clean re-signin path rather than silently re-minting.
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const PhoneSignInPage()),
+      (_) => false,
     );
   }
 

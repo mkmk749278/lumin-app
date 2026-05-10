@@ -1,18 +1,33 @@
-/// Auth service — anonymous JWT lifecycle.
+/// Auth service — JWT lifecycle.
 ///
-/// First launch: posts to ``/api/auth/anonymous`` and stores the JWT in
-/// flutter_secure_storage (encrypted at-rest).  Subsequent calls reuse
-/// the cached token until it's within the refresh window or has expired.
+/// Phase 2 introduces phone-OTP authentication.  First launch shows a
+/// phone-signin page that calls :func:`requestOtp` then
+/// :func:`verifyOtpAndStore`.  The resulting user-id JWT is persisted to
+/// flutter_secure_storage (encrypted at-rest) and reused/refreshed
+/// transparently across app launches.
 ///
 /// On a 401 from any API call, ``handleUnauthorized()`` clears the cached
-/// JWT and forces the next request to re-mint anonymously.  This makes
-/// server-side secret rotation invisible to the user — they see at most
-/// a 200ms blip on one request.
+/// JWT.  In production this surfaces as a sign-in re-prompt at the next
+/// boot; in :const:`kDebugMode` the dev-bypass path on the phone-signin
+/// page can re-mint an anonymous JWT.
+///
+/// The engine still supports ``/api/auth/anonymous`` post-Phase-2 — it
+/// returns ``tier=all-access``.  We expose :func:`mintAnonymous` for
+/// the dev-bypass path on the phone-signin page (debug builds) so the
+/// CI / manual-test workflow doesn't require a working OTP delivery
+/// stack.
 import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
+
+/// Result of a successful ``POST /api/auth/request-otp``.
+class OtpRequestResult {
+  OtpRequestResult({required this.channelUsed, required this.expiresInSeconds});
+  final String channelUsed; // "whatsapp" | "sms" | "log"
+  final int expiresInSeconds;
+}
 
 class AuthError implements Exception {
   AuthError(this.message);
@@ -108,6 +123,77 @@ class AuthService {
   /// Hard reset — used by Settings → "Reset connection".
   Future<void> signOut() async {
     await handleUnauthorized();
+  }
+
+  /// Quick boot-time check: does the device have a (non-corrupt, possibly
+  /// expired) token in secure storage?  Used by main.dart to decide
+  /// whether to show the phone-signin page on launch.  An expired token
+  /// counts as "stored" — the in-flight refresh path will renew it; if
+  /// refresh fails the user falls back to phone-signin via the 401 path.
+  Future<bool> hasStoredToken() async {
+    if (_cached != null) return true;
+    final loaded = await _loadFromStorage();
+    if (loaded == null) return false;
+    _cached = loaded;
+    return true;
+  }
+
+  /// Mint a fresh anonymous JWT (``sub=device-<uuid>``, ``tier=all-access``).
+  /// Public so the debug-build phone-signin page can offer a "skip" path
+  /// for CI / manual testing without a working OTP delivery stack.
+  Future<void> mintAnonymous() => _mintAnonymous();
+
+  /// Phase 2 — phone-OTP signin, step 1.  Asks the engine to send a
+  /// 6-digit code to ``phone`` (E.164).  Returns the channel used so
+  /// the caller can render the right hint ("check WhatsApp" vs "check
+  /// SMS" vs "see logs").  Throws :class:`AuthError` on 429
+  /// (rate-limited), 502 (delivery failed), 503 (auth not configured).
+  Future<OtpRequestResult> requestOtp(String phone) async {
+    final uri = Uri.parse('${_trimSlash(baseUrl)}/api/auth/request-otp');
+    final resp = await _client
+        .post(
+          uri,
+          headers: const {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({'phone': phone}),
+        )
+        .timeout(const Duration(seconds: 10));
+    if (resp.statusCode != 200) {
+      throw AuthError(
+        'request-otp failed (${resp.statusCode}): ${_decodeDetail(resp.body)}',
+      );
+    }
+    final j = jsonDecode(resp.body) as Map<String, dynamic>;
+    return OtpRequestResult(
+      channelUsed: j['channel_used'] as String,
+      expiresInSeconds: (j['expires_in_seconds'] as num).toInt(),
+    );
+  }
+
+  /// Phase 2 — phone-OTP signin, step 2.  Submits ``code`` for ``phone``;
+  /// on success the engine returns a user-id JWT carrying ``sub=user-<id>``
+  /// and ``tier=<paid|free|owner>``.  We persist it the same way as the
+  /// anonymous path, so all subsequent API calls flow unchanged.
+  Future<void> verifyOtpAndStore(String phone, String code) async {
+    final uri = Uri.parse('${_trimSlash(baseUrl)}/api/auth/verify-otp');
+    final resp = await _client
+        .post(
+          uri,
+          headers: const {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({'phone': phone, 'code': code}),
+        )
+        .timeout(const Duration(seconds: 10));
+    if (resp.statusCode != 200) {
+      throw AuthError(
+        'verify-otp failed (${resp.statusCode}): ${_decodeDetail(resp.body)}',
+      );
+    }
+    await _persist(_parseTokenResponse(resp.body));
   }
 
   // ---- internals --------------------------------------------------------
