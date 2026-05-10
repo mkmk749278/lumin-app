@@ -4,6 +4,7 @@ import '../features/pulse/pulse_page.dart';
 import '../features/settings/settings_page.dart';
 import '../features/signals/signals_page.dart';
 import '../features/trade/trade_page.dart';
+import '../features/update/update_banner.dart';
 
 class NavShell extends StatefulWidget {
   const NavShell({super.key});
@@ -34,7 +35,14 @@ class _NavShellState extends State<NavShell> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(index: _index, children: _pages),
+      body: Column(
+        children: [
+          // Update banner sits above all tabs — sticky-on-top, ignored
+          // when no newer GitHub Release is available.
+          const UpdateBanner(),
+          Expanded(child: IndexedStack(index: _index, children: _pages)),
+        ],
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),
