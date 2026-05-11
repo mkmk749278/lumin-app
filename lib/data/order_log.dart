@@ -32,6 +32,10 @@ class OrderLogEntry {
     required this.placedAt,
     required this.testnet,
     this.avgFillPrice,
+    this.executionMode = 'manual',
+    this.entryPriceTarget,
+    this.slPrice,
+    this.tpPrice,
   });
 
   /// Engine's signal_id — the idempotency key.  Also wired into
@@ -44,22 +48,51 @@ class OrderLogEntry {
   final double quantity;
 
   /// Binance's broker-side order ID for the entry market order.  Null
-  /// when the entry placement itself failed.
+  /// when the entry placement itself failed; also null for paper-mode
+  /// auto-trades (no broker call was made).
   final int? entryOrderId;
 
   /// Reduce-only stop-loss trigger order.  Null when SL placement
-  /// failed after entry succeeded (UX surfaces this with a warning).
+  /// failed after entry succeeded (UX surfaces this with a warning),
+  /// or for paper-mode entries.
   final int? stopOrderId;
 
-  /// Take-profit trigger order at TP1.  Null when TP placement failed.
+  /// Take-profit trigger order at TP1.  Null when TP placement failed
+  /// or for paper-mode entries.
   final int? tpOrderId;
 
   final DateTime placedAt;
   final bool testnet;
 
   /// avgPrice from the entry order response.  Useful for "Taken @ $X"
-  /// display next to the signal once filled.
+  /// display next to the signal once filled.  For paper entries this
+  /// is the signal's nominal entry price.
   final double? avgFillPrice;
+
+  /// How this entry was triggered:
+  ///   * ``manual``    — user tapped Take Signal on the detail sheet
+  ///                     (Phase 3b-1).  Default for backwards-compat
+  ///                     with already-persisted entries.
+  ///   * ``auto-live`` — :class:`AutoTradeWatcher` fired this on new
+  ///                     signal arrival; real Binance orders placed.
+  ///   * ``auto-paper`` — watcher would-have-fired; no broker call.
+  ///                     Used for trust-building before flipping to
+  ///                     live.
+  final String executionMode;
+
+  /// Nominal entry price from the signal.  For manual entries we have
+  /// ``avgFillPrice`` post-fill; for paper entries we record the
+  /// signal's entry as a notional "if you'd taken it" price.
+  final double? entryPriceTarget;
+
+  /// Rounded SL price actually sent to Binance (or recorded for paper).
+  final double? slPrice;
+
+  /// Rounded TP1 price actually sent (or recorded for paper).
+  final double? tpPrice;
+
+  bool get isPaper => executionMode == 'auto-paper';
+  bool get isAuto => executionMode.startsWith('auto-');
 
   Map<String, dynamic> toJson() => {
         'signal_id': signalId,
@@ -72,6 +105,10 @@ class OrderLogEntry {
         'placed_at': placedAt.toIso8601String(),
         'testnet': testnet,
         if (avgFillPrice != null) 'avg_fill_price': avgFillPrice,
+        'execution_mode': executionMode,
+        if (entryPriceTarget != null) 'entry_price_target': entryPriceTarget,
+        if (slPrice != null) 'sl_price': slPrice,
+        if (tpPrice != null) 'tp_price': tpPrice,
       };
 
   factory OrderLogEntry.fromJson(Map<String, dynamic> j) => OrderLogEntry(
@@ -85,6 +122,10 @@ class OrderLogEntry {
         placedAt: DateTime.parse(j['placed_at'] as String),
         testnet: j['testnet'] as bool? ?? false,
         avgFillPrice: (j['avg_fill_price'] as num?)?.toDouble(),
+        executionMode: j['execution_mode'] as String? ?? 'manual',
+        entryPriceTarget: (j['entry_price_target'] as num?)?.toDouble(),
+        slPrice: (j['sl_price'] as num?)?.toDouble(),
+        tpPrice: (j['tp_price'] as num?)?.toDouble(),
       );
 }
 
