@@ -1,10 +1,14 @@
 /// Trade — auto-execution control + activity log.
 ///
-/// FutureBuilder against the live repo.  Mode toggle calls
-/// ``repo.setAutoMode(...)`` against the engine; on success the page
-/// refetches positions and activity.  The engine refuses mode changes
-/// with open positions or missing creds — those refusals surface as a
-/// SnackBar with the engine's reason.
+/// FutureBuilder against the live repo.  The Off/Paper/Live mode
+/// toggle writes the **per-user** auto-trade setting via
+/// ``repo.updateUserAutoTradeSettings`` (Phase 2 endpoint, open to
+/// every signed-in tier) and kicks the AutoTradeWatcher (Phase 3b-2)
+/// to pick up the new mode without waiting for its next tick.
+///
+/// The Trade tab does NOT flip the engine-wide auto-mode — that's
+/// owner-only and lives on Settings → Engine defaults.  Touching
+/// the engine-wide endpoint from a non-owner tier would 403.
 import 'package:flutter/material.dart';
 
 import '../../data/app_config.dart';
@@ -18,10 +22,19 @@ import '../../shared/widgets/preview_badge.dart';
 class _TradeBundle {
   const _TradeBundle({
     required this.autoMode,
+    required this.userSettings,
     required this.positions,
     required this.activity,
   });
+  /// Engine-wide auto-mode (read by all tiers).  Drives the P&L card
+  /// + open positions until Phase 4 ships per-user PnL.
   final AutoModeStatus autoMode;
+
+  /// Per-user override (Phase 2).  Drives the mode pill selection +
+  /// the AutoTradeWatcher (Phase 3b-2).  ``mode`` falls back to
+  /// engine-wide via ``using_defaults`` if the user hasn't picked one.
+  final AutoTradeSettings userSettings;
+
   final List<MockPosition> positions;
   final List<MockActivityEvent> activity;
 }
@@ -53,11 +66,18 @@ class _TradePageState extends State<TradePage> {
       repo.fetchAutoMode(),
       repo.fetchPositions(),
       repo.fetchActivity(limit: 30),
+      repo.fetchUserAutoTradeSettings().catchError(
+        // Anonymous device JWTs → 404.  Fall back to "no overrides"
+        // so the page still renders; the mode pill follows engine
+        // until the user signs in with phone.
+        (_) => const AutoTradeSettings(usingDefaults: true),
+      ),
     ]);
     return _TradeBundle(
       autoMode: results[0] as AutoModeStatus,
       positions: (results[1] as List).cast<MockPosition>(),
       activity: (results[2] as List).cast<MockActivityEvent>(),
+      userSettings: results[3] as AutoTradeSettings,
     );
   }
 
@@ -67,12 +87,104 @@ class _TradePageState extends State<TradePage> {
     await _future;
   }
 
+  /// Real-money confirmation modal before flipping per-user mode →
+  /// LIVE.  Same gate as the Auto-trade settings page (Phase 3b-2),
+  /// inlined here so both entry points to live-mode get the same
+  /// explicit opt-in.
+  Future<bool?> _confirmLiveFlip() {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: LuminColors.bgCard,
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded,
+                color: LuminColors.loss, size: 20),
+            SizedBox(width: LuminSpacing.sm),
+            Expanded(
+              child: Text(
+                'Enable LIVE auto-trade?',
+                style: TextStyle(
+                  color: LuminColors.textPrimary,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Lumin will place real Binance Futures orders without '
+              'per-signal confirmation while the app is open.',
+              style: TextStyle(
+                color: LuminColors.textPrimary,
+                fontSize: 13,
+                height: 1.4,
+              ),
+            ),
+            SizedBox(height: LuminSpacing.sm),
+            Text(
+              '• Sized by your position-size % × leverage cap\n'
+              '• Idempotent per signal (each fires at most once)\n'
+              '• Auto-trade pauses when the app backgrounds\n'
+              '• Tap the AUTO banner to stop immediately',
+              style: TextStyle(
+                color: LuminColors.textSecondary,
+                fontSize: 12,
+                height: 1.5,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: LuminColors.textSecondary),
+            ),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: LuminColors.loss,
+              foregroundColor: LuminColors.bgDeep,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text(
+              'Enable LIVE',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _changeMode(String newMode) async {
     if (_switchingMode) return;
-    final repo = AppConfigScope.of(context).repo;
+    final scope = AppConfigScope.of(context);
+    final repo = scope.repo;
+    // Real-money confirmation before LIVE — same gate as the
+    // Auto-trade settings page (3b-2).  Off / Paper bypass.
+    if (newMode == 'live') {
+      final ok = await _confirmLiveFlip();
+      if (ok != true) return;
+    }
     setState(() => _switchingMode = true);
     try {
-      await repo.setAutoMode(newMode);
+      // Per-user mode flip (Phase 2 endpoint).  Every signed-in tier
+      // can write its own profile — no 403 path here.  The engine-
+      // wide mode lives on Settings → Engine defaults (owner-only).
+      await repo.updateUserAutoTradeSettings(
+        AutoTradeSettings(mode: newMode),
+      );
+      // Kick the watcher so the new mode takes effect immediately.
+      // Same pattern as the Auto-trade settings page.
+      await scope.autoTradeWatcher.refreshSettings();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -123,10 +235,34 @@ class _TradePageState extends State<TradePage> {
               children: [
                 if (!scope.repo.isLive) const PreviewBadge(),
                 _ModeToggle(
-                  mode: _modeIndex(data.autoMode.mode),
+                  // Pill reflects the user's per-user mode (what the
+                  // AutoTradeWatcher will act on).  Falls back to the
+                  // engine-wide mode when the user has no override
+                  // (usingDefaults == true).
+                  mode: _modeIndex(
+                    data.userSettings.mode ?? data.autoMode.mode,
+                  ),
                   switching: _switchingMode,
                   onChanged: (i) => _changeMode(_modeName(i)),
                 ),
+                if (data.userSettings.mode != null &&
+                    data.userSettings.mode != data.autoMode.mode)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: LuminSpacing.lg,
+                      vertical: LuminSpacing.xs,
+                    ),
+                    child: Text(
+                      'Engine globally on ${data.autoMode.mode?.toUpperCase() ?? "—"}; '
+                      'your auto-trade overrides to '
+                      '${data.userSettings.mode!.toUpperCase()}.',
+                      style: const TextStyle(
+                        color: LuminColors.textMuted,
+                        fontSize: 11,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
                 const SizedBox(height: LuminSpacing.md),
                 _ModePnlCard(autoMode: data.autoMode),
                 const SizedBox(height: LuminSpacing.md),
