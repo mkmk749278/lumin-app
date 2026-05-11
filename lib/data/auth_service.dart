@@ -320,6 +320,36 @@ class AuthService {
   /// 403 per PR #355).
   String? currentTier() => _cached?.tier;
 
+  /// Current user_id parsed from the JWT subject (``user-<id>``), or
+  /// null when the cached token is anonymous (``device-<uuid>``) or
+  /// missing.  Used by per-user secure-storage namespaces (Phase 3 —
+  /// Binance keys) so signing out as user A and signing back in as
+  /// user B doesn't leak A's locally-stored keys to B.
+  ///
+  /// Decodes the JWT payload without verifying the signature — we
+  /// already trust this token (we minted it from the engine and it
+  /// passed signature verification on every API call).  The risk of
+  /// trusting the local sub is bounded: worst case is we read a
+  /// secure-storage entry under the wrong user_id, which the engine
+  /// would 403 on if it actually mattered.
+  int? currentUserId() {
+    final c = _cached;
+    if (c == null) return null;
+    try {
+      final parts = c.token.split('.');
+      if (parts.length != 3) return null;
+      final padded =
+          parts[1] + '=' * ((4 - parts[1].length % 4) % 4);
+      final payload = jsonDecode(utf8.decode(base64Url.decode(padded)))
+          as Map<String, dynamic>;
+      final sub = payload['sub'] as String?;
+      if (sub == null || !sub.startsWith('user-')) return null;
+      return int.tryParse(sub.substring('user-'.length));
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Current ``needs_onboarding`` value from the cached JWT.  False
   /// (don't push SignupPage) when nothing is cached so the existing
   /// signed-in user's first launch after this build doesn't get

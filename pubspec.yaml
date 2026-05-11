@@ -1,7 +1,7 @@
 name: lumin
 description: "Lumin — AI Crypto Trading. Mobile app for 360 Crypto Eye signals."
 publish_to: "none"
-version: 0.0.16+16
+version: 0.0.17+17
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -20,6 +20,10 @@ dependencies:
   open_filex: ^4.5.0
   permission_handler: ^11.3.1
   path_provider: ^2.1.4
+  # Phase 3 — HMAC-SHA256 signing for Binance Futures REST.  The engine
+  # never holds user Binance keys; the app fires the user's order with
+  # keys held in flutter_secure_storage.
+  crypto: ^3.0.3
 
 dev_dependencies:
   flutter_test:
