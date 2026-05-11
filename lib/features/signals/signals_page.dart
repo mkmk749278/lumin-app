@@ -14,6 +14,7 @@ import '../../shared/format.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
 import '../../shared/widgets/preview_badge.dart';
+import 'take_signal_sheet.dart';
 
 enum _SignalFilter { all, open, closed }
 
@@ -685,7 +686,49 @@ class _SignalCard extends StatelessWidget {
             _DetailRow('Confidence',
                 '${sig.confidence.toStringAsFixed(1)} (${sig.tier})'),
             _DetailRow('Status', sig.status),
+            // Take Signal — Phase 3b-1 manual order placement.  Visible
+            // only when the signal is still actionable (ACTIVE status)
+            // — TP/SL/expired signals are read-only.  Inside the sheet
+            // the user confirms again before any order fires, and we
+            // short-circuit on a prior signal_id (idempotency).
+            if (sig.status == 'ACTIVE') ...[
+              const SizedBox(height: LuminSpacing.lg),
+              _TakeSignalAction(sig: sig),
+            ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// "Take signal" CTA on the detail sheet.  Opens the review sheet
+/// (sized to wallet equity + per-user settings) on tap; the user
+/// confirms there before any Binance call fires.
+class _TakeSignalAction extends StatelessWidget {
+  const _TakeSignalAction({required this.sig});
+  final MockSignal sig;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      child: FilledButton.icon(
+        style: FilledButton.styleFrom(
+          backgroundColor: LuminColors.accent,
+          foregroundColor: LuminColors.bgDeep,
+          padding: const EdgeInsets.symmetric(vertical: LuminSpacing.md),
+        ),
+        onPressed: () async {
+          // Close the detail sheet first so the take sheet stacks
+          // cleanly without an awkward double-modal.
+          Navigator.of(context).pop();
+          await showTakeSignalSheet(context, signal: sig);
+        },
+        icon: const Icon(Icons.bolt, size: 18),
+        label: const Text(
+          'Take signal',
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
         ),
       ),
     );

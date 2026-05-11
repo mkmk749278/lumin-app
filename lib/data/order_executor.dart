@@ -1,0 +1,258 @@
+/// Order execution — composes a Binance Futures order triplet from a
+/// signal and the user's per-user settings.
+///
+/// Phase 3b-1.  No autonomy: the caller (TakeSignalSheet) decides
+/// when to invoke ``placeFromSignal``; this module only does the
+/// composition + the three REST calls + the idempotency wrap.
+///
+/// Order shape (single entry + single bracket):
+///
+///   1. Market entry order (BUY for LONG, SELL for SHORT).
+///   2. Stop-Market trigger order at the signal's SL.  ``closePosition=true``
+///      so it flattens any quantity that's open — including a future DCA
+///      add — without us having to track partial fills.
+///   3. Take-Profit-Market trigger order at the signal's TP1.
+///      ``reduceOnly=true`` + explicit qty so a runner can carry past TP1.
+///
+/// We do NOT cancel previous orders on the same symbol or check for
+/// existing positions — that's an explicit owner trade-off for v0:
+/// the user takes ONE signal at a time per symbol, and they're in
+/// the confirm loop.  Phase 3b-2 / 3c will add cross-position-state
+/// awareness when autonomy is wired.
+///
+/// Returns an ``ExecutionResult`` that lifts the three broker calls'
+/// outcomes into one place so the caller can render success or partial
+/// failure cleanly ("entry filled but SL placement failed — go to
+/// Binance and place it manually").
+library;
+
+import 'binance_client.dart';
+import 'binance_keys_service.dart';
+import 'mock_data.dart';
+import 'order_log.dart';
+import 'repository.dart';
+
+class ExecutionResult {
+  const ExecutionResult({
+    required this.success,
+    required this.message,
+    this.entry,
+    this.alreadyTaken,
+  });
+
+  /// True when entry+SL+TP all placed.  False on partial or full
+  /// failure; ``message`` carries the user-facing detail.
+  final bool success;
+
+  /// User-facing summary.  Caller surfaces this in a SnackBar.
+  final String message;
+
+  /// Recorded log entry on success (or partial — the log captures
+  /// what got placed so a follow-up can patch the rest).  Null on
+  /// hard failure where nothing was placed.
+  final OrderLogEntry? entry;
+
+  /// Set when the idempotency log already had an entry for this
+  /// signal_id — the caller can short-circuit and show "already
+  /// taken @ $X" instead of re-firing.
+  final OrderLogEntry? alreadyTaken;
+}
+
+class OrderExecutor {
+  OrderExecutor({OrderLogService? logService})
+      : _logService = logService ?? OrderLogService();
+
+  final OrderLogService _logService;
+
+  /// Compose + place the order triplet for a signal.  ``signal`` is
+  /// the engine's view (entry / SL / TP1 / direction / symbol);
+  /// ``keys`` is the user's saved Binance credentials; ``settings``
+  /// is their per-user auto-trade overrides.  ``equity`` is the
+  /// user's current Binance wallet balance (from /fapi/v2/account)
+  /// — used to size from ``positionSizePct``.
+  Future<ExecutionResult> placeFromSignal({
+    required int userId,
+    required MockSignal signal,
+    required BinanceKeys keys,
+    required AutoTradeSettings settings,
+    required double equity,
+  }) async {
+    // Idempotency first — never double-place.
+    final existing = await _logService.entryFor(userId, signal.id);
+    if (existing != null) {
+      return ExecutionResult(
+        success: true,
+        alreadyTaken: existing,
+        message: 'Already taken — order ${existing.entryOrderId} '
+            'placed ${_age(existing.placedAt)} ago.',
+      );
+    }
+
+    // Required settings.  v0 enforces explicit values; defaults from
+    // engine-wide are inherited at the API layer so this should
+    // always be non-null when the user has clicked through Pre-TP /
+    // Auto-trade settings at least once.
+    final sizingPct = settings.positionSizePct;
+    final leverageReq = settings.leverageCap;
+    if (sizingPct == null || sizingPct <= 0) {
+      return _fail('Set position size on the Auto-trade page first.');
+    }
+    if (leverageReq == null || leverageReq <= 0) {
+      return _fail('Set leverage cap on the Auto-trade page first.');
+    }
+    final leverageHardCapped = leverageReq.clamp(1.0, 30.0).toInt();
+
+    // Compose order params.
+    final side = signal.direction == 'LONG' ? 'BUY' : 'SELL';
+    final closeSide = side == 'BUY' ? 'SELL' : 'BUY';
+
+    final client = BinanceClient(
+      apiKey: keys.apiKey,
+      apiSecret: keys.apiSecret,
+      testnet: keys.testnet,
+    );
+
+    try {
+      // Symbol filters — required for qty + price rounding to avoid
+      // broker rejects.
+      final filters = await client.getSymbolFilters(signal.symbol);
+
+      // Size from equity × pct × leverage / price.  Subscriber default
+      // leverage is 10x per OWNER_BRIEF B11; we use the user's
+      // configured cap as the actual leverage for the position.
+      final notional = equity * (sizingPct / 100.0) * leverageHardCapped;
+      final rawQty = notional / signal.entry;
+      final qty = filters.roundQty(rawQty);
+      if (qty <= 0.0) {
+        return _fail(
+          'Size too small: ${rawQty.toStringAsFixed(6)} ${signal.symbol} '
+          'rounds below minQty (${filters.minQty}). Increase position '
+          'size or pick a higher-priced pair.',
+        );
+      }
+      if (qty * signal.entry < filters.minNotional) {
+        return _fail(
+          'Notional too small: ${(qty * signal.entry).toStringAsFixed(2)} USDT '
+          '< minNotional ${filters.minNotional} USDT. Increase position size.',
+        );
+      }
+
+      // Round SL down (LONG) or up (SHORT) so the trigger sits at a
+      // valid tick.  Same for TP in the opposite direction.
+      final slPrice = filters.roundPrice(
+        signal.sl,
+        floor: signal.direction == 'LONG',
+      );
+      final tpPrice = filters.roundPrice(
+        signal.tp1,
+        floor: signal.direction == 'SHORT',
+      );
+
+      // Set leverage before the entry order — Binance requires the
+      // per-symbol leverage to match the order's implicit leverage,
+      // and a wrong call here returns -4028 "Leverage XX is not
+      // valid".
+      await client.setLeverage(signal.symbol, leverageHardCapped);
+
+      // 1. Market entry.  signal_id as client order ID = idempotency
+      //    at the broker layer too.
+      final entryClientId = 'lumin-entry-${signal.id}';
+      final entryOrder = await client.createMarketOrder(
+        symbol: signal.symbol,
+        side: side,
+        quantity: qty,
+        clientOrderId: entryClientId,
+      );
+      final entryId = (entryOrder['orderId'] as num?)?.toInt();
+      final avgPrice = (entryOrder['avgPrice'] as num?)?.toDouble() ?? 0.0;
+
+      // 2. Stop-Loss — closePosition flattens the lot at trigger.
+      int? stopId;
+      String? slError;
+      try {
+        final stopOrder = await client.createStopOrder(
+          symbol: signal.symbol,
+          side: closeSide,
+          stopType: 'STOP_MARKET',
+          stopPrice: slPrice,
+          closePosition: true,
+          clientOrderId: 'lumin-sl-${signal.id}',
+        );
+        stopId = (stopOrder['orderId'] as num?)?.toInt();
+      } on BinanceError catch (e) {
+        slError = 'SL placement failed: ${e.message}';
+      }
+
+      // 3. Take-Profit — reduceOnly + explicit qty so a runner can
+      //    carry past TP1 if Phase 3b-2 adds laddered TP2/TP3.
+      int? tpId;
+      String? tpError;
+      try {
+        final tpOrder = await client.createStopOrder(
+          symbol: signal.symbol,
+          side: closeSide,
+          stopType: 'TAKE_PROFIT_MARKET',
+          stopPrice: tpPrice,
+          quantity: qty,
+          clientOrderId: 'lumin-tp1-${signal.id}',
+        );
+        tpId = (tpOrder['orderId'] as num?)?.toInt();
+      } on BinanceError catch (e) {
+        tpError = 'TP placement failed: ${e.message}';
+      }
+
+      final entry = OrderLogEntry(
+        signalId: signal.id,
+        symbol: signal.symbol,
+        side: side,
+        quantity: qty,
+        entryOrderId: entryId,
+        stopOrderId: stopId,
+        tpOrderId: tpId,
+        placedAt: DateTime.now().toUtc(),
+        testnet: keys.testnet,
+        avgFillPrice: avgPrice > 0 ? avgPrice : null,
+      );
+      await _logService.record(userId, entry);
+
+      if (slError != null || tpError != null) {
+        // Partial success: entry placed but bracket incomplete.  Caller
+        // surfaces a clear warning so the user can go fix it on Binance.
+        return ExecutionResult(
+          success: false,
+          entry: entry,
+          message: [
+            'Entry placed (qty $qty @ ~${avgPrice.toStringAsFixed(2)})',
+            if (slError != null) slError,
+            if (tpError != null) tpError,
+            'Place missing leg(s) manually on Binance.',
+          ].join('\n'),
+        );
+      }
+      return ExecutionResult(
+        success: true,
+        entry: entry,
+        message: 'Order placed: $qty ${signal.symbol} '
+            '@ ${avgPrice > 0 ? "\$${avgPrice.toStringAsFixed(4)}" : "market"}, '
+            'SL ${slPrice.toStringAsFixed(4)}, TP1 ${tpPrice.toStringAsFixed(4)}.',
+      );
+    } on BinanceError catch (e) {
+      return _fail('${e.message} (code ${e.code ?? "?"})');
+    } catch (e) {
+      return _fail('$e');
+    } finally {
+      client.dispose();
+    }
+  }
+
+  ExecutionResult _fail(String message) =>
+      ExecutionResult(success: false, message: message);
+
+  String _age(DateTime t) {
+    final delta = DateTime.now().toUtc().difference(t.toUtc());
+    if (delta.inMinutes < 1) return '${delta.inSeconds}s';
+    if (delta.inHours < 1) return '${delta.inMinutes}m';
+    if (delta.inDays < 1) return '${delta.inHours}h';
+    return '${delta.inDays}d';
+  }
+}

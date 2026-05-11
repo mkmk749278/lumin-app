@@ -10,7 +10,7 @@ import '../../../shared/widgets/lumin_card.dart';
 class AboutPage extends StatelessWidget {
   const AboutPage({super.key});
 
-  static const _version = '0.0.17';
+  static const _version = '0.0.18';
   static const _build = 'live';
 
   @override
