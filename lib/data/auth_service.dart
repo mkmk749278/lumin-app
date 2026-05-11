@@ -42,9 +42,16 @@ class AuthError implements Exception {
 const int _kRefreshLeadSeconds = 86400;
 
 class _CachedToken {
-  _CachedToken({required this.token, required this.expiresAt});
+  _CachedToken({required this.token, required this.expiresAt, this.tier});
   final String token;
   final DateTime expiresAt;
+  // `tier` from the JWT payload (``owner`` / ``paid`` / ``free`` /
+  // ``all-access``).  Surfaced by [AuthService.currentTier] so UI layers
+  // can hide write controls on tier-gated endpoints (engine returns 403
+  // for non-owner writes per PR #355; the app should not display the
+  // Save button to a tier that can't use it).  Nullable for backwards
+  // compatibility with persisted tokens from before this field shipped.
+  final String? tier;
 
   bool get isExpired => DateTime.now().isAfter(expiresAt);
   bool get needsRefresh =>
@@ -53,11 +60,13 @@ class _CachedToken {
   Map<String, dynamic> toJson() => {
         'token': token,
         'expiresAt': expiresAt.toIso8601String(),
+        if (tier != null) 'tier': tier,
       };
 
   static _CachedToken fromJson(Map<String, dynamic> j) => _CachedToken(
         token: j['token'] as String,
         expiresAt: DateTime.parse(j['expiresAt'] as String),
+        tier: j['tier'] as String?,
       );
 }
 
@@ -168,9 +177,16 @@ class AuthService {
     // refresh path (which would 401 against a non-JWT bearer) doesn't
     // fire during normal use.  If the token is ever rotated, the next
     // 401 from any API call clears the cache via handleUnauthorized.
+    //
+    // Tier is hard-coded to "owner" — engine PR #355 treats the static
+    // admin token as owner-tier regardless of any tier claim, so the
+    // UI should reflect that.  The /api/pulse 200 above confirmed the
+    // token is valid; if it's not really admin-tier, the engine will
+    // 403 on the first write attempt and the cache will clear.
     await _persist(_CachedToken(
       token: token,
       expiresAt: DateTime.now().add(const Duration(days: 365)),
+      tier: 'owner',
     ));
   }
 
@@ -279,15 +295,28 @@ class AuthService {
     await _persist(_parseTokenResponse(resp.body));
   }
 
+  /// Current tier from the cached JWT, or ``null`` if not yet signed in.
+  /// Returned values match the engine's tier constants:
+  /// ``"owner"`` / ``"paid"`` / ``"free"`` / ``"all-access"``.  UI layers
+  /// use this to gate write controls (Save buttons on settings pages are
+  /// hidden when the tier can't successfully POST/PUT — engine enforces
+  /// 403 per PR #355).
+  String? currentTier() => _cached?.tier;
+
   _CachedToken _parseTokenResponse(String body) {
     final j = jsonDecode(body) as Map<String, dynamic>;
     final token = j['token'] as String;
     final expSeconds = (j['exp_seconds'] as num).toInt();
+    // Engine returns the tier alongside the token on every mint /
+    // refresh path.  Older payloads (pre-Phase-2) may omit it; in that
+    // case we leave tier=null and the UI defaults to "non-owner".
+    final tier = j['tier'] as String?;
     return _CachedToken(
       token: token,
       // Subtract 30s to give us margin against clock skew between
       // device and server.
       expiresAt: DateTime.now().add(Duration(seconds: expSeconds - 30)),
+      tier: tier,
     );
   }
 

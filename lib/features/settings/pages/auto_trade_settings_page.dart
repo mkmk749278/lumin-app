@@ -11,6 +11,7 @@ import '../../../data/app_config.dart';
 import '../../../data/repository.dart';
 import '../../../shared/tokens.dart';
 import '../../../shared/widgets/lumin_card.dart';
+import '../../../shared/widgets/owner_only_banner.dart';
 import '../../../shared/widgets/preview_badge.dart';
 
 class AutoTradeSettingsPage extends StatefulWidget {
@@ -116,6 +117,11 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
   Widget build(BuildContext context) {
     final scope = AppConfigScope.of(context);
     final isLive = scope.repo.isLive;
+    // Engine PR #355 + #356 gate PUT /api/settings/auto-trade +
+    // POST /api/auto-mode to OWNER_TIER.  Hide Save + disable form
+    // inputs when tier != owner.
+    final tier = scope.tier;
+    final canEdit = tier == null || tier == 'owner';
     return Scaffold(
       appBar: AppBar(
         title: const Text('Auto-trade'),
@@ -129,7 +135,7 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
                 child: CircularProgressIndicator(strokeWidth: 2),
               ),
             )
-          else
+          else if (canEdit)
             IconButton(
               icon: const Icon(Icons.check),
               onPressed: _loaded && _loadError == null ? _save : null,
@@ -137,11 +143,11 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
             ),
         ],
       ),
-      body: _bodyFor(isLive),
+      body: _bodyFor(isLive, canEdit: canEdit),
     );
   }
 
-  Widget _bodyFor(bool isLive) {
+  Widget _bodyFor(bool isLive, {bool canEdit = true}) {
     if (!_loaded) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -187,10 +193,11 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
         ),
       );
     }
-    return ListView(
+    final list = ListView(
       physics: const BouncingScrollPhysics(),
       children: [
         if (!isLive) const PreviewBadge(),
+        if (!canEdit) const OwnerOnlyBanner(),
         _modeCard(),
         const SizedBox(height: LuminSpacing.md),
         _sizingCard(),
@@ -198,6 +205,14 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
         _safetyNote(),
         const SizedBox(height: LuminSpacing.xl),
       ],
+    );
+    // Read-only render for non-owner tiers: AbsorbPointer blocks all
+    // input below the AppBar; Opacity visually signals disabled state.
+    // Engine 403 remains the source-of-truth backstop.
+    if (canEdit) return list;
+    return Opacity(
+      opacity: 0.65,
+      child: AbsorbPointer(absorbing: true, child: list),
     );
   }
 
