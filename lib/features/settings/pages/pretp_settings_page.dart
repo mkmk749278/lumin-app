@@ -11,6 +11,7 @@ import '../../../data/app_config.dart';
 import '../../../data/repository.dart';
 import '../../../shared/tokens.dart';
 import '../../../shared/widgets/lumin_card.dart';
+import '../../../shared/widgets/owner_only_banner.dart';
 import '../../../shared/widgets/preview_badge.dart';
 
 /// UI-side regime buckets.  The backend uses 5 labels (TRENDING_UP /
@@ -175,6 +176,12 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
   Widget build(BuildContext context) {
     final scope = AppConfigScope.of(context);
     final isLive = scope.repo.isLive;
+    // Engine PR #355 gates PUT /api/settings/pretp to OWNER_TIER.  Hide
+    // the Save action + disable form inputs when the cached JWT's tier
+    // is anything other than owner.  ``null`` tier (mock mode, pre-Phase-2
+    // token) shows controls — the engine 403 remains the backstop.
+    final tier = scope.tier;
+    final canEdit = tier == null || tier == 'owner';
     return Scaffold(
       appBar: AppBar(
         title: const Text('Pre-TP grab'),
@@ -188,7 +195,7 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
                 child: CircularProgressIndicator(strokeWidth: 2),
               ),
             )
-          else
+          else if (canEdit)
             IconButton(
               icon: const Icon(Icons.check),
               onPressed: _loaded && _loadError == null ? _save : null,
@@ -196,11 +203,11 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
             ),
         ],
       ),
-      body: _bodyFor(isLive),
+      body: _bodyFor(isLive, canEdit: canEdit),
     );
   }
 
-  Widget _bodyFor(bool isLive) {
+  Widget _bodyFor(bool isLive, {bool canEdit = true}) {
     if (!_loaded) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -246,10 +253,11 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
         ),
       );
     }
-    return ListView(
+    final list = ListView(
       physics: const BouncingScrollPhysics(),
       children: [
         if (!isLive) const PreviewBadge(),
+        if (!canEdit) const OwnerOnlyBanner(),
         _masterCard(),
         const SizedBox(height: LuminSpacing.md),
         _thresholdsCard(),
@@ -259,6 +267,17 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
         _setupsCard(),
         const SizedBox(height: LuminSpacing.xl),
       ],
+    );
+    // Non-owner tiers see all the fields read-only.  AbsorbPointer
+    // blocks every tap / scroll / drag below it; combined with the
+    // hidden Save button in the AppBar and the OwnerOnlyBanner at the
+    // top of the list, the page becomes a clear read-only view of the
+    // current engine config.  The visual `Opacity` reinforces the
+    // disabled state without altering the existing colour tokens.
+    if (canEdit) return list;
+    return Opacity(
+      opacity: 0.65,
+      child: AbsorbPointer(absorbing: true, child: list),
     );
   }
 

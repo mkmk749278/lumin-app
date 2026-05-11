@@ -85,6 +85,21 @@ class _AppConfigScopeState extends State<AppConfigScope> {
   LuminRepository get repo => _repo;
   AuthService? get auth => _auth;
 
+  /// Current user tier from the cached JWT, or ``null`` when:
+  ///   * mock mode (no live auth)
+  ///   * not yet signed in
+  ///   * persisted JWT pre-dates the tier-claim wiring
+  ///
+  /// Widgets gate tier-restricted controls (Save on settings pages,
+  /// auto-mode flip, etc.) by treating ``null`` as "treat as
+  /// non-blocking — show controls" and any concrete non-owner value
+  /// as "hide".  Engine 403 remains the source-of-truth backstop.
+  ///
+  /// Tier changes are not reactive — they update on next rebuild after
+  /// signin / signout / refresh.  Acceptable because tier transitions
+  /// are bursty (subscription state changes), not continuous.
+  String? get tier => _auth?.currentTier();
+
   Future<void> update(AppConfig next) async {
     setState(() {
       _config = next;
