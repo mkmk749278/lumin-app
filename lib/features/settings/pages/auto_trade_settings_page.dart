@@ -1,9 +1,15 @@
-/// Auto-trade settings — execution-mode + sizing controls.
+/// Auto-trade settings — per-user overrides (Phase 2).
 ///
-/// Loads the engine's effective state from ``GET /api/settings/auto-trade``
-/// on init and persists changes via ``PUT`` on save.  Mode change routes
-/// through the same engine path as the Trade tab's mode toggle so flipping
-/// from this page actually switches the engine's auto-execution mode.
+/// Loads the current user's overrides from
+/// ``GET /api/settings/user/auto-trade`` (engine defaults when the user
+/// has none yet) and persists changes via ``PUT``.  Per-user mode flips
+/// do NOT change engine-global execution — Phase 3 wires per-user
+/// execution; until then the engine continues operating in whatever
+/// mode the operator picked.  The banner at the top says so honestly.
+///
+/// The operator's engine-wide defaults live on a separate page (Settings →
+/// Engine defaults, owner-only entry), pointed at
+/// ``/api/settings/auto-trade``.
 import 'package:flutter/material.dart';
 
 import '../../../data/api_client.dart';
@@ -11,7 +17,6 @@ import '../../../data/app_config.dart';
 import '../../../data/repository.dart';
 import '../../../shared/tokens.dart';
 import '../../../shared/widgets/lumin_card.dart';
-import '../../../shared/widgets/owner_only_banner.dart';
 import '../../../shared/widgets/preview_badge.dart';
 
 class AutoTradeSettingsPage extends StatefulWidget {
@@ -31,6 +36,7 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
   bool _loaded = false;
   bool _saving = false;
   String? _loadError;
+  bool _usingDefaults = true;
 
   static const _kModeIndexToString = {0: 'off', 1: 'paper', 2: 'live'};
   static const _kModeStringToIndex = {'off': 0, 'paper': 1, 'live': 2};
@@ -46,7 +52,7 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
   Future<void> _load() async {
     final repo = AppConfigScope.of(context).repo;
     try {
-      final s = await repo.fetchAutoTradeSettings();
+      final s = await repo.fetchUserAutoTradeSettings();
       if (!mounted) return;
       setState(() {
         if (s.mode != null) {
@@ -55,6 +61,7 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
         _positionSizePct = s.positionSizePct ?? _positionSizePct;
         _leverageCap = s.leverageCap ?? _leverageCap;
         _maxConcurrent = s.maxConcurrentPositions ?? _maxConcurrent;
+        _usingDefaults = s.usingDefaults ?? true;
         _loaded = true;
         _loadError = null;
       });
@@ -84,8 +91,9 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
       maxConcurrentPositions: _maxConcurrent,
     );
     try {
-      await repo.updateAutoTradeSettings(partial);
+      final saved = await repo.updateUserAutoTradeSettings(partial);
       if (!mounted) return;
+      setState(() => _usingDefaults = saved.usingDefaults ?? false);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Auto-trade settings saved'),
@@ -117,11 +125,6 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
   Widget build(BuildContext context) {
     final scope = AppConfigScope.of(context);
     final isLive = scope.repo.isLive;
-    // Engine PR #355 + #356 gate PUT /api/settings/auto-trade +
-    // POST /api/auto-mode to OWNER_TIER.  Hide Save + disable form
-    // inputs when tier != owner.
-    final tier = scope.tier;
-    final canEdit = tier == null || tier == 'owner';
     return Scaffold(
       appBar: AppBar(
         title: const Text('Auto-trade'),
@@ -135,7 +138,7 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
                 child: CircularProgressIndicator(strokeWidth: 2),
               ),
             )
-          else if (canEdit)
+          else
             IconButton(
               icon: const Icon(Icons.check),
               onPressed: _loaded && _loadError == null ? _save : null,
@@ -143,11 +146,11 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
             ),
         ],
       ),
-      body: _bodyFor(isLive, canEdit: canEdit),
+      body: _bodyFor(isLive),
     );
   }
 
-  Widget _bodyFor(bool isLive, {bool canEdit = true}) {
+  Widget _bodyFor(bool isLive) {
     if (!_loaded) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -193,11 +196,11 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
         ),
       );
     }
-    final list = ListView(
+    return ListView(
       physics: const BouncingScrollPhysics(),
       children: [
         if (!isLive) const PreviewBadge(),
-        if (!canEdit) const OwnerOnlyBanner(),
+        _scopeBanner(),
         _modeCard(),
         const SizedBox(height: LuminSpacing.md),
         _sizingCard(),
@@ -206,13 +209,71 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
         const SizedBox(height: LuminSpacing.xl),
       ],
     );
-    // Read-only render for non-owner tiers: AbsorbPointer blocks all
-    // input below the AppBar; Opacity visually signals disabled state.
-    // Engine 403 remains the source-of-truth backstop.
-    if (canEdit) return list;
-    return Opacity(
-      opacity: 0.65,
-      child: AbsorbPointer(absorbing: true, child: list),
+  }
+
+  /// Per-user scope banner — explains that settings persist to the
+  /// user's profile but aren't consumed at signal-time yet (Phase 3
+  /// wires the user-side execution path).
+  Widget _scopeBanner() {
+    final usingDefaults = _usingDefaults;
+    final accent = usingDefaults ? LuminColors.textMuted : LuminColors.accent;
+    final label = usingDefaults
+        ? 'Using engine defaults.'
+        : 'Custom — your overrides.';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        LuminSpacing.lg,
+        LuminSpacing.sm,
+        LuminSpacing.lg,
+        LuminSpacing.md,
+      ),
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: LuminSpacing.md,
+          vertical: LuminSpacing.sm,
+        ),
+        decoration: BoxDecoration(
+          color: accent.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(LuminRadii.sm),
+          border: Border.all(color: accent.withOpacity(0.30)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              usingDefaults ? Icons.info_outline : Icons.tune,
+              color: accent,
+              size: 16,
+            ),
+            const SizedBox(width: LuminSpacing.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: accent,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  const Text(
+                    'Saved to your profile. Takes effect once auto-trade '
+                    'execution ships (Phase 3).',
+                    style: TextStyle(
+                      color: LuminColors.textSecondary,
+                      fontSize: 11,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

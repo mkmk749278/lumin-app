@@ -5,12 +5,14 @@
 /// lands when the FastAPI backend ships.
 import 'package:flutter/material.dart';
 
+import '../../data/app_config.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
 import 'pages/about_page.dart';
 import 'pages/agents_settings_page.dart';
 import 'pages/api_keys_settings_page.dart';
 import 'pages/auto_trade_settings_page.dart';
+import 'pages/engine_defaults_page.dart';
 import 'pages/pretp_settings_page.dart';
 import 'pages/risk_gates_settings_page.dart';
 import 'pages/subscription_page.dart';
@@ -20,6 +22,12 @@ class SettingsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scope = AppConfigScope.of(context);
+    // Owner-only entry-points.  When ``tier`` is null (mock mode,
+    // pre-Phase-2 JWT) we show the row too — the engine still gates
+    // writes server-side, so a non-owner who somehow opens the page
+    // can read but not edit.
+    final isOwner = scope.tier == null || scope.tier == 'owner';
     return Scaffold(
       appBar: AppBar(title: const Text('Menu')),
       body: ListView(
@@ -32,13 +40,13 @@ class SettingsPage extends StatelessWidget {
               _Row(
                 icon: Icons.auto_mode,
                 label: 'Auto-trade',
-                subtitle: 'Mode, sizing, leverage cap',
+                subtitle: 'Your sizing, leverage, mode',
                 onTap: () => _push(context, const AutoTradeSettingsPage()),
               ),
               _Row(
                 icon: Icons.shield_moon_outlined,
                 label: 'Pre-TP grab',
-                subtitle: 'Auto-breakeven thresholds',
+                subtitle: 'Your thresholds + regime allowlist',
                 onTap: () => _push(context, const PreTpSettingsPage()),
               ),
               _Row(
@@ -53,6 +61,13 @@ class SettingsPage extends StatelessWidget {
           _section(
             title: 'ENGINE',
             rows: [
+              if (isOwner)
+                _Row(
+                  icon: Icons.settings_input_component_outlined,
+                  label: 'Engine defaults',
+                  subtitle: 'Owner — engine-wide pre-TP + auto-mode',
+                  onTap: () => _push(context, const EngineDefaultsPage()),
+                ),
               _Row(
                 icon: Icons.psychology_outlined,
                 label: 'Agents',

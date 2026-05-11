@@ -144,6 +144,7 @@ class PretpSettings {
     this.feeFloorPct,
     this.minAgeSec,
     this.maxAgeSec,
+    this.usingDefaults,
   });
 
   final bool? enabled;
@@ -154,6 +155,12 @@ class PretpSettings {
   final double? feeFloorPct;
   final int? minAgeSec;
   final int? maxAgeSec;
+
+  /// Only present on per-user responses (``/api/settings/user/pretp``).
+  /// True when the user has no override row — every field above is the
+  /// engine default.  False once at least one field is user-set.  Null
+  /// on engine-wide responses where the concept doesn't apply.
+  final bool? usingDefaults;
 
   factory PretpSettings.fromJson(Map<String, dynamic> j) => PretpSettings(
         enabled: j['enabled'] as bool?,
@@ -168,6 +175,7 @@ class PretpSettings {
         feeFloorPct: (j['fee_floor_pct'] as num?)?.toDouble(),
         minAgeSec: (j['min_age_sec'] as num?)?.toInt(),
         maxAgeSec: (j['max_age_sec'] as num?)?.toInt(),
+        usingDefaults: j['using_defaults'] as bool?,
       );
 
   /// Serialise only the non-null fields so a partial PUT doesn't wipe
@@ -198,6 +206,7 @@ class AutoTradeSettings {
     this.positionSizePct,
     this.leverageCap,
     this.maxConcurrentPositions,
+    this.usingDefaults,
   });
 
   /// "off" | "paper" | "live".
@@ -206,12 +215,16 @@ class AutoTradeSettings {
   final double? leverageCap;
   final int? maxConcurrentPositions;
 
+  /// Only present on ``/api/settings/user/auto-trade`` responses.
+  final bool? usingDefaults;
+
   factory AutoTradeSettings.fromJson(Map<String, dynamic> j) => AutoTradeSettings(
         mode: j['mode'] as String?,
         positionSizePct: (j['position_size_pct'] as num?)?.toDouble(),
         leverageCap: (j['leverage_cap'] as num?)?.toDouble(),
         maxConcurrentPositions:
             (j['max_concurrent_positions'] as num?)?.toInt(),
+        usingDefaults: j['using_defaults'] as bool?,
       );
 
   Map<String, dynamic> toJsonPartial() {
@@ -312,12 +325,24 @@ abstract class LuminRepository {
   /// engine's current auto-execution mode; pass an explicit value to
   /// view the opposite ledger (paper history while in live, etc.).
   Future<PnlHistory> fetchPnlHistory({int days = 30, String? mode});
-  /// Pre-TP grab settings page — load + persist user overrides.
+  /// Pre-TP grab settings page — engine-wide defaults (owner-only writes).
+  /// Used by Settings → Engine defaults.
   Future<PretpSettings> fetchPretpSettings();
   Future<PretpSettings> updatePretpSettings(PretpSettings partial);
-  /// Auto-trade settings page — load + persist execution mode + sizing.
+  /// Auto-trade settings page — engine-wide defaults (owner-only writes).
   Future<AutoTradeSettings> fetchAutoTradeSettings();
   Future<AutoTradeSettings> updateAutoTradeSettings(AutoTradeSettings partial);
+  /// Per-user pre-TP overrides (Phase 2).  Every signed-in user can
+  /// edit their own; the engine doesn't yet consume per-user values
+  /// (Phase 3 wires execution).  Same data class — server adds the
+  /// ``using_defaults`` flag so the page can render a "Custom" badge.
+  Future<PretpSettings> fetchUserPretpSettings();
+  Future<PretpSettings> updateUserPretpSettings(PretpSettings partial);
+  /// Per-user auto-trade overrides (Phase 2).
+  Future<AutoTradeSettings> fetchUserAutoTradeSettings();
+  Future<AutoTradeSettings> updateUserAutoTradeSettings(
+    AutoTradeSettings partial,
+  );
   /// User profile (Phase 3) — drives SignupPage + Settings → Profile.
   Future<Profile> fetchProfile();
   Future<Profile> updateProfile(Profile partial, {bool acceptTerms = false});
@@ -532,6 +557,66 @@ class MockRepository implements LuminRepository {
     return _mockAutoTrade;
   }
 
+  // Per-user overrides (Phase 2) — single in-memory store covers all
+  // mocked users since the offline mode doesn't have a real user_id.
+  // ``using_defaults`` flips off as soon as the user touches anything.
+  static PretpSettings _mockUserPretp = const PretpSettings(usingDefaults: true);
+  static AutoTradeSettings _mockUserAutoTrade =
+      const AutoTradeSettings(usingDefaults: true);
+
+  @override
+  Future<PretpSettings> fetchUserPretpSettings() async => _mockUserPretp;
+
+  @override
+  Future<PretpSettings> updateUserPretpSettings(PretpSettings partial) async {
+    _mockUserPretp = PretpSettings(
+      enabled: partial.enabled ?? _mockUserPretp.enabled ?? _mockPretp.enabled,
+      regimeAllowlist:
+          partial.regimeAllowlist ?? _mockUserPretp.regimeAllowlist,
+      setupAllowlist:
+          partial.setupAllowlist ?? _mockUserPretp.setupAllowlist,
+      thresholdPct: partial.thresholdPct ??
+          _mockUserPretp.thresholdPct ??
+          _mockPretp.thresholdPct,
+      atrMultiplier: partial.atrMultiplier ??
+          _mockUserPretp.atrMultiplier ??
+          _mockPretp.atrMultiplier,
+      feeFloorPct: partial.feeFloorPct ??
+          _mockUserPretp.feeFloorPct ??
+          _mockPretp.feeFloorPct,
+      minAgeSec:
+          partial.minAgeSec ?? _mockUserPretp.minAgeSec ?? _mockPretp.minAgeSec,
+      maxAgeSec:
+          partial.maxAgeSec ?? _mockUserPretp.maxAgeSec ?? _mockPretp.maxAgeSec,
+      usingDefaults: false,
+    );
+    return _mockUserPretp;
+  }
+
+  @override
+  Future<AutoTradeSettings> fetchUserAutoTradeSettings() async =>
+      _mockUserAutoTrade;
+
+  @override
+  Future<AutoTradeSettings> updateUserAutoTradeSettings(
+    AutoTradeSettings partial,
+  ) async {
+    _mockUserAutoTrade = AutoTradeSettings(
+      mode: partial.mode ?? _mockUserAutoTrade.mode ?? _mockAutoTrade.mode,
+      positionSizePct: partial.positionSizePct ??
+          _mockUserAutoTrade.positionSizePct ??
+          _mockAutoTrade.positionSizePct,
+      leverageCap: partial.leverageCap ??
+          _mockUserAutoTrade.leverageCap ??
+          _mockAutoTrade.leverageCap,
+      maxConcurrentPositions: partial.maxConcurrentPositions ??
+          _mockUserAutoTrade.maxConcurrentPositions ??
+          _mockAutoTrade.maxConcurrentPositions,
+      usingDefaults: false,
+    );
+    return _mockUserAutoTrade;
+  }
+
   // Profile (Phase 3) — in mock mode we keep a tiny static profile so
   // SignupPage previews work offline.  ``needsOnboarding`` flips false
   // once ``updateProfile`` lands a display name + ``acceptTerms``.
@@ -736,6 +821,40 @@ class HttpRepository implements LuminRepository {
   ) async {
     final j = (await client.put(
       '/api/settings/auto-trade',
+      body: partial.toJsonPartial(),
+    )) as Map<String, dynamic>;
+    return AutoTradeSettings.fromJson(j);
+  }
+
+  @override
+  Future<PretpSettings> fetchUserPretpSettings() async {
+    final j = (await client.get('/api/settings/user/pretp'))
+        as Map<String, dynamic>;
+    return PretpSettings.fromJson(j);
+  }
+
+  @override
+  Future<PretpSettings> updateUserPretpSettings(PretpSettings partial) async {
+    final j = (await client.put(
+      '/api/settings/user/pretp',
+      body: partial.toJsonPartial(),
+    )) as Map<String, dynamic>;
+    return PretpSettings.fromJson(j);
+  }
+
+  @override
+  Future<AutoTradeSettings> fetchUserAutoTradeSettings() async {
+    final j = (await client.get('/api/settings/user/auto-trade'))
+        as Map<String, dynamic>;
+    return AutoTradeSettings.fromJson(j);
+  }
+
+  @override
+  Future<AutoTradeSettings> updateUserAutoTradeSettings(
+    AutoTradeSettings partial,
+  ) async {
+    final j = (await client.put(
+      '/api/settings/user/auto-trade',
       body: partial.toJsonPartial(),
     )) as Map<String, dynamic>;
     return AutoTradeSettings.fromJson(j);
