@@ -664,20 +664,4 @@ class _ApiKeysSettingsPageState extends State<ApiKeysSettingsPage> {
       ),
     );
   }
-
-  Future<void> _save() async {
-    final scope = AppConfigScope.of(context);
-    final next = scope.config.copyWith(
-      dataSource: _liveMode ? DataSource.live : DataSource.mock,
-      apiBaseUrl: _baseUrlCtl.text.trim(),
-    );
-    await scope.update(next);
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Saved'),
-        duration: Duration(seconds: 2),
-      ),
-    );
-  }
 }
