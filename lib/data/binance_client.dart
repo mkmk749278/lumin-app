@@ -85,6 +85,73 @@ class BinanceAccount {
   }
 }
 
+/// Per-symbol open position from /fapi/v2/positionRisk.  Only entries
+/// where ``positionAmt`` is non-zero are surfaced — Binance returns
+/// every tradable symbol regardless of whether the user holds.
+class BinancePosition {
+  const BinancePosition({
+    required this.symbol,
+    required this.positionAmt,
+    required this.entryPrice,
+    required this.markPrice,
+    required this.unrealizedProfit,
+    required this.leverage,
+    required this.marginType,
+    required this.liquidationPrice,
+    required this.updatedAt,
+  });
+
+  final String symbol;
+
+  /// Signed quantity — positive for LONG, negative for SHORT.
+  final double positionAmt;
+
+  final double entryPrice;
+  final double markPrice;
+  final double unrealizedProfit;
+  final double leverage;
+
+  /// ``cross`` or ``isolated``.
+  final String marginType;
+
+  /// 0 when the broker hasn't computed it yet (very-small positions).
+  final double liquidationPrice;
+
+  /// ms since epoch — Binance's ``updateTime`` field.
+  final int updatedAt;
+
+  bool get isLong => positionAmt > 0;
+  bool get isShort => positionAmt < 0;
+  String get side => isLong ? 'LONG' : 'SHORT';
+  double get qty => positionAmt.abs();
+  double get notional => qty * markPrice;
+
+  /// P&L as a fraction of margin posted (handy for percentage display
+  /// without us tracking the user's per-position margin separately).
+  /// Returns 0 when entryPrice is 0 — avoids divide-by-zero on fresh
+  /// rows.
+  double get pnlPctOnMargin {
+    if (entryPrice <= 0 || leverage <= 0) return 0.0;
+    final movePct = isLong
+        ? ((markPrice - entryPrice) / entryPrice)
+        : ((entryPrice - markPrice) / entryPrice);
+    return movePct * leverage * 100.0;
+  }
+
+  factory BinancePosition.fromJson(Map<String, dynamic> j) =>
+      BinancePosition(
+        symbol: j['symbol'] as String,
+        positionAmt: _asDouble(j['positionAmt']),
+        entryPrice: _asDouble(j['entryPrice']),
+        markPrice: _asDouble(j['markPrice']),
+        unrealizedProfit: _asDouble(j['unRealizedProfit']),
+        leverage: _asDouble(j['leverage']),
+        marginType: j['marginType'] as String? ?? 'cross',
+        liquidationPrice: _asDouble(j['liquidationPrice']),
+        updatedAt: (j['updateTime'] as num?)?.toInt() ?? 0,
+      );
+}
+
 double _asDouble(dynamic v) {
   if (v is num) return v.toDouble();
   if (v is String) return double.tryParse(v) ?? 0.0;
@@ -229,6 +296,31 @@ class BinanceClient {
     _ensureOk(resp);
     final j = jsonDecode(resp.body) as Map<String, dynamic>;
     return (j['serverTime'] as num).toInt();
+  }
+
+  /// All open positions on the user's Futures account.
+  ///
+  /// /fapi/v2/positionRisk returns every tradable symbol; we filter
+  /// to ``positionAmt != 0``.  Cheap signed call (~150ms p50).  Used
+  /// by the Trade tab to display real positions instead of engine-
+  /// paper, and by AutoTradeWatcher to enforce the per-user concurrent
+  /// cap before each fire.
+  Future<List<BinancePosition>> getOpenPositions() async {
+    final body = await _signedGet('/fapi/v2/positionRisk');
+    if (body is! List) {
+      throw BinanceError(
+        statusCode: 200,
+        message: 'unexpected response shape from /fapi/v2/positionRisk',
+      );
+    }
+    final positions = <BinancePosition>[];
+    for (final raw in body) {
+      if (raw is! Map<String, dynamic>) continue;
+      final amt = _asDouble(raw['positionAmt']);
+      if (amt == 0.0) continue;
+      positions.add(BinancePosition.fromJson(raw));
+    }
+    return positions;
   }
 
   /// Symbol exchange-info subset — ``stepSize`` for qty rounding +
