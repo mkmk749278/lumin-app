@@ -226,6 +226,67 @@ class AutoTradeSettings {
   }
 }
 
+/// User profile — backend ``GET / PUT /api/profile`` (Phase 3).
+///
+/// All fields nullable on read (a freshly-created user has nothing set
+/// until SignupPage completes); ``needsOnboarding`` mirrors the engine's
+/// derived flag so the app doesn't have to inspect ``onboardedAt``
+/// directly.  On PUT, the engine accepts a partial body — only the
+/// non-null fields are sent so the caller doesn't have to round-trip
+/// the entire row to update one column.
+class Profile {
+  const Profile({
+    this.userId,
+    this.phoneE164,
+    this.tier,
+    this.paidUntil,
+    this.displayName,
+    this.countryCode,
+    this.timezone,
+    this.currency,
+    this.termsAcceptedAt,
+    this.onboardedAt,
+    this.needsOnboarding = true,
+  });
+
+  final int? userId;
+  final String? phoneE164;
+  final String? tier;
+  final String? paidUntil;
+  final String? displayName;
+  final String? countryCode;
+  final String? timezone;
+  final String? currency;
+  final String? termsAcceptedAt;
+  final String? onboardedAt;
+  final bool needsOnboarding;
+
+  factory Profile.fromJson(Map<String, dynamic> j) => Profile(
+        userId: (j['user_id'] as num?)?.toInt(),
+        phoneE164: j['phone_e164'] as String?,
+        tier: j['tier'] as String?,
+        paidUntil: j['paid_until'] as String?,
+        displayName: j['display_name'] as String?,
+        countryCode: j['country_code'] as String?,
+        timezone: j['timezone'] as String?,
+        currency: j['currency'] as String?,
+        termsAcceptedAt: j['terms_accepted_at'] as String?,
+        onboardedAt: j['onboarded_at'] as String?,
+        needsOnboarding: j['needs_onboarding'] as bool? ?? true,
+      );
+
+  /// Partial PUT — only non-null fields are sent.
+  Map<String, dynamic> toJsonPartial({bool acceptTerms = false}) {
+    final out = <String, dynamic>{};
+    if (displayName != null) out['display_name'] = displayName;
+    if (countryCode != null) out['country_code'] = countryCode;
+    if (timezone != null) out['timezone'] = timezone;
+    if (currency != null) out['currency'] = currency;
+    if (acceptTerms) out['accept_terms'] = true;
+    return out;
+  }
+}
+
 abstract class LuminRepository {
   /// True when the underlying source is the live engine (vs. mocks).
   bool get isLive;
@@ -257,6 +318,9 @@ abstract class LuminRepository {
   /// Auto-trade settings page — load + persist execution mode + sizing.
   Future<AutoTradeSettings> fetchAutoTradeSettings();
   Future<AutoTradeSettings> updateAutoTradeSettings(AutoTradeSettings partial);
+  /// User profile (Phase 3) — drives SignupPage + Settings → Profile.
+  Future<Profile> fetchProfile();
+  Future<Profile> updateProfile(Profile partial, {bool acceptTerms = false});
   Future<bool> healthCheck();
 }
 
@@ -467,6 +531,45 @@ class MockRepository implements LuminRepository {
     );
     return _mockAutoTrade;
   }
+
+  // Profile (Phase 3) — in mock mode we keep a tiny static profile so
+  // SignupPage previews work offline.  ``needsOnboarding`` flips false
+  // once ``updateProfile`` lands a display name + ``acceptTerms``.
+  static Profile _mockProfile = const Profile(
+    userId: 0,
+    phoneE164: '+10000000000',
+    tier: 'free',
+    needsOnboarding: true,
+  );
+
+  @override
+  Future<Profile> fetchProfile() async => _mockProfile;
+
+  @override
+  Future<Profile> updateProfile(
+    Profile partial, {
+    bool acceptTerms = false,
+  }) async {
+    final stillNeeds = _mockProfile.needsOnboarding &&
+        !((partial.displayName != null) && acceptTerms);
+    _mockProfile = Profile(
+      userId: _mockProfile.userId,
+      phoneE164: _mockProfile.phoneE164,
+      tier: _mockProfile.tier,
+      paidUntil: _mockProfile.paidUntil,
+      displayName: partial.displayName ?? _mockProfile.displayName,
+      countryCode: partial.countryCode ?? _mockProfile.countryCode,
+      timezone: partial.timezone ?? _mockProfile.timezone,
+      currency: partial.currency ?? _mockProfile.currency,
+      termsAcceptedAt:
+          acceptTerms ? DateTime.now().toIso8601String() : _mockProfile.termsAcceptedAt,
+      onboardedAt: stillNeeds
+          ? _mockProfile.onboardedAt
+          : (_mockProfile.onboardedAt ?? DateTime.now().toIso8601String()),
+      needsOnboarding: stillNeeds,
+    );
+    return _mockProfile;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -636,6 +739,24 @@ class HttpRepository implements LuminRepository {
       body: partial.toJsonPartial(),
     )) as Map<String, dynamic>;
     return AutoTradeSettings.fromJson(j);
+  }
+
+  @override
+  Future<Profile> fetchProfile() async {
+    final j = (await client.get('/api/profile')) as Map<String, dynamic>;
+    return Profile.fromJson(j);
+  }
+
+  @override
+  Future<Profile> updateProfile(
+    Profile partial, {
+    bool acceptTerms = false,
+  }) async {
+    final j = (await client.put(
+      '/api/profile',
+      body: partial.toJsonPartial(acceptTerms: acceptTerms),
+    )) as Map<String, dynamic>;
+    return Profile.fromJson(j);
   }
 
   // ---- json → mock-class adapters --------------------------------------
