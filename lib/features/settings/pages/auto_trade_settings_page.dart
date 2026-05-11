@@ -82,16 +82,28 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
 
   Future<void> _save() async {
     if (_saving) return;
+    final newModeToken = _kModeIndexToString[_mode];
+    // Flipping to LIVE shows an explicit confirmation modal with a
+    // real-money warning.  Phase 3b-2 wires the AutoTradeWatcher to
+    // pick up live mode → fire orders without per-signal user
+    // confirmation, so this is the last clear opt-in moment.
+    if (newModeToken == 'live') {
+      final ok = await _confirmLiveFlip();
+      if (ok != true) return;
+    }
     setState(() => _saving = true);
-    final repo = AppConfigScope.of(context).repo;
+    final scope = AppConfigScope.of(context);
+    final repo = scope.repo;
     final partial = AutoTradeSettings(
-      mode: _kModeIndexToString[_mode],
+      mode: newModeToken,
       positionSizePct: _positionSizePct,
       leverageCap: _leverageCap,
       maxConcurrentPositions: _maxConcurrent,
     );
     try {
       final saved = await repo.updateUserAutoTradeSettings(partial);
+      // Kick the watcher so the new mode takes effect immediately.
+      await scope.autoTradeWatcher.refreshSettings();
       if (!mounted) return;
       setState(() => _usingDefaults = saved.usingDefaults ?? false);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -273,6 +285,82 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// Show a real-money confirmation dialog before flipping to LIVE
+  /// mode.  Returns true when the user explicitly confirms.  Off /
+  /// paper transitions bypass this.
+  Future<bool?> _confirmLiveFlip() {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: LuminColors.bgCard,
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded,
+                color: LuminColors.loss, size: 20),
+            SizedBox(width: LuminSpacing.sm),
+            Expanded(
+              child: Text(
+                'Enable LIVE auto-trade?',
+                style: TextStyle(
+                  color: LuminColors.textPrimary,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Lumin will place real Binance Futures orders without per-'
+              'signal confirmation while the app is open.',
+              style: TextStyle(
+                color: LuminColors.textPrimary,
+                fontSize: 13,
+                height: 1.4,
+              ),
+            ),
+            SizedBox(height: LuminSpacing.sm),
+            Text(
+              '• Sized by your position-size % × leverage cap\n'
+              '• Idempotent per signal (each fires at most once)\n'
+              '• Auto-trade pauses when the app backgrounds\n'
+              '• Tap the AUTO banner to stop immediately',
+              style: TextStyle(
+                color: LuminColors.textSecondary,
+                fontSize: 12,
+                height: 1.5,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: LuminColors.textSecondary),
+            ),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: LuminColors.loss,
+              foregroundColor: LuminColors.bgDeep,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text(
+              'Enable LIVE',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
       ),
     );
   }

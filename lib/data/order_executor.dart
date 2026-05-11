@@ -70,12 +70,17 @@ class OrderExecutor {
   /// is their per-user auto-trade overrides.  ``equity`` is the
   /// user's current Binance wallet balance (from /fapi/v2/account)
   /// — used to size from ``positionSizePct``.
+  ///
+  /// ``executionMode`` is recorded in the order log:
+  ///   * ``manual``    — user tapped Take Signal (default, 3b-1).
+  ///   * ``auto-live`` — :class:`AutoTradeWatcher` fired it (3b-2).
   Future<ExecutionResult> placeFromSignal({
     required int userId,
     required MockSignal signal,
     required BinanceKeys keys,
     required AutoTradeSettings settings,
     required double equity,
+    String executionMode = 'manual',
   }) async {
     // Idempotency first — never double-place.
     final existing = await _logService.entryFor(userId, signal.id);
@@ -212,6 +217,10 @@ class OrderExecutor {
         placedAt: DateTime.now().toUtc(),
         testnet: keys.testnet,
         avgFillPrice: avgPrice > 0 ? avgPrice : null,
+        executionMode: executionMode,
+        entryPriceTarget: signal.entry,
+        slPrice: slPrice,
+        tpPrice: tpPrice,
       );
       await _logService.record(userId, entry);
 
@@ -243,6 +252,67 @@ class OrderExecutor {
     } finally {
       client.dispose();
     }
+  }
+
+  /// Paper-mode recording — same shape as a live entry but without
+  /// any Binance call.  Used by :class:`AutoTradeWatcher` when the
+  /// user's auto-trade mode is ``paper``.  Sizes against the same
+  /// math live would have used (equity × pct × leverage) so the
+  /// paper log shows realistic "would have been" qty.  No equity
+  /// fetch here — the watcher passes a fake equity (default 10k USDT)
+  /// or zero; either way the math is honest about being a simulation.
+  Future<ExecutionResult> recordPaper({
+    required int userId,
+    required MockSignal signal,
+    required AutoTradeSettings settings,
+    required double simulatedEquity,
+  }) async {
+    final existing = await _logService.entryFor(userId, signal.id);
+    if (existing != null) {
+      return ExecutionResult(
+        success: true,
+        alreadyTaken: existing,
+        message: 'Paper: already recorded.',
+      );
+    }
+    final sizingPct = settings.positionSizePct;
+    final leverage = settings.leverageCap;
+    if (sizingPct == null || leverage == null) {
+      return _fail('Set position size + leverage on Auto-trade page first.');
+    }
+    final leverageCapped = leverage.clamp(1.0, 30.0).toInt();
+    final side = signal.direction == 'LONG' ? 'BUY' : 'SELL';
+    // Round qty to 6 decimals — Binance step sizes vary, but paper
+    // mode skips the exchangeInfo round-trip; this is good enough for
+    // a "would have placed" log.
+    final qty = double.parse(
+      ((simulatedEquity * (sizingPct / 100.0) * leverageCapped) / signal.entry)
+          .toStringAsFixed(6),
+    );
+    final entry = OrderLogEntry(
+      signalId: signal.id,
+      symbol: signal.symbol,
+      side: side,
+      quantity: qty,
+      entryOrderId: null,
+      stopOrderId: null,
+      tpOrderId: null,
+      placedAt: DateTime.now().toUtc(),
+      testnet: false,
+      avgFillPrice: signal.entry,
+      executionMode: 'auto-paper',
+      entryPriceTarget: signal.entry,
+      slPrice: signal.sl,
+      tpPrice: signal.tp1,
+    );
+    await _logService.record(userId, entry);
+    return ExecutionResult(
+      success: true,
+      entry: entry,
+      message:
+          'Paper: $qty ${signal.symbol} @ ${signal.entry.toStringAsFixed(4)} '
+          '(simulated, no broker call).',
+    );
   }
 
   ExecutionResult _fail(String message) =>
