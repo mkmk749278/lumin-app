@@ -1,20 +1,20 @@
 /// Menu / Settings — root list of drill-down pages.
 ///
-/// Each row pushes a self-contained settings page where the user can edit
-/// the relevant subsystem.  No setting persists across sessions yet — that
-/// lands when the FastAPI backend ships.
+/// Lumin is consumer-only: this menu shows just the user's own
+/// controls (auto-trade preferences, Binance, profile, subscription,
+/// about, sign out).  Operator surfaces (engine defaults, agents,
+/// risk gates, dev tools) live in the separate ops app — not here.
 import 'package:flutter/material.dart';
 
 import '../../data/app_config.dart';
+import '../auth/pages/phone_signin_page.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
 import 'pages/about_page.dart';
-import 'pages/agents_settings_page.dart';
 import 'pages/api_keys_settings_page.dart';
 import 'pages/auto_trade_settings_page.dart';
-import 'pages/engine_defaults_page.dart';
 import 'pages/pretp_settings_page.dart';
-import 'pages/risk_gates_settings_page.dart';
+import 'pages/profile_settings_page.dart';
 import 'pages/subscription_page.dart';
 
 class SettingsPage extends StatelessWidget {
@@ -22,12 +22,6 @@ class SettingsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scope = AppConfigScope.of(context);
-    // Owner-only entry-points.  When ``tier`` is null (mock mode,
-    // pre-Phase-2 JWT) we show the row too — the engine still gates
-    // writes server-side, so a non-owner who somehow opens the page
-    // can read but not edit.
-    final isOwner = scope.tier == null || scope.tier == 'owner';
     return Scaffold(
       appBar: AppBar(title: const Text('Menu')),
       body: ListView(
@@ -35,7 +29,7 @@ class SettingsPage extends StatelessWidget {
         children: [
           const SizedBox(height: LuminSpacing.md),
           _section(
-            title: 'EXECUTION',
+            title: 'AUTO-TRADE',
             rows: [
               _Row(
                 icon: Icons.auto_mode,
@@ -50,34 +44,9 @@ class SettingsPage extends StatelessWidget {
                 onTap: () => _push(context, const PreTpSettingsPage()),
               ),
               _Row(
-                icon: Icons.shield_outlined,
-                label: 'Risk gates',
-                subtitle: 'Daily-loss kill, leverage, equity floor',
-                onTap: () => _push(context, const RiskGatesSettingsPage()),
-              ),
-            ],
-          ),
-          const SizedBox(height: LuminSpacing.md),
-          _section(
-            title: 'ENGINE',
-            rows: [
-              if (isOwner)
-                _Row(
-                  icon: Icons.settings_input_component_outlined,
-                  label: 'Engine defaults',
-                  subtitle: 'Owner — engine-wide pre-TP + auto-mode',
-                  onTap: () => _push(context, const EngineDefaultsPage()),
-                ),
-              _Row(
-                icon: Icons.psychology_outlined,
-                label: 'Agents',
-                subtitle: '15 evaluators — per-agent toggles',
-                onTap: () => _push(context, const AgentsSettingsPage()),
-              ),
-              _Row(
-                icon: Icons.vpn_key_outlined,
-                label: 'API keys',
-                subtitle: 'Binance Futures credentials',
+                icon: Icons.account_balance_outlined,
+                label: 'Binance',
+                subtitle: 'Connect your Futures API keys',
                 onTap: () => _push(context, const ApiKeysSettingsPage()),
               ),
             ],
@@ -87,28 +56,29 @@ class SettingsPage extends StatelessWidget {
             title: 'ACCOUNT',
             rows: [
               _Row(
+                icon: Icons.person_outline,
+                label: 'Profile',
+                subtitle: 'Name, country, display currency',
+                onTap: () => _push(context, const ProfileSettingsPage()),
+              ),
+              _Row(
                 icon: Icons.workspace_premium_outlined,
                 label: 'Subscription',
                 subtitle: 'Free / Pro tiers',
                 onTap: () => _push(context, const SubscriptionPage()),
               ),
               _Row(
-                icon: Icons.palette_outlined,
-                label: 'Appearance',
-                subtitle: 'Dark mode (always on for now)',
-                onTap: () => _stub(context, 'Appearance'),
-              ),
-              _Row(
-                icon: Icons.translate_outlined,
-                label: 'Language',
-                subtitle: 'English',
-                onTap: () => _stub(context, 'Language'),
-              ),
-              _Row(
                 icon: Icons.info_outline,
                 label: 'About',
                 subtitle: 'Version, terms, risk disclosure',
                 onTap: () => _push(context, const AboutPage()),
+              ),
+              _Row(
+                icon: Icons.logout,
+                label: 'Sign out',
+                subtitle: 'Wipes the cached token; phone signin again next launch',
+                destructive: true,
+                onTap: () => _signOut(context),
               ),
             ],
           ),
@@ -164,12 +134,53 @@ class SettingsPage extends StatelessWidget {
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
   }
 
-  void _stub(BuildContext context, String label) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('$label — not yet implemented'),
-        duration: const Duration(seconds: 2),
+  Future<void> _signOut(BuildContext context) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: LuminColors.bgCard,
+        title: const Text(
+          'Sign out?',
+          style: TextStyle(color: LuminColors.textPrimary),
+        ),
+        content: const Text(
+          'You\'ll need to verify your phone again on next launch.  Your '
+          'Binance keys stay on the device — you can pick up where you '
+          'left off when you sign back in with the same phone.',
+          style: TextStyle(color: LuminColors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: LuminColors.textSecondary),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              'Sign out',
+              style: TextStyle(
+                color: LuminColors.loss,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
       ),
+    );
+    if (confirm != true) return;
+    if (!context.mounted) return;
+    final scope = AppConfigScope.of(context);
+    // Stop the auto-trade watcher first so it doesn't tick against
+    // a stale userId after the JWT is wiped.
+    scope.autoTradeWatcher.stop();
+    await scope.resetConnection();
+    if (!context.mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const PhoneSignInPage()),
+      (_) => false,
     );
   }
 }
@@ -180,15 +191,18 @@ class _Row extends StatelessWidget {
     required this.label,
     required this.subtitle,
     required this.onTap,
+    this.destructive = false,
   });
 
   final IconData icon;
   final String label;
   final String subtitle;
   final VoidCallback onTap;
+  final bool destructive;
 
   @override
   Widget build(BuildContext context) {
+    final fg = destructive ? LuminColors.loss : LuminColors.accent;
     return InkWell(
       onTap: onTap,
       child: Padding(
@@ -202,11 +216,11 @@ class _Row extends StatelessWidget {
               width: 32,
               height: 32,
               decoration: BoxDecoration(
-                color: LuminColors.accent.withOpacity(0.10),
+                color: fg.withOpacity(0.10),
                 borderRadius: BorderRadius.circular(LuminRadii.sm),
               ),
               alignment: Alignment.center,
-              child: Icon(icon, color: LuminColors.accent, size: 18),
+              child: Icon(icon, color: fg, size: 18),
             ),
             const SizedBox(width: LuminSpacing.md),
             Expanded(
@@ -215,8 +229,10 @@ class _Row extends StatelessWidget {
                 children: [
                   Text(
                     label,
-                    style: const TextStyle(
-                      color: LuminColors.textPrimary,
+                    style: TextStyle(
+                      color: destructive
+                          ? LuminColors.loss
+                          : LuminColors.textPrimary,
                       fontSize: 14,
                       fontWeight: FontWeight.w500,
                     ),
@@ -232,7 +248,8 @@ class _Row extends StatelessWidget {
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right, color: LuminColors.textMuted, size: 18),
+            const Icon(Icons.chevron_right,
+                color: LuminColors.textMuted, size: 18),
           ],
         ),
       ),
