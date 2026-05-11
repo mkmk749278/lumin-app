@@ -1,9 +1,15 @@
-/// Pre-TP grab settings — early-profit-taking knobs.
+/// Pre-TP grab settings — per-user overrides (Phase 2).
 ///
 /// Pre-TP grab moves SL to breakeven once price has captured a configurable
 /// fraction of the path to TP1 (covers fees + safety margin).  This page
-/// loads the engine's resolved view from ``GET /api/settings/pretp`` and
-/// persists user toggles via ``PUT`` on save.
+/// loads the **current user's** overrides via ``GET /api/settings/user/pretp``
+/// (or the engine defaults if the user has none yet) and persists toggles
+/// via ``PUT``.  The engine itself doesn't yet consume per-user values —
+/// Phase 3 wires execution; until then this page is honest about storage-
+/// only behaviour via the banner at the top.
+///
+/// The operator's engine-wide defaults live on a separate page (Settings →
+/// Engine defaults, owner-only entry), pointed at ``/api/settings/pretp``.
 import 'package:flutter/material.dart';
 
 import '../../../data/api_client.dart';
@@ -11,7 +17,6 @@ import '../../../data/app_config.dart';
 import '../../../data/repository.dart';
 import '../../../shared/tokens.dart';
 import '../../../shared/widgets/lumin_card.dart';
-import '../../../shared/widgets/owner_only_banner.dart';
 import '../../../shared/widgets/preview_badge.dart';
 
 /// UI-side regime buckets.  The backend uses 5 labels (TRENDING_UP /
@@ -29,8 +34,8 @@ class PreTpSettingsPage extends StatefulWidget {
 }
 
 class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
-  // Local edit state — populated from ``fetchPretpSettings`` on init,
-  // mutated by user toggles, written back via ``updatePretpSettings``.
+  // Local edit state — populated from ``fetchUserPretpSettings`` on init,
+  // mutated by user toggles, written back via ``updateUserPretpSettings``.
   bool _enabled = true;
   double _grabPct = 0.50;
   double _atrMult = 0.30;
@@ -63,6 +68,11 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
   bool _saving = false;
   String? _loadError;
 
+  /// True when the server reports the user has no overrides yet — every
+  /// rendered value is the engine default.  Drives the "Custom" badge
+  /// vs. "Engine defaults" hint at the top of the page.
+  bool _usingDefaults = true;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -74,12 +84,13 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
   Future<void> _load() async {
     final repo = AppConfigScope.of(context).repo;
     try {
-      final s = await repo.fetchPretpSettings();
+      final s = await repo.fetchUserPretpSettings();
       if (!mounted) return;
       setState(() {
         _enabled = s.enabled ?? _enabled;
         _atrMult = s.atrMultiplier ?? _atrMult;
         _feeFloor = s.feeFloorPct ?? _feeFloor;
+        _usingDefaults = s.usingDefaults ?? true;
         if (s.regimeAllowlist != null) {
           final tokens = s.regimeAllowlist!.toSet();
           _regimeTrending = tokens.intersection(_kTrendingTokens).isNotEmpty;
@@ -143,8 +154,9 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
       feeFloorPct: _feeFloor,
     );
     try {
-      await repo.updatePretpSettings(partial);
+      final saved = await repo.updateUserPretpSettings(partial);
       if (!mounted) return;
+      setState(() => _usingDefaults = saved.usingDefaults ?? false);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Pre-TP settings saved'),
@@ -176,12 +188,6 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
   Widget build(BuildContext context) {
     final scope = AppConfigScope.of(context);
     final isLive = scope.repo.isLive;
-    // Engine PR #355 gates PUT /api/settings/pretp to OWNER_TIER.  Hide
-    // the Save action + disable form inputs when the cached JWT's tier
-    // is anything other than owner.  ``null`` tier (mock mode, pre-Phase-2
-    // token) shows controls — the engine 403 remains the backstop.
-    final tier = scope.tier;
-    final canEdit = tier == null || tier == 'owner';
     return Scaffold(
       appBar: AppBar(
         title: const Text('Pre-TP grab'),
@@ -195,7 +201,7 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
                 child: CircularProgressIndicator(strokeWidth: 2),
               ),
             )
-          else if (canEdit)
+          else
             IconButton(
               icon: const Icon(Icons.check),
               onPressed: _loaded && _loadError == null ? _save : null,
@@ -203,11 +209,11 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
             ),
         ],
       ),
-      body: _bodyFor(isLive, canEdit: canEdit),
+      body: _bodyFor(isLive),
     );
   }
 
-  Widget _bodyFor(bool isLive, {bool canEdit = true}) {
+  Widget _bodyFor(bool isLive) {
     if (!_loaded) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -253,11 +259,11 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
         ),
       );
     }
-    final list = ListView(
+    return ListView(
       physics: const BouncingScrollPhysics(),
       children: [
         if (!isLive) const PreviewBadge(),
-        if (!canEdit) const OwnerOnlyBanner(),
+        _scopeBanner(),
         _masterCard(),
         const SizedBox(height: LuminSpacing.md),
         _thresholdsCard(),
@@ -268,16 +274,73 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
         const SizedBox(height: LuminSpacing.xl),
       ],
     );
-    // Non-owner tiers see all the fields read-only.  AbsorbPointer
-    // blocks every tap / scroll / drag below it; combined with the
-    // hidden Save button in the AppBar and the OwnerOnlyBanner at the
-    // top of the list, the page becomes a clear read-only view of the
-    // current engine config.  The visual `Opacity` reinforces the
-    // disabled state without altering the existing colour tokens.
-    if (canEdit) return list;
-    return Opacity(
-      opacity: 0.65,
-      child: AbsorbPointer(absorbing: true, child: list),
+  }
+
+  /// Honest banner explaining the current scope of these settings.
+  /// Phase 2 ships storage + endpoints but the engine doesn't yet
+  /// consume per-user values at signal-evaluation time — that's
+  /// Phase 3 (the user's app fires their own order using these
+  /// values).  Until then we say so plainly rather than imply effect.
+  Widget _scopeBanner() {
+    final usingDefaults = _usingDefaults;
+    final accent = usingDefaults ? LuminColors.textMuted : LuminColors.accent;
+    final label = usingDefaults
+        ? 'Using engine defaults.'
+        : 'Custom — your overrides.';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        LuminSpacing.lg,
+        LuminSpacing.sm,
+        LuminSpacing.lg,
+        LuminSpacing.md,
+      ),
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: LuminSpacing.md,
+          vertical: LuminSpacing.sm,
+        ),
+        decoration: BoxDecoration(
+          color: accent.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(LuminRadii.sm),
+          border: Border.all(color: accent.withOpacity(0.30)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              usingDefaults ? Icons.info_outline : Icons.tune,
+              color: accent,
+              size: 16,
+            ),
+            const SizedBox(width: LuminSpacing.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: accent,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  const Text(
+                    'Saved to your profile. Takes effect when auto-trade '
+                    'execution ships (Phase 3).',
+                    style: TextStyle(
+                      color: LuminColors.textSecondary,
+                      fontSize: 11,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
