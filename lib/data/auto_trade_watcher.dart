@@ -242,14 +242,27 @@ class AutoTradeWatcher {
       testnet: keys.testnet,
     );
     double equity = 0.0;
+    int openCount = 0;
     try {
       final account = await client.getAccount();
       equity = account.totalWalletBalance;
+      openCount = account.openPositionCount;
     } catch (e) {
       _setStatus(_status.copyWith(lastError: 'Auto-trade equity fetch: $e'));
       return;
     } finally {
       client.dispose();
+    }
+    // B12 per-user concurrent-position cap.  Engine PR #355 enforces
+    // the engine-wide cap; this guard adds the per-user layer using
+    // the openPositionCount we already paid for in getAccount.
+    final cap = settings.maxConcurrentPositions ?? 999;
+    if (openCount >= cap) {
+      _setStatus(_status.copyWith(
+        lastError:
+            'Skipped — already at concurrent-position cap ($openCount / $cap).',
+      ));
+      return;
     }
     final result = await _executor.placeFromSignal(
       userId: uid,
