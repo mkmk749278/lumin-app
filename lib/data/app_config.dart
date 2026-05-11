@@ -107,6 +107,12 @@ class _AppConfigScopeState extends State<AppConfigScope> {
   /// row to label the action.
   bool get needsOnboarding => _auth?.currentNeedsOnboarding() ?? false;
 
+  /// Current user_id parsed from the cached JWT subject (Phase 3).
+  /// Null for anonymous device-id tokens, mock mode, or pre-signin.
+  /// Used as the per-user secure-storage namespace key for Binance
+  /// API keys so per-user isolation survives sign-out / sign-in.
+  int? get userId => _auth?.currentUserId();
+
   Future<void> update(AppConfig next) async {
     setState(() {
       _config = next;
