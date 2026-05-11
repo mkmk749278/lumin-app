@@ -42,7 +42,12 @@ class AuthError implements Exception {
 const int _kRefreshLeadSeconds = 86400;
 
 class _CachedToken {
-  _CachedToken({required this.token, required this.expiresAt, this.tier});
+  _CachedToken({
+    required this.token,
+    required this.expiresAt,
+    this.tier,
+    this.needsOnboarding = false,
+  });
   final String token;
   final DateTime expiresAt;
   // `tier` from the JWT payload (``owner`` / ``paid`` / ``free`` /
@@ -52,6 +57,13 @@ class _CachedToken {
   // Save button to a tier that can't use it).  Nullable for backwards
   // compatibility with persisted tokens from before this field shipped.
   final String? tier;
+  // `needs_onboarding` from the token response — true when the engine
+  // user row has ``users.onboarded_at IS NULL`` (Phase 3).  Drives the
+  // post-OTP routing fork: true → SignupPage, false → NavShell.
+  // Defaults to false for backwards-compat with persisted tokens from
+  // before this field shipped (existing testers will land on NavShell
+  // and only see SignupPage on their next OTP signin).
+  final bool needsOnboarding;
 
   bool get isExpired => DateTime.now().isAfter(expiresAt);
   bool get needsRefresh =>
@@ -61,12 +73,14 @@ class _CachedToken {
         'token': token,
         'expiresAt': expiresAt.toIso8601String(),
         if (tier != null) 'tier': tier,
+        'needsOnboarding': needsOnboarding,
       };
 
   static _CachedToken fromJson(Map<String, dynamic> j) => _CachedToken(
         token: j['token'] as String,
         expiresAt: DateTime.parse(j['expiresAt'] as String),
         tier: j['tier'] as String?,
+        needsOnboarding: j['needsOnboarding'] as bool? ?? false,
       );
 }
 
@@ -220,10 +234,11 @@ class AuthService {
   }
 
   /// Phase 2 — phone-OTP signin, step 2.  Submits ``code`` for ``phone``;
-  /// on success the engine returns a user-id JWT carrying ``sub=user-<id>``
-  /// and ``tier=<paid|free|owner>``.  We persist it the same way as the
-  /// anonymous path, so all subsequent API calls flow unchanged.
-  Future<void> verifyOtpAndStore(String phone, String code) async {
+  /// on success the engine returns a user-id JWT carrying ``sub=user-<id>``,
+  /// ``tier=<paid|free|owner>``, and ``needs_onboarding`` (Phase 3).  We
+  /// persist it the same way as the anonymous path; the boolean is
+  /// returned so the caller can route between SignupPage and NavShell.
+  Future<bool> verifyOtpAndStore(String phone, String code) async {
     final uri = Uri.parse('${_trimSlash(baseUrl)}/api/auth/verify-otp');
     final resp = await _client
         .post(
@@ -240,7 +255,9 @@ class AuthService {
         'verify-otp failed (${resp.statusCode}): ${_decodeDetail(resp.body)}',
       );
     }
-    await _persist(_parseTokenResponse(resp.body));
+    final cached = _parseTokenResponse(resp.body);
+    await _persist(cached);
+    return cached.needsOnboarding;
   }
 
   // ---- internals --------------------------------------------------------
@@ -303,6 +320,27 @@ class AuthService {
   /// 403 per PR #355).
   String? currentTier() => _cached?.tier;
 
+  /// Current ``needs_onboarding`` value from the cached JWT.  False
+  /// (don't push SignupPage) when nothing is cached so the existing
+  /// signed-in user's first launch after this build doesn't get
+  /// bounced into onboarding — engine will recompute it on next
+  /// refresh anyway.
+  bool currentNeedsOnboarding() => _cached?.needsOnboarding ?? false;
+
+  /// Mark the cached token as onboarded — called after a successful
+  /// ``PUT /api/profile`` so the in-memory + on-disk state matches what
+  /// the engine now stores.  Skips re-persistence if already false.
+  Future<void> markOnboarded() async {
+    final c = _cached;
+    if (c == null || !c.needsOnboarding) return;
+    await _persist(_CachedToken(
+      token: c.token,
+      expiresAt: c.expiresAt,
+      tier: c.tier,
+      needsOnboarding: false,
+    ));
+  }
+
   _CachedToken _parseTokenResponse(String body) {
     final j = jsonDecode(body) as Map<String, dynamic>;
     final token = j['token'] as String;
@@ -311,12 +349,17 @@ class AuthService {
     // refresh path.  Older payloads (pre-Phase-2) may omit it; in that
     // case we leave tier=null and the UI defaults to "non-owner".
     final tier = j['tier'] as String?;
+    // ``needs_onboarding`` shipped in Phase 3 — older engines omit it;
+    // default to false so the user lands on NavShell rather than being
+    // bounced into SignupPage by a confusing-but-temporary backend.
+    final needsOnboarding = j['needs_onboarding'] as bool? ?? false;
     return _CachedToken(
       token: token,
       // Subtract 30s to give us margin against clock skew between
       // device and server.
       expiresAt: DateTime.now().add(Duration(seconds: expSeconds - 30)),
       tier: tier,
+      needsOnboarding: needsOnboarding,
     );
   }
 

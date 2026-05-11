@@ -17,8 +17,10 @@ import 'package:flutter/services.dart';
 import '../../../app/nav_shell.dart';
 import '../../../data/app_config.dart';
 import '../../../data/auth_service.dart';
+import '../../../data/country_codes.dart';
 import '../../../shared/tokens.dart';
 import '../../../shared/widgets/lumin_card.dart';
+import 'signup_page.dart';
 
 class OtpEntryPage extends StatefulWidget {
   const OtpEntryPage({
@@ -26,11 +28,17 @@ class OtpEntryPage extends StatefulWidget {
     required this.phone,
     required this.channelUsed,
     required this.expiresInSeconds,
+    this.countryHint,
   });
 
   final String phone;
   final String channelUsed;
   final int expiresInSeconds;
+
+  /// Country auto-detected on PhoneSignInPage.  Forwarded into
+  /// SignupPage so a new user doesn't have to re-pick when filling
+  /// their profile.  Null for legacy callers / direct OTP flows.
+  final CountryCode? countryHint;
 
   @override
   State<OtpEntryPage> createState() => _OtpEntryPageState();
@@ -93,12 +101,19 @@ class _OtpEntryPageState extends State<OtpEntryPage> {
       _error = null;
     });
     try {
-      await auth.verifyOtpAndStore(widget.phone, _codeCtl.text.trim());
+      final needsOnboarding =
+          await auth.verifyOtpAndStore(widget.phone, _codeCtl.text.trim());
       if (!mounted) return;
-      // Replace the entire stack so the user can't back-button into
-      // the signin pages — they're authed now.
+      // Replace the entire stack — the user is authed now and we don't
+      // want them back-buttoning into the signin pages.  Fork on the
+      // engine's ``needs_onboarding`` flag: brand-new users + returning
+      // users who never completed signup → SignupPage; otherwise →
+      // NavShell.
+      final Widget next = needsOnboarding
+          ? SignupPage(phoneE164: widget.phone, countryHint: widget.countryHint)
+          : const NavShell();
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const NavShell()),
+        MaterialPageRoute(builder: (_) => next),
         (_) => false,
       );
     } on AuthError catch (e) {

@@ -100,6 +100,13 @@ class _AppConfigScopeState extends State<AppConfigScope> {
   /// are bursty (subscription state changes), not continuous.
   String? get tier => _auth?.currentTier();
 
+  /// Whether the current user still needs to complete the signup
+  /// flow (display name + terms acceptance).  Engine sets the bit
+  /// based on ``users.onboarded_at``.  Used by OtpEntryPage to choose
+  /// between SignupPage and NavShell, and by the SettingsPage Profile
+  /// row to label the action.
+  bool get needsOnboarding => _auth?.currentNeedsOnboarding() ?? false;
+
   Future<void> update(AppConfig next) async {
     setState(() {
       _config = next;
