@@ -180,6 +180,7 @@ jobs:
 
       - name: Decode keystore (release only)
         if: env.ANDROID_KEYSTORE_B64 != ''
+        id: keystore
         env:
           ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
         run: |
@@ -189,12 +190,129 @@ jobs:
           echo "storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" >> android/key.properties
           echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}" >> android/key.properties
           echo "keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}" >> android/key.properties
+          echo "wired=true" >> "$GITHUB_OUTPUT"
+
+      - name: Patch app/build.gradle.kts to use release signing config
+        # Required because `flutter create` generates a build.gradle.kts
+        # that signs release builds with the *debug* keystore by default
+        # (with a TODO comment to fix it). Without this patch, the APK
+        # ends up signed by `CN=Android Debug` even when ANDROID_KEYSTORE_B64
+        # is set, key.properties is written, and the build "succeeds" —
+        # exactly the silent failure that produced the 2026-05-15
+        # Firebase Phone Auth `Invalid app info in play_integrity_token`
+        # error after we registered SHAs of the actual release keystore.
+        if: steps.keystore.outputs.wired == 'true'
+        run: |
+          set -eu
+          if [ -f android/app/build.gradle.kts ]; then
+            python3 << 'PYEOF'
+          from pathlib import Path
+
+          kts = Path('android/app/build.gradle.kts')
+          content = kts.read_text()
+          original = content
+
+          # 1) Top-level imports (idempotent).
+          if 'java.util.Properties' not in content:
+              content = (
+                  'import java.util.Properties\n'
+                  'import java.io.FileInputStream\n'
+                  '\n'
+              ) + content
+              print('Added Properties / FileInputStream imports')
+
+          # 2) Top-level keystore properties loader, before `android {`.
+          if 'val keystoreProperties' not in content:
+              loader = (
+                  '\n'
+                  'val keystoreProperties = Properties()\n'
+                  'val keystorePropertiesFile = rootProject.file("key.properties")\n'
+                  'if (keystorePropertiesFile.exists()) {\n'
+                  '    keystoreProperties.load(FileInputStream(keystorePropertiesFile))\n'
+                  '}\n'
+                  '\n'
+              )
+              if 'android {' in content:
+                  content = content.replace('android {', loader + 'android {', 1)
+                  print('Added keystoreProperties loader')
+              else:
+                  raise SystemExit('ERROR: android { ... } block not found in build.gradle.kts')
+
+          # 3) signingConfigs block inside `android { ... }`, before `buildTypes {`.
+          if 'signingConfigs {' not in content:
+              signing = (
+                  '    signingConfigs {\n'
+                  '        create("release") {\n'
+                  '            if (keystorePropertiesFile.exists()) {\n'
+                  '                keyAlias = keystoreProperties["keyAlias"] as String\n'
+                  '                keyPassword = keystoreProperties["keyPassword"] as String\n'
+                  '                storeFile = file(keystoreProperties["storeFile"] as String)\n'
+                  '                storePassword = keystoreProperties["storePassword"] as String\n'
+                  '            }\n'
+                  '        }\n'
+                  '    }\n'
+                  '\n'
+              )
+              if '    buildTypes {' in content:
+                  content = content.replace('    buildTypes {', signing + '    buildTypes {', 1)
+                  print('Added signingConfigs.release block')
+              else:
+                  raise SystemExit('ERROR: buildTypes { ... } block not found at expected indent')
+
+          # 4) Switch release buildType from debug → release signing config.
+          for pat in (
+              'signingConfig = signingConfigs.getByName("debug")',
+              'signingConfig signingConfigs.debug',  # Groovy-style — defensive
+          ):
+              if pat in content:
+                  content = content.replace(pat, 'signingConfig = signingConfigs.getByName("release")')
+                  print(f'Switched {pat!r} → release')
+
+          if content == original:
+              print('No changes — file may already be patched (idempotent re-run).')
+          else:
+              kts.write_text(content)
+              print('--- Patched android/app/build.gradle.kts ---')
+              print(content)
+          PYEOF
+          elif [ -f android/app/build.gradle ]; then
+            echo "ERROR: Groovy DSL detected; this patch step only handles Kotlin DSL."
+            echo "Add a Groovy-side patch here when Flutter regresses, or update flutter create to force Kotlin DSL."
+            exit 1
+          else
+            echo "ERROR: android/app/build.gradle.kts not found — flutter create didn't run?"
+            exit 1
+          fi
 
       - name: Build release APK
         run: |
           flutter build apk --release \
             --build-name=${{ github.ref_name }} \
             --build-number=${{ github.run_number }}
+
+      - name: Verify APK was signed with release keystore (not debug)
+        # Defensive: detect the silent-debug-signing failure mode that
+        # the build.gradle.kts patch is meant to fix. If apksigner shows
+        # CN=Android Debug, we fail the build loudly rather than ship an
+        # APK that will trip Firebase Phone Auth's play_integrity check
+        # in the field.
+        if: steps.keystore.outputs.wired == 'true'
+        run: |
+          set -eu
+          APK=$(ls build/app/outputs/flutter-apk/*-release.apk build/app/outputs/flutter-apk/lumin-*.apk 2>/dev/null | head -1)
+          if [ -z "$APK" ]; then
+            echo "ERROR: no APK found to verify"
+            ls -la build/app/outputs/flutter-apk/ || true
+            exit 1
+          fi
+          # apksigner is in build-tools; flutter-action puts it on PATH.
+          CERT_DN=$(apksigner verify --print-certs "$APK" 2>&1 | grep 'Signer #1 certificate DN' || true)
+          echo "$CERT_DN"
+          if echo "$CERT_DN" | grep -q "CN=Android Debug"; then
+            echo "FAIL: APK is signed with debug keystore. The build.gradle.kts patch did not stick."
+            exit 1
+          fi
+          echo "OK: APK is signed with release keystore."
 
       - name: Rename APK with run number
         run: |
