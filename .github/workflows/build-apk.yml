@@ -75,22 +75,24 @@ jobs:
           fi
           grep REQUEST_INSTALL_PACKAGES "$MANIFEST" || (echo "FAIL: missing" && exit 1)
 
-      - name: Inject google-services.json
+      - name: Inject google-services.json (if secret is set)
+        id: gs_json
         env:
           GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: |
-          mkdir -p android/app
           if [ -z "$GOOGLE_SERVICES_JSON" ]; then
-            echo "GOOGLE_SERVICES_JSON secret not set — Firebase auth will not work at runtime"
+            echo "GOOGLE_SERVICES_JSON secret not set — skipping Firebase wiring for this build"
             echo "Owner uploads it via Repo Settings → Secrets and Variables → Actions"
-            # Empty placeholder so the gradle plugin doesn't fail with a missing-file error
-            echo '{}' > android/app/google-services.json
+            echo "wired=false" >> "$GITHUB_OUTPUT"
           else
+            mkdir -p android/app
             echo "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
             echo "google-services.json written ($(wc -c < android/app/google-services.json) bytes)"
+            echo "wired=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Apply google-services Gradle plugin (DSL-agnostic)
+        if: steps.gs_json.outputs.wired == 'true'
         run: |
           set -eu
           # Modern Flutter (3.27+) generates Kotlin DSL build.gradle.kts;
@@ -103,7 +105,7 @@ jobs:
 
             # Root: add plugin declaration to settings.gradle.kts plugins block.
             if ! grep -q "com.google.gms.google-services" android/settings.gradle.kts; then
-              sed -i '/^plugins {/a\    id("com.google.gms.google-services") version "4.4.2" apply false' android/settings.gradle.kts
+              sed -i '/^plugins {/a\    id("com.google.gms.google-services") version "4.4.4" apply false' android/settings.gradle.kts
               echo "Patched android/settings.gradle.kts"
             fi
 
@@ -118,7 +120,7 @@ jobs:
 
             # Root: add buildscript classpath in build.gradle.
             if ! grep -q "com.google.gms:google-services" android/build.gradle; then
-              sed -i "/classpath 'com.android.tools.build:gradle/a\\        classpath 'com.google.gms:google-services:4.4.2'" android/build.gradle
+              sed -i "/classpath 'com.android.tools.build:gradle/a\\        classpath 'com.google.gms:google-services:4.4.4'" android/build.gradle
               echo "Patched android/build.gradle"
             fi
 
