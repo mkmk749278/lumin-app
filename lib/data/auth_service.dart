@@ -1,31 +1,46 @@
-/// Auth service — JWT lifecycle.
+/// Auth service — Firebase-backed session lifecycle.
 ///
-/// Phase 2 introduces phone-OTP authentication.  First launch shows a
-/// phone-signin page that calls :func:`requestOtp` then
-/// :func:`verifyOtpAndStore`.  The resulting user-id JWT is persisted to
-/// flutter_secure_storage (encrypted at-rest) and reused/refreshed
-/// transparently across app launches.
+/// Replaces the previous local HS256 JWT mint/refresh path with the
+/// Firebase Authentication SDK.  After this migration:
 ///
-/// On a 401 from any API call, ``handleUnauthorized()`` clears the cached
-/// JWT.  In production this surfaces as a sign-in re-prompt at the next
-/// boot; in :const:`kDebugMode` the dev-bypass path on the phone-signin
-/// page can re-mint an anonymous JWT.
+///   * SMS path: Firebase Phone Auth handles delivery + verification
+///     directly (Play Integrity / SafetyNet on Android, no engine
+///     round-trip for the code itself).
+///   * Telegram path: app POSTs to the engine's
+///     `/api/auth/telegram-otp/issue` and `/verify` endpoints; verify
+///     returns a Firebase **custom token** which we exchange for a
+///     real Firebase session via `signInWithCustomToken`.
+///   * Every authorized engine API call carries
+///     `Authorization: Bearer <Firebase ID token>`; the SDK
+///     auto-refreshes the ID token on a ~1h cycle so the HTTP client
+///     just calls [currentIdToken] before each request.
 ///
-/// The engine still supports ``/api/auth/anonymous`` post-Phase-2 — it
-/// returns ``tier=all-access``.  We expose :func:`mintAnonymous` for
-/// the dev-bypass path on the phone-signin page (debug builds) so the
-/// CI / manual-test workflow doesn't require a working OTP delivery
-/// stack.
+/// Tier / user_id / needs_onboarding used to be parsed out of the
+/// local JWT payload.  Post-migration the engine returns them on the
+/// telegram-otp verify response and (for SMS-only signins) when the
+/// app first calls `/api/profile`.  We cache the latest values in
+/// memory so the existing `AppConfigScope.tier` / `.userId` /
+/// `.needsOnboarding` getters keep working without async plumbing
+/// through every widget.
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 
-/// Result of a successful ``POST /api/auth/request-otp``.
-class OtpRequestResult {
-  OtpRequestResult({required this.channelUsed, required this.expiresInSeconds});
-  final String channelUsed; // "whatsapp" | "sms" | "log"
+/// Result of a successful `POST /api/auth/telegram-otp/issue`.
+///
+/// `channelUsed` is always `"telegram"` for this path — kept as a
+/// field so the OTP-entry page can render a channel-aware hint
+/// without special-casing.  `expiresInSeconds` drives the resend
+/// countdown.
+class TelegramOtpIssueResult {
+  TelegramOtpIssueResult({
+    required this.channelUsed,
+    required this.expiresInSeconds,
+  });
+  final String channelUsed;
   final int expiresInSeconds;
 }
 
@@ -36,181 +51,144 @@ class AuthError implements Exception {
   String toString() => 'AuthError: $message';
 }
 
-/// Refresh the JWT this many seconds *before* expiry to avoid a race
-/// where the token was valid when sent but expired by the time the
-/// server validates it.
-const int _kRefreshLeadSeconds = 86400;
-
-class _CachedToken {
-  _CachedToken({
-    required this.token,
-    required this.expiresAt,
-    this.tier,
-    this.needsOnboarding = false,
-  });
-  final String token;
-  final DateTime expiresAt;
-  // `tier` from the JWT payload (``owner`` / ``paid`` / ``free`` /
-  // ``all-access``).  Surfaced by [AuthService.currentTier] so UI layers
-  // can hide write controls on tier-gated endpoints (engine returns 403
-  // for non-owner writes per PR #355; the app should not display the
-  // Save button to a tier that can't use it).  Nullable for backwards
-  // compatibility with persisted tokens from before this field shipped.
-  final String? tier;
-  // `needs_onboarding` from the token response — true when the engine
-  // user row has ``users.onboarded_at IS NULL`` (Phase 3).  Drives the
-  // post-OTP routing fork: true → SignupPage, false → NavShell.
-  // Defaults to false for backwards-compat with persisted tokens from
-  // before this field shipped (existing testers will land on NavShell
-  // and only see SignupPage on their next OTP signin).
-  final bool needsOnboarding;
-
-  bool get isExpired => DateTime.now().isAfter(expiresAt);
-  bool get needsRefresh =>
-      DateTime.now().isAfter(expiresAt.subtract(const Duration(seconds: _kRefreshLeadSeconds)));
-
-  Map<String, dynamic> toJson() => {
-        'token': token,
-        'expiresAt': expiresAt.toIso8601String(),
-        if (tier != null) 'tier': tier,
-        'needsOnboarding': needsOnboarding,
-      };
-
-  static _CachedToken fromJson(Map<String, dynamic> j) => _CachedToken(
-        token: j['token'] as String,
-        expiresAt: DateTime.parse(j['expiresAt'] as String),
-        tier: j['tier'] as String?,
-        needsOnboarding: j['needsOnboarding'] as bool? ?? false,
-      );
-}
-
+/// Surface called by API client / auth pages / settings.
+///
+/// All Firebase interaction is funneled through this class so unit
+/// tests (when we add them — deferred for this PR) can swap a
+/// `FirebaseAuth` mock in via the optional constructor parameter.
 class AuthService {
   AuthService({
     required this.baseUrl,
+    FirebaseAuth? firebaseAuth,
     FlutterSecureStorage? storage,
     http.Client? client,
-  })  : _storage = storage ?? const FlutterSecureStorage(),
+  })  : _auth = firebaseAuth ?? FirebaseAuth.instance,
+        _storage = storage ?? const FlutterSecureStorage(),
         _client = client ?? http.Client();
 
   final String baseUrl;
+  final FirebaseAuth _auth;
   final FlutterSecureStorage _storage;
   final http.Client _client;
 
-  static const _kStorageKey = 'lumin.auth.jwt';
+  // Cached metadata from the most recent telegram-otp verify response.
+  // Populated on signin via custom token; survives until signOut /
+  // process restart.  SMS-only signins leave this null — call sites
+  // already tolerate that (they treat null as "not yet known, render
+  // the safe default").
+  int? _cachedUserId;
+  String? _cachedTier;
+  String? _cachedPaidUntil;
+  bool _cachedNeedsOnboarding = false;
 
-  // In-memory cache so we don't hit secure storage on every request.
-  // Reset on signOut() and after handleUnauthorized().
-  _CachedToken? _cached;
+  // ---- Firebase session surface ----------------------------------------
 
-  /// Returns a JWT suitable for use in an Authorization: Bearer header.
-  /// Mints, refreshes, or reuses the cached token transparently.
-  Future<String> getValidToken() async {
-    // 1. In-memory cache
-    if (_cached != null && !_cached!.isExpired && !_cached!.needsRefresh) {
-      return _cached!.token;
-    }
+  /// Live stream of the current Firebase user (null when signed out).
+  /// Used by [_AuthGate] in `main.dart` to drive sign-in / nav-shell
+  /// routing reactively.
+  Stream<User?> get authStateChanges => _auth.authStateChanges();
 
-    // 2. Disk-backed cache
-    if (_cached == null) {
-      _cached = await _loadFromStorage();
-    }
+  /// Synchronous read of the current Firebase user.  Null when no
+  /// session is active.  Prefer [authStateChanges] for UI; this is
+  /// for one-shot boot-time checks.
+  User? get currentUser => _auth.currentUser;
 
-    // 3. Refresh window — try to extend without re-minting
-    if (_cached != null && !_cached!.isExpired && _cached!.needsRefresh) {
-      try {
-        await _refresh(_cached!.token);
-        return _cached!.token;
-      } catch (_) {
-        // Refresh failed — fall through to anonymous mint
-      }
-    }
-
-    // 4. Cached token still valid?
-    if (_cached != null && !_cached!.isExpired) {
-      return _cached!.token;
-    }
-
-    // 5. Mint a fresh anonymous token
-    await _mintAnonymous();
-    return _cached!.token;
+  /// Returns the current Firebase ID token, or null if no user is
+  /// signed in.  Passing `forceRefresh: true` bypasses the SDK's
+  /// in-memory cache and round-trips to Firebase — the API client
+  /// uses that path on a 401 to handle the rare case where our
+  /// cached token expired between auto-refresh cycles.
+  Future<String?> currentIdToken({bool forceRefresh = false}) async {
+    final user = _auth.currentUser;
+    if (user == null) return null;
+    return await user.getIdToken(forceRefresh);
   }
 
-  /// Called by the API client when a request returns 401.  Drops the
-  /// cached token so the next ``getValidToken`` re-mints from scratch.
-  /// The caller should then retry the original request once.
-  Future<void> handleUnauthorized() async {
-    _cached = null;
-    await _storage.delete(key: _kStorageKey);
-  }
+  // ---- SMS path (Firebase Phone Auth) ----------------------------------
 
-  /// Hard reset — used by Settings → "Reset connection".
-  Future<void> signOut() async {
-    await handleUnauthorized();
-  }
-
-  /// Quick boot-time check: does the device have a (non-corrupt, possibly
-  /// expired) token in secure storage?  Used by main.dart to decide
-  /// whether to show the phone-signin page on launch.  An expired token
-  /// counts as "stored" — the in-flight refresh path will renew it; if
-  /// refresh fails the user falls back to phone-signin via the 401 path.
-  Future<bool> hasStoredToken() async {
-    if (_cached != null) return true;
-    final loaded = await _loadFromStorage();
-    if (loaded == null) return false;
-    _cached = loaded;
-    return true;
-  }
-
-  /// Mint a fresh anonymous JWT (``sub=device-<uuid>``, ``tier=all-access``).
-  /// Public so the debug-build phone-signin page can offer a "skip" path
-  /// for CI / manual testing without a working OTP delivery stack.
-  Future<void> mintAnonymous() => _mintAnonymous();
-
-  /// Sign in with the engine's static ``API_AUTH_TOKEN``.  This is the
-  /// owner-only bypass: the engine treats this exact bearer string as
-  /// ``tier=owner`` (PR #355).  Validates by hitting an authenticated
-  /// endpoint (`/api/pulse`); on success persists the token to secure
-  /// storage with a long expiry so subsequent API calls just work.
+  /// Kick off Firebase Phone Auth.  Three things can happen:
   ///
-  /// Owner uses this on first launch to skip the phone-OTP flow
-  /// entirely.  If the engine rotates the static token, the next
-  /// refresh attempt will 401 and the user will be punted back to
-  /// signin — same path as a normal session expiry.
-  Future<void> signInWithAdminToken(String token) async {
-    final uri = Uri.parse('${_trimSlash(baseUrl)}/api/pulse');
+  ///   * `onCodeSent` fires once the SMS is dispatched (most common).
+  ///     The caller advances to the OTP page; later calls
+  ///     [confirmSmsCode] with the captured `verificationId`.
+  ///   * `onAutoVerified` fires on devices where Play Integrity
+  ///     completes invisible verification — there's no code to type.
+  ///   * `onVerificationFailed` fires on any error before code-sent
+  ///     (invalid number, quota exceeded, reCAPTCHA dismissed, etc.).
+  Future<void> startSmsSignIn({
+    required String phoneE164,
+    required void Function(String verificationId, int? resendToken) onCodeSent,
+    required void Function(FirebaseAuthException error) onVerificationFailed,
+    required void Function(UserCredential credential) onAutoVerified,
+  }) async {
+    await _auth.verifyPhoneNumber(
+      phoneNumber: phoneE164,
+      verificationCompleted: (credential) async {
+        final result = await _auth.signInWithCredential(credential);
+        onAutoVerified(result);
+      },
+      verificationFailed: onVerificationFailed,
+      codeSent: onCodeSent,
+      codeAutoRetrievalTimeout: (_) {},
+    );
+  }
+
+  /// Exchange the `verificationId` (received via `onCodeSent`) and the
+  /// user-typed 6-digit `code` for a Firebase session.
+  Future<UserCredential> confirmSmsCode(
+    String verificationId,
+    String code,
+  ) async {
+    final credential = PhoneAuthProvider.credential(
+      verificationId: verificationId,
+      smsCode: code,
+    );
+    return await _auth.signInWithCredential(credential);
+  }
+
+  // ---- Telegram path (engine-mediated custom token) --------------------
+
+  /// Ask the engine to deliver a 6-digit code via Telegram to
+  /// `phoneE164`.  Returns the channel hint + TTL so the OTP page can
+  /// render the same UX as the legacy WhatsApp/SMS paths.
+  Future<TelegramOtpIssueResult> startTelegramSignIn(String phoneE164) async {
+    final uri = Uri.parse('${_trimSlash(baseUrl)}/api/auth/telegram-otp/issue');
     final resp = await _client
-        .get(uri, headers: {'Authorization': 'Bearer $token'})
-        .timeout(const Duration(seconds: 8));
+        .post(
+          uri,
+          headers: const {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({'phone_e164': phoneE164}),
+        )
+        .timeout(const Duration(seconds: 10));
     if (resp.statusCode != 200) {
       throw AuthError(
-        'admin-token signin failed (${resp.statusCode}): '
+        'telegram-otp/issue failed (${resp.statusCode}): '
         '${_decodeDetail(resp.body)}',
       );
     }
-    // Static token has no expiry server-side; pick a long window so the
-    // refresh path (which would 401 against a non-JWT bearer) doesn't
-    // fire during normal use.  If the token is ever rotated, the next
-    // 401 from any API call clears the cache via handleUnauthorized.
-    //
-    // Tier is hard-coded to "owner" — engine PR #355 treats the static
-    // admin token as owner-tier regardless of any tier claim, so the
-    // UI should reflect that.  The /api/pulse 200 above confirmed the
-    // token is valid; if it's not really admin-tier, the engine will
-    // 403 on the first write attempt and the cache will clear.
-    await _persist(_CachedToken(
-      token: token,
-      expiresAt: DateTime.now().add(const Duration(days: 365)),
-      tier: 'owner',
-    ));
+    final j = jsonDecode(resp.body) as Map<String, dynamic>;
+    return TelegramOtpIssueResult(
+      channelUsed: j['channel_used'] as String? ?? 'telegram',
+      expiresInSeconds: (j['expires_in_seconds'] as num?)?.toInt() ?? 300,
+    );
   }
 
-  /// Phase 2 — phone-OTP signin, step 1.  Asks the engine to send a
-  /// 6-digit code to ``phone`` (E.164).  Returns the channel used so
-  /// the caller can render the right hint ("check WhatsApp" vs "check
-  /// SMS" vs "see logs").  Throws :class:`AuthError` on 429
-  /// (rate-limited), 502 (delivery failed), 503 (auth not configured).
-  Future<OtpRequestResult> requestOtp(String phone) async {
-    final uri = Uri.parse('${_trimSlash(baseUrl)}/api/auth/request-otp');
+  /// Submit `code` for `phoneE164`; on success the engine returns a
+  /// Firebase **custom token** which we exchange for a real Firebase
+  /// session.  The verify response also carries the user's tier /
+  /// paid_until / needs_onboarding — we cache those here so the
+  /// existing `AppConfigScope.tier` / `.userId` / `.needsOnboarding`
+  /// getters keep returning sensible values without a follow-up
+  /// engine round-trip.
+  Future<UserCredential> confirmTelegramCode(
+    String phoneE164,
+    String code,
+  ) async {
+    final uri =
+        Uri.parse('${_trimSlash(baseUrl)}/api/auth/telegram-otp/verify');
     final resp = await _client
         .post(
           uri,
@@ -218,180 +196,88 @@ class AuthService {
             'Accept': 'application/json',
             'Content-Type': 'application/json',
           },
-          body: jsonEncode({'phone': phone}),
+          body: jsonEncode({'phone_e164': phoneE164, 'code': code}),
         )
         .timeout(const Duration(seconds: 10));
     if (resp.statusCode != 200) {
       throw AuthError(
-        'request-otp failed (${resp.statusCode}): ${_decodeDetail(resp.body)}',
+        'telegram-otp/verify failed (${resp.statusCode}): '
+        '${_decodeDetail(resp.body)}',
       );
     }
     final j = jsonDecode(resp.body) as Map<String, dynamic>;
-    return OtpRequestResult(
-      channelUsed: j['channel_used'] as String,
-      expiresInSeconds: (j['expires_in_seconds'] as num).toInt(),
-    );
-  }
-
-  /// Phase 2 — phone-OTP signin, step 2.  Submits ``code`` for ``phone``;
-  /// on success the engine returns a user-id JWT carrying ``sub=user-<id>``,
-  /// ``tier=<paid|free|owner>``, and ``needs_onboarding`` (Phase 3).  We
-  /// persist it the same way as the anonymous path; the boolean is
-  /// returned so the caller can route between SignupPage and NavShell.
-  Future<bool> verifyOtpAndStore(String phone, String code) async {
-    final uri = Uri.parse('${_trimSlash(baseUrl)}/api/auth/verify-otp');
-    final resp = await _client
-        .post(
-          uri,
-          headers: const {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-          },
-          body: jsonEncode({'phone': phone, 'code': code}),
-        )
-        .timeout(const Duration(seconds: 10));
-    if (resp.statusCode != 200) {
-      throw AuthError(
-        'verify-otp failed (${resp.statusCode}): ${_decodeDetail(resp.body)}',
-      );
+    final customToken = j['custom_token'] as String?;
+    if (customToken == null || customToken.isEmpty) {
+      throw AuthError('telegram-otp/verify response missing custom_token');
     }
-    final cached = _parseTokenResponse(resp.body);
-    await _persist(cached);
-    return cached.needsOnboarding;
+    _cachedUserId = (j['user_id'] as num?)?.toInt();
+    _cachedTier = j['tier'] as String?;
+    _cachedPaidUntil = j['paid_until'] as String?;
+    _cachedNeedsOnboarding = j['needs_onboarding'] as bool? ?? false;
+    return await _auth.signInWithCustomToken(customToken);
   }
 
-  // ---- internals --------------------------------------------------------
+  // ---- Sign out + legacy cleanup ---------------------------------------
 
-  Future<_CachedToken?> _loadFromStorage() async {
-    try {
-      final raw = await _storage.read(key: _kStorageKey);
-      if (raw == null) return null;
-      return _CachedToken.fromJson(jsonDecode(raw) as Map<String, dynamic>);
-    } catch (_) {
-      // Corrupt entry — wipe so next mint starts clean.
-      await _storage.delete(key: _kStorageKey);
-      return null;
-    }
+  /// Wipe the Firebase session.  Drops the cached engine metadata
+  /// alongside so the next signin's getters don't surface stale tier.
+  Future<void> signOut() async {
+    _cachedUserId = null;
+    _cachedTier = null;
+    _cachedPaidUntil = null;
+    _cachedNeedsOnboarding = false;
+    await _auth.signOut();
   }
 
-  Future<void> _persist(_CachedToken t) async {
-    _cached = t;
-    await _storage.write(key: _kStorageKey, value: jsonEncode(t.toJson()));
-  }
-
-  Future<void> _mintAnonymous() async {
-    final uri = Uri.parse('${_trimSlash(baseUrl)}/api/auth/anonymous');
-    final resp = await _client
-        .post(uri, headers: const {'Accept': 'application/json'})
-        .timeout(const Duration(seconds: 8));
-    if (resp.statusCode != 200) {
-      throw AuthError(
-        'mint failed (${resp.statusCode}): ${_decodeDetail(resp.body)}',
-      );
-    }
-    await _persist(_parseTokenResponse(resp.body));
-  }
-
-  Future<void> _refresh(String token) async {
-    final uri = Uri.parse('${_trimSlash(baseUrl)}/api/auth/refresh');
-    final resp = await _client
-        .post(
-          uri,
-          headers: const {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-          },
-          body: jsonEncode({'token': token}),
-        )
-        .timeout(const Duration(seconds: 8));
-    if (resp.statusCode != 200) {
-      throw AuthError(
-        'refresh failed (${resp.statusCode}): ${_decodeDetail(resp.body)}',
-      );
-    }
-    await _persist(_parseTokenResponse(resp.body));
-  }
-
-  /// Current tier from the cached JWT, or ``null`` if not yet signed in.
-  /// Returned values match the engine's tier constants:
-  /// ``"owner"`` / ``"paid"`` / ``"free"`` / ``"all-access"``.  UI layers
-  /// use this to gate write controls (Save buttons on settings pages are
-  /// hidden when the tier can't successfully POST/PUT — engine enforces
-  /// 403 per PR #355).
-  String? currentTier() => _cached?.tier;
-
-  /// Current user_id parsed from the JWT subject (``user-<id>``), or
-  /// null when the cached token is anonymous (``device-<uuid>``) or
-  /// missing.  Used by per-user secure-storage namespaces (Phase 3 —
-  /// Binance keys) so signing out as user A and signing back in as
-  /// user B doesn't leak A's locally-stored keys to B.
+  /// One-shot cleanup on first post-migration launch: wipe any local
+  /// JWT entries left behind by the pre-Firebase auth service so they
+  /// don't sit in secure storage forever.  Idempotent — running it on
+  /// every launch is harmless (`delete` is a no-op for missing keys).
   ///
-  /// Decodes the JWT payload without verifying the signature — we
-  /// already trust this token (we minted it from the engine and it
-  /// passed signature verification on every API call).  The risk of
-  /// trusting the local sub is bounded: worst case is we read a
-  /// secure-storage entry under the wrong user_id, which the engine
-  /// would 403 on if it actually mattered.
-  int? currentUserId() {
-    final c = _cached;
-    if (c == null) return null;
-    try {
-      final parts = c.token.split('.');
-      if (parts.length != 3) return null;
-      final padded =
-          parts[1] + '=' * ((4 - parts[1].length % 4) % 4);
-      final payload = jsonDecode(utf8.decode(base64Url.decode(padded)))
-          as Map<String, dynamic>;
-      final sub = payload['sub'] as String?;
-      if (sub == null || !sub.startsWith('user-')) return null;
-      return int.tryParse(sub.substring('user-'.length));
-    } catch (_) {
-      return null;
-    }
+  /// Called from `main.dart` after `Firebase.initializeApp` and before
+  /// `runApp` so the keys are gone before any code path can read them.
+  Future<void> cleanupLegacyJwtStorage() async {
+    // The pre-migration key from the old AuthService (`_kStorageKey`).
+    await _storage.delete(key: 'lumin.auth.jwt');
+    // Defensive: a generic name some earlier iterations may have used.
+    await _storage.delete(key: 'jwt_token');
   }
 
-  /// Current ``needs_onboarding`` value from the cached JWT.  False
-  /// (don't push SignupPage) when nothing is cached so the existing
-  /// signed-in user's first launch after this build doesn't get
-  /// bounced into onboarding — engine will recompute it on next
-  /// refresh anyway.
-  bool currentNeedsOnboarding() => _cached?.needsOnboarding ?? false;
+  // ---- Cached engine metadata (back-compat with old call sites) --------
 
-  /// Mark the cached token as onboarded — called after a successful
-  /// ``PUT /api/profile`` so the in-memory + on-disk state matches what
-  /// the engine now stores.  Skips re-persistence if already false.
+  /// Current tier from the most recent telegram-otp verify, or null
+  /// when not yet known (SMS-only signin, or pre-signin).  UI layers
+  /// treat null as "show controls, let the engine 403 if needed".
+  String? currentTier() => _cachedTier;
+
+  /// Current `paid_until` ISO timestamp, or null when not yet known.
+  String? currentPaidUntil() => _cachedPaidUntil;
+
+  /// Current engine `user_id`, or null when not yet known.  Used as
+  /// the per-user secure-storage namespace key for Binance API keys
+  /// (Phase 3) so signing out as A and back in as B doesn't leak A's
+  /// locally-stored keys to B.
+  int? currentUserId() => _cachedUserId;
+
+  /// Current `needs_onboarding` value.  False as the default so the
+  /// existing signed-in user's first launch after this build doesn't
+  /// get bounced into onboarding when the cache is empty — the
+  /// engine recomputes it on the next `/api/profile` round-trip.
+  bool currentNeedsOnboarding() => _cachedNeedsOnboarding;
+
+  /// Mark the cached state as onboarded — called by SignupPage after
+  /// a successful `PUT /api/profile` so the in-memory bit matches
+  /// what the engine now stores.
   Future<void> markOnboarded() async {
-    final c = _cached;
-    if (c == null || !c.needsOnboarding) return;
-    await _persist(_CachedToken(
-      token: c.token,
-      expiresAt: c.expiresAt,
-      tier: c.tier,
-      needsOnboarding: false,
-    ));
+    _cachedNeedsOnboarding = false;
   }
 
-  _CachedToken _parseTokenResponse(String body) {
-    final j = jsonDecode(body) as Map<String, dynamic>;
-    final token = j['token'] as String;
-    final expSeconds = (j['exp_seconds'] as num).toInt();
-    // Engine returns the tier alongside the token on every mint /
-    // refresh path.  Older payloads (pre-Phase-2) may omit it; in that
-    // case we leave tier=null and the UI defaults to "non-owner".
-    final tier = j['tier'] as String?;
-    // ``needs_onboarding`` shipped in Phase 3 — older engines omit it;
-    // default to false so the user lands on NavShell rather than being
-    // bounced into SignupPage by a confusing-but-temporary backend.
-    final needsOnboarding = j['needs_onboarding'] as bool? ?? false;
-    return _CachedToken(
-      token: token,
-      // Subtract 30s to give us margin against clock skew between
-      // device and server.
-      expiresAt: DateTime.now().add(Duration(seconds: expSeconds - 30)),
-      tier: tier,
-      needsOnboarding: needsOnboarding,
-    );
-  }
+  /// Quick boot-time check: is a Firebase user currently signed in?
+  /// Retained for back-compat with the splash-page gate; new code
+  /// should subscribe to [authStateChanges] instead.
+  Future<bool> hasStoredToken() async => _auth.currentUser != null;
+
+  // ---- internals -------------------------------------------------------
 
   static String _trimSlash(String s) =>
       s.endsWith('/') ? s.substring(0, s.length - 1) : s;
