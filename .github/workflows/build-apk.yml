@@ -91,6 +91,41 @@ jobs:
             echo "wired=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Generate firebase_options.dart android block from google-services.json
+        if: steps.gs_json.outputs.wired == 'true'
+        run: |
+          set -eu
+          GS=android/app/google-services.json
+          API_KEY=$(jq -r '.client[0].api_key[0].current_key // empty' "$GS")
+          APP_ID=$(jq -r '.client[0].client_info.mobilesdk_app_id // empty' "$GS")
+          SENDER_ID=$(jq -r '.project_info.project_number // empty' "$GS")
+          PROJECT_ID=$(jq -r '.project_info.project_id // empty' "$GS")
+          STORAGE_BUCKET=$(jq -r '.project_info.storage_bucket // empty' "$GS")
+
+          # Defensive: fail fast if any required field is missing — surfaces
+          # a malformed google-services.json before flutter build wastes time.
+          for v in "API_KEY=$API_KEY" "APP_ID=$APP_ID" "SENDER_ID=$SENDER_ID" "PROJECT_ID=$PROJECT_ID" "STORAGE_BUCKET=$STORAGE_BUCKET"; do
+            key="${v%%=*}"; val="${v#*=}"
+            if [ -z "$val" ]; then
+              echo "ERROR: $key is empty in google-services.json — verify the file is the correct one from Firebase Console"
+              echo "(structure expected: client[0].api_key[0].current_key, client[0].client_info.mobilesdk_app_id, project_info.{project_number,project_id,storage_bucket})"
+              exit 1
+            fi
+          done
+
+          # Substitute placeholders only inside the android FirebaseOptions block.
+          # iOS and web blocks retain their TODO placeholders until those targets ship.
+          sed -i "/^  static const FirebaseOptions android = FirebaseOptions(/,/^  );/ {
+            s|^    apiKey: .*|    apiKey: '$API_KEY',|
+            s|^    appId: .*|    appId: '$APP_ID',|
+            s|^    messagingSenderId: .*|    messagingSenderId: '$SENDER_ID',|
+            s|^    projectId: .*|    projectId: '$PROJECT_ID',|
+            s|^    storageBucket: .*|    storageBucket: '$STORAGE_BUCKET',|
+          }" lib/firebase_options.dart
+
+          echo "--- firebase_options.dart android block after substitution ---"
+          sed -n '/^  static const FirebaseOptions android = FirebaseOptions(/,/^  );/p' lib/firebase_options.dart
+
       - name: Apply google-services Gradle plugin (DSL-agnostic)
         if: steps.gs_json.outputs.wired == 'true'
         run: |
