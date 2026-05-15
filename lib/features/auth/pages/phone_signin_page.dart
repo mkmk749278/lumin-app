@@ -4,15 +4,19 @@
 ///   * country chip (flag + dial code), auto-detected from device locale
 ///   * national-format number input
 ///
-/// Submit composes the E.164 string and asks the backend to deliver a
-/// 6-digit OTP via WhatsApp / SMS / engine logs (depending on
-/// ``OTP_PRIMARY_CHANNEL``).  On success pushes [OtpEntryPage]; that
-/// page handles the SignupPage-vs-NavShell fork based on the engine's
-/// ``needs_onboarding`` flag.
+/// Two submit paths:
+///   * "Send via SMS" — Firebase Phone Auth.  Google's SDK delivers
+///     the code (Play Integrity invisible verification when
+///     available, reCAPTCHA fallback otherwise) and hands us back a
+///     `verificationId` we forward to [OtpEntryPage].
+///   * "Send via Telegram" — engine-mediated fallback.  POSTs
+///     `/api/auth/telegram-otp/issue`; the engine drops a 6-digit
+///     code into the user's Telegram, and OtpEntryPage will exchange
+///     it for a Firebase custom token via `/verify`.
 ///
-/// Operator-mode bypasses (admin-token signin, anonymous-skip) used
-/// to live here.  They've moved to the ops app — Lumin is consumer-
-/// only.  Owner signs in via phone OTP like every other tester.
+/// Operator bypasses (admin-token signin, anonymous skip) live in the
+/// separate ops app — Lumin is consumer-only.
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -91,31 +95,86 @@ class _PhoneSignInPageState extends State<PhoneSignInPage> {
     }
   }
 
-  Future<void> _submit() async {
-    if (!(_formKey.currentState?.validate() ?? false)) return;
+  AuthService? _resolveAuth() {
     final scope = AppConfigScope.of(context);
     final auth = scope.auth;
     if (auth == null) {
       setState(
           () => _error = 'Live backend not configured. Check API keys page.');
-      return;
     }
+    return auth;
+  }
+
+  Future<void> _submitSms() async {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    final auth = _resolveAuth();
+    if (auth == null) return;
     final phone = _composeE164();
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
-      final result = await auth.requestOtp(phone);
+      await auth.startSmsSignIn(
+        phoneE164: phone,
+        onCodeSent: (verificationId, _) {
+          if (!mounted) return;
+          setState(() => _busy = false);
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => OtpEntryPage(
+                phone: phone,
+                channel: OtpChannel.sms,
+                verificationId: verificationId,
+                expiresInSeconds: 60, // matches Firebase auto-retrieval timeout
+                countryHint: _country,
+              ),
+            ),
+          );
+        },
+        onVerificationFailed: (FirebaseAuthException e) {
+          if (!mounted) return;
+          setState(() {
+            _busy = false;
+            _error = e.message ?? 'Couldn\'t send code (${e.code})';
+          });
+        },
+        onAutoVerified: (_) {
+          // Auto-resolution landed us a session — the AuthGate stream
+          // listener in main.dart will swap to NavShell on the next
+          // frame.  Nothing more to do here.
+          if (!mounted) return;
+          setState(() => _busy = false);
+        },
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = 'Couldn\'t send code: $e';
+      });
+    }
+  }
+
+  Future<void> _submitTelegram() async {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    final auth = _resolveAuth();
+    if (auth == null) return;
+    final phone = _composeE164();
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final result = await auth.startTelegramSignIn(phone);
       if (!mounted) return;
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => OtpEntryPage(
             phone: phone,
-            channelUsed: result.channelUsed,
+            channel: OtpChannel.telegram,
             expiresInSeconds: result.expiresInSeconds,
-            // Surface the country to the signup form if the user is
-            // new — saves a re-pick when they're filling profile.
+            channelUsed: result.channelUsed,
             countryHint: _country,
           ),
         ),
@@ -270,7 +329,7 @@ class _PhoneSignInPageState extends State<PhoneSignInPage> {
                       borderRadius: BorderRadius.circular(LuminRadii.md),
                     ),
                   ),
-                  onPressed: _busy ? null : _submit,
+                  onPressed: _busy ? null : _submitSms,
                   child: _busy
                       ? const SizedBox(
                           width: 18,
@@ -281,12 +340,31 @@ class _PhoneSignInPageState extends State<PhoneSignInPage> {
                           ),
                         )
                       : const Text(
-                          'Send code',
+                          'Send via SMS',
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
+                ),
+                const SizedBox(height: LuminSpacing.md),
+                OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: LuminColors.accent,
+                    side: const BorderSide(color: LuminColors.accent),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(LuminRadii.md),
+                    ),
+                  ),
+                  onPressed: _busy ? null : _submitTelegram,
+                  child: const Text(
+                    'Send via Telegram',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ),
                 const Spacer(),
               ],
