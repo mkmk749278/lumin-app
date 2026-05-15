@@ -1,21 +1,31 @@
-/// Lumin app entry — boots the AppConfigScope before MaterialApp.
+/// Lumin app entry — boots Firebase, the AppConfigScope, and routes
+/// the first frame between sign-in and the main shell.
 ///
-/// We load the persisted ``AppConfig`` once at startup so the repository
-/// is ready before the first page renders.  No splash flicker: the load
-/// is a single shared_preferences read, well under the first frame.
-///
-/// Phase 2: if no JWT is in secure storage we route the first frame to
-/// [PhoneSignInPage] instead of [NavShell].  Mock-data mode skips this
-/// gate entirely (no auth required).
+/// Post-migration: `Firebase.initializeApp` runs before `runApp` so
+/// any subsequent FirebaseAuth call (including the AuthGate stream
+/// subscription) finds an initialized app.  The legacy local-JWT
+/// secure-storage entry is wiped here too — one-shot cleanup that
+/// runs idempotently on every launch.
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 
 import 'app/nav_shell.dart';
 import 'data/app_config.dart';
+import 'data/auth_service.dart';
 import 'features/auth/pages/phone_signin_page.dart';
+import 'firebase_options.dart';
 import 'theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+  // One-shot cleanup of any pre-migration JWT entries.  Constructs a
+  // bare AuthService with a throwaway base URL — we only need the
+  // secure-storage delete; no network call happens here.
+  await AuthService(baseUrl: '').cleanupLegacyJwtStorage();
   final cfg = await AppConfig.load();
   runApp(LuminApp(initialConfig: cfg));
 }
@@ -40,19 +50,11 @@ class LuminApp extends StatelessWidget {
 }
 
 /// First-frame gate that decides between [PhoneSignInPage] and
-/// [NavShell].  Mock mode bypasses auth; live mode checks
-/// [AuthService.hasStoredToken] once on boot.  After phone-signin the
-/// page itself does ``pushAndRemoveUntil`` to NavShell, so this widget
-/// only runs once per launch.
-class _AuthGate extends StatefulWidget {
+/// [NavShell].  Mock mode bypasses auth.  Live mode subscribes to
+/// `FirebaseAuth.authStateChanges()` so sign-in / sign-out reroute
+/// the shell reactively without manual `pushAndRemoveUntil` plumbing.
+class _AuthGate extends StatelessWidget {
   const _AuthGate();
-
-  @override
-  State<_AuthGate> createState() => _AuthGateState();
-}
-
-class _AuthGateState extends State<_AuthGate> {
-  Future<bool>? _hasToken;
 
   @override
   Widget build(BuildContext context) {
@@ -61,21 +63,19 @@ class _AuthGateState extends State<_AuthGate> {
     if (scope.config.dataSource == DataSource.mock || scope.auth == null) {
       return const NavShell();
     }
-    _hasToken ??= scope.auth!.hasStoredToken();
-    return FutureBuilder<bool>(
-      future: _hasToken,
+    return StreamBuilder<User?>(
+      stream: scope.auth!.authStateChanges,
+      // Seed the first frame with the synchronous `currentUser` so a
+      // logged-in user doesn't see the splash flash on cold-start.
+      initialData: scope.auth!.currentUser,
       builder: (context, snap) {
-        if (snap.connectionState != ConnectionState.done) {
-          // shared_preferences + secure-storage read; well under one
-          // frame on every device we target.  Showing a tiny spinner
-          // keeps the first paint clean if the platform channel is
-          // slow on a cold start.
+        if (snap.connectionState == ConnectionState.waiting) {
           return const Scaffold(
             backgroundColor: Color(0xFF0A0E1A),
             body: SizedBox.shrink(),
           );
         }
-        if (snap.data == true) return const NavShell();
+        if (snap.data != null) return const NavShell();
         return const PhoneSignInPage();
       },
     );
