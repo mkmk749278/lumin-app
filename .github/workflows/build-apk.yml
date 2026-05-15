@@ -75,6 +75,106 @@ jobs:
           fi
           grep REQUEST_INSTALL_PACKAGES "$MANIFEST" || (echo "FAIL: missing" && exit 1)
 
+      - name: Inject google-services.json (if secret is set)
+        id: gs_json
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -z "$GOOGLE_SERVICES_JSON" ]; then
+            echo "GOOGLE_SERVICES_JSON secret not set — skipping Firebase wiring for this build"
+            echo "Owner uploads it via Repo Settings → Secrets and Variables → Actions"
+            echo "wired=false" >> "$GITHUB_OUTPUT"
+          else
+            mkdir -p android/app
+            echo "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
+            echo "google-services.json written ($(wc -c < android/app/google-services.json) bytes)"
+            echo "wired=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate firebase_options.dart android block from google-services.json
+        if: steps.gs_json.outputs.wired == 'true'
+        run: |
+          set -eu
+          GS=android/app/google-services.json
+          API_KEY=$(jq -r '.client[0].api_key[0].current_key // empty' "$GS")
+          APP_ID=$(jq -r '.client[0].client_info.mobilesdk_app_id // empty' "$GS")
+          SENDER_ID=$(jq -r '.project_info.project_number // empty' "$GS")
+          PROJECT_ID=$(jq -r '.project_info.project_id // empty' "$GS")
+          STORAGE_BUCKET=$(jq -r '.project_info.storage_bucket // empty' "$GS")
+
+          # Defensive: fail fast if any required field is missing — surfaces
+          # a malformed google-services.json before flutter build wastes time.
+          for v in "API_KEY=$API_KEY" "APP_ID=$APP_ID" "SENDER_ID=$SENDER_ID" "PROJECT_ID=$PROJECT_ID" "STORAGE_BUCKET=$STORAGE_BUCKET"; do
+            key="${v%%=*}"; val="${v#*=}"
+            if [ -z "$val" ]; then
+              echo "ERROR: $key is empty in google-services.json — verify the file is the correct one from Firebase Console"
+              echo "(structure expected: client[0].api_key[0].current_key, client[0].client_info.mobilesdk_app_id, project_info.{project_number,project_id,storage_bucket})"
+              exit 1
+            fi
+          done
+
+          # Substitute placeholders only inside the android FirebaseOptions block.
+          # iOS and web blocks retain their TODO placeholders until those targets ship.
+          sed -i "/^  static const FirebaseOptions android = FirebaseOptions(/,/^  );/ {
+            s|^    apiKey: .*|    apiKey: '$API_KEY',|
+            s|^    appId: .*|    appId: '$APP_ID',|
+            s|^    messagingSenderId: .*|    messagingSenderId: '$SENDER_ID',|
+            s|^    projectId: .*|    projectId: '$PROJECT_ID',|
+            s|^    storageBucket: .*|    storageBucket: '$STORAGE_BUCKET',|
+          }" lib/firebase_options.dart
+
+          echo "--- firebase_options.dart android block after substitution ---"
+          sed -n '/^  static const FirebaseOptions android = FirebaseOptions(/,/^  );/p' lib/firebase_options.dart
+
+      - name: Apply google-services Gradle plugin (DSL-agnostic)
+        if: steps.gs_json.outputs.wired == 'true'
+        run: |
+          set -eu
+          # Modern Flutter (3.27+) generates Kotlin DSL build.gradle.kts;
+          # older projects generate Groovy build.gradle. Detect which is
+          # in use and patch accordingly. Idempotent — re-running over a
+          # patched tree is a no-op.
+
+          if [ -f android/settings.gradle.kts ]; then
+            echo "Detected Kotlin DSL"
+
+            # Root: add plugin declaration to settings.gradle.kts plugins block.
+            if ! grep -q "com.google.gms.google-services" android/settings.gradle.kts; then
+              sed -i '/^plugins {/a\    id("com.google.gms.google-services") version "4.4.4" apply false' android/settings.gradle.kts
+              echo "Patched android/settings.gradle.kts"
+            fi
+
+            # App module: apply plugin in app/build.gradle.kts plugins block.
+            if ! grep -q "com.google.gms.google-services" android/app/build.gradle.kts; then
+              sed -i '/^plugins {/a\    id("com.google.gms.google-services")' android/app/build.gradle.kts
+              echo "Patched android/app/build.gradle.kts"
+            fi
+
+          elif [ -f android/build.gradle ]; then
+            echo "Detected Groovy DSL"
+
+            # Root: add buildscript classpath in build.gradle.
+            if ! grep -q "com.google.gms:google-services" android/build.gradle; then
+              sed -i "/classpath 'com.android.tools.build:gradle/a\\        classpath 'com.google.gms:google-services:4.4.4'" android/build.gradle
+              echo "Patched android/build.gradle"
+            fi
+
+            # App module: apply plugin in app/build.gradle.
+            if ! grep -q "com.google.gms.google-services" android/app/build.gradle; then
+              printf '\napply plugin: %s\n' "'com.google.gms.google-services'" >> android/app/build.gradle
+              echo "Patched android/app/build.gradle"
+            fi
+
+          else
+            echo "ERROR: neither android/settings.gradle.kts nor android/build.gradle found"
+            echo "android/ tree:"
+            ls -la android/
+            exit 1
+          fi
+
+          echo "--- google-services references after patch ---"
+          grep -rE "google.?services" android/*.gradle* android/app/*.gradle* 2>/dev/null || echo "(none)"
+
       - name: Get dependencies
         run: flutter pub get
 

@@ -1,9 +1,8 @@
 /// Thin HTTP client for the 360 Crypto Eye API.
 ///
-/// Pulls a JWT from ``AuthService`` for every request.  On a 401 the
-/// client clears the cached token, re-mints anonymously, and retries
-/// the original request once — making server-side secret rotation
-/// invisible to the user.
+/// Post-Firebase-migration: the `Authorization` header carries the
+/// current Firebase ID token (auto-refreshed by the SDK).  On a 401
+/// we retry once with `forceRefresh: true` then give up — no loop.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -55,50 +54,55 @@ class LuminApiClient {
     });
   }
 
-  Future<Map<String, String>> _headers() async {
-    final token = await auth.getValidToken();
-    return {
+  Future<Map<String, String>> _headers({bool forceRefresh = false}) async {
+    final token = await auth.currentIdToken(forceRefresh: forceRefresh);
+    final h = <String, String>{
       'Accept': 'application/json',
       'Content-Type': 'application/json',
-      'Authorization': 'Bearer $token',
     };
+    if (token != null) {
+      h['Authorization'] = 'Bearer $token';
+    }
+    return h;
   }
 
   Future<dynamic> get(String path, {Map<String, dynamic>? query}) async {
-    return _request(() async {
-      final h = await _headers();
+    return _request((forceRefresh) async {
+      final h = await _headers(forceRefresh: forceRefresh);
       return _http.get(_uri(path, query), headers: h);
     });
   }
 
   Future<dynamic> post(String path, {Object? body}) async {
     final encoded = body == null ? null : jsonEncode(body);
-    return _request(() async {
-      final h = await _headers();
+    return _request((forceRefresh) async {
+      final h = await _headers(forceRefresh: forceRefresh);
       return _http.post(_uri(path), headers: h, body: encoded);
     });
   }
 
   Future<dynamic> put(String path, {Object? body}) async {
     final encoded = body == null ? null : jsonEncode(body);
-    return _request(() async {
-      final h = await _headers();
+    return _request((forceRefresh) async {
+      final h = await _headers(forceRefresh: forceRefresh);
       return _http.put(_uri(path), headers: h, body: encoded);
     });
   }
 
-  Future<dynamic> _request(Future<http.Response> Function() send) async {
+  Future<dynamic> _request(
+    Future<http.Response> Function(bool forceRefresh) send,
+  ) async {
     int attempt = 0;
     bool authRetried = false;
     Object? lastError;
     while (attempt <= maxRetries) {
       try {
-        final resp = await send().timeout(timeout);
+        final resp = await send(authRetried).timeout(timeout);
 
-        // 401 → token rotated server-side; drop ours, re-mint, retry once.
+        // 401 → cached ID token may be stale; force-refresh once and
+        // retry.  After one retry we give up — no loop.
         if (resp.statusCode == 401 && !authRetried) {
           authRetried = true;
-          await auth.handleUnauthorized();
           continue; // doesn't increment attempt — auth retry is "free"
         }
 
