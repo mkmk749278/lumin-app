@@ -20,6 +20,7 @@ android/local.properties
 android/key.properties
 android/app/key.properties
 android/app/release-keystore.jks
+android/app/google-services.json
 *.jks
 *.keystore
 local.properties
