@@ -1,0 +1,64 @@
+name: Print SHA fingerprints
+
+# One-shot workflow for retrieving the release keystore's SHA-1 + SHA-256
+# fingerprints from CI (without ever exposing the keystore itself).
+#
+# Trigger:
+#   gh workflow run print-fingerprints.yml --repo mkmk749278/lumin-app
+# or from the GitHub Actions web UI ("Run workflow" button on the Actions
+# tab — works fine on mobile).
+#
+# Output: the job log under the "Decode release keystore and print
+# fingerprints" step. Copy the SHA-1 and SHA-256 lines into Firebase
+# Console:
+#   Project Settings → Your apps → Android app → Fingerprints
+
+on:
+  workflow_dispatch:
+
+jobs:
+  print:
+    name: Print release keystore fingerprints
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: "17"
+
+      - name: Decode release keystore and print fingerprints
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -eu
+          if [ -z "${ANDROID_KEYSTORE_B64:-}" ]; then
+            echo "ERROR: ANDROID_KEYSTORE_B64 secret is not set on this repo."
+            echo "Upload your release keystore (base64-encoded) as that secret first."
+            exit 1
+          fi
+          echo "$ANDROID_KEYSTORE_B64" | base64 -d > /tmp/release.jks
+
+          echo "═══════════════════════════════════════════════════════════════"
+          echo "  Release keystore fingerprints"
+          echo "  Register both SHA-1 and SHA-256 in Firebase Console:"
+          echo "    Project Settings → Your apps → Android app → Fingerprints"
+          echo "═══════════════════════════════════════════════════════════════"
+
+          keytool -list -v \
+            -keystore /tmp/release.jks \
+            -alias "${ANDROID_KEY_ALIAS:-}" \
+            -storepass "${ANDROID_KEYSTORE_PASSWORD:-}" \
+            -keypass "${ANDROID_KEY_PASSWORD:-}" \
+            2>&1 | grep -E "SHA1:|SHA256:|Owner:|Valid from" || {
+              echo "keytool returned no fingerprints — check alias / password secrets"
+              exit 1
+            }
+
+          rm -f /tmp/release.jks
+          echo "═══════════════════════════════════════════════════════════════"
+          echo "Done. Keystore removed from runner."
