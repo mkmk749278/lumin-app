@@ -12,6 +12,7 @@ import '../../shared/format.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
 import '../../shared/widgets/preview_badge.dart';
+import '../trade/paper_trades_page.dart';
 
 class _PulseBundle {
   const _PulseBundle({
@@ -339,6 +340,11 @@ class _RegimeBar extends StatelessWidget {
 /// Today's P&L — promoted from a half-row stat to a full-width card now
 /// that the regime bar takes the row above.  Reads cleaner and gives the
 /// number the prominence the audit asked for.
+///
+/// 2026-05 — Paper visibility: a "View all trades →" footer link routes
+/// to :class:`PaperTradesPage` so the daily aggregate has a one-tap
+/// drill-down to the per-trade ledger.  The Today/Weekly/Monthly
+/// aggregate layout above stays untouched.
 class _TodayPnlCard extends StatelessWidget {
   const _TodayPnlCard({required this.engine});
   final MockEngineSnapshot engine;
@@ -350,59 +356,106 @@ class _TodayPnlCard extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
       child: LuminCard(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Icon(
-              positive ? Icons.trending_up : Icons.trending_down,
-              size: 22,
-              color: color,
-            ),
-            const SizedBox(width: LuminSpacing.md),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: const [
-                Text(
-                  "TODAY'S P&L",
-                  style: TextStyle(
-                    color: LuminColors.textMuted,
-                    fontSize: 10,
-                    letterSpacing: 1.2,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                SizedBox(height: 2),
-                Text(
-                  'Realised across paper / live trades',
-                  style: TextStyle(
-                    color: LuminColors.textSecondary,
-                    fontSize: 11,
-                  ),
-                ),
-              ],
-            ),
-            const Spacer(),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Text(
-                  '${positive ? '+' : ''}\$${engine.todayPnlUsd.toStringAsFixed(2)}',
-                  style: TextStyle(
-                    color: color,
-                    fontSize: 22,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: -0.5,
-                  ),
+                Icon(
+                  positive ? Icons.trending_up : Icons.trending_down,
+                  size: 22,
+                  color: color,
                 ),
-                Text(
-                  '${positive ? '+' : ''}${engine.todayPnlPct.toStringAsFixed(2)}% on margin',
-                  style: TextStyle(
-                    color: color.withOpacity(0.85),
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                  ),
+                const SizedBox(width: LuminSpacing.md),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [
+                    Text(
+                      "TODAY'S P&L",
+                      style: TextStyle(
+                        color: LuminColors.textMuted,
+                        fontSize: 10,
+                        letterSpacing: 1.2,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Realised across paper / live trades',
+                      style: TextStyle(
+                        color: LuminColors.textSecondary,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+                const Spacer(),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      '${positive ? '+' : ''}\$${engine.todayPnlUsd.toStringAsFixed(2)}',
+                      style: TextStyle(
+                        color: color,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.5,
+                      ),
+                    ),
+                    Text(
+                      '${positive ? '+' : ''}${engine.todayPnlPct.toStringAsFixed(2)}% on margin',
+                      style: TextStyle(
+                        color: color.withOpacity(0.85),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
               ],
+            ),
+            const SizedBox(height: LuminSpacing.sm),
+            const Divider(color: LuminColors.cardBorder, height: 1),
+            const SizedBox(height: 4),
+            // Drill-down to the paginated per-trade ledger — owner asked
+            // for honest "what would I have earned" context next to the
+            // aggregate number.
+            Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(LuminRadii.sm),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const PaperTradesPage(),
+                  ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 6,
+                    horizontal: 2,
+                  ),
+                  child: Row(
+                    children: const [
+                      Text(
+                        'View all trades',
+                        style: TextStyle(
+                          color: LuminColors.accent,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                      SizedBox(width: 4),
+                      Icon(
+                        Icons.arrow_forward,
+                        size: 14,
+                        color: LuminColors.accent,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ),
           ],
         ),

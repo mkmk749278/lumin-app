@@ -10,6 +10,11 @@
 /// setting via ``repo.updateUserAutoTradeSettings`` (Phase 2 endpoint)
 /// and kicks the AutoTradeWatcher (Phase 3b-2) to pick up the new
 /// mode without waiting for its next tick.
+///
+/// 2026-05 — Paper visibility: a top-of-screen Live | Paper toggle
+/// hands the body off to :class:`PaperTradesPage` for the per-trade
+/// list view.  The existing Live surface (mode control + open
+/// positions + activity) is preserved verbatim under the Live tab.
 import 'package:flutter/material.dart';
 
 import '../../data/app_config.dart';
@@ -21,6 +26,7 @@ import '../../shared/format.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
 import '../../shared/widgets/preview_badge.dart';
+import 'paper_trades_page.dart';
 
 class _TradeBundle {
   const _TradeBundle({
@@ -63,6 +69,14 @@ class _TradeBundle {
   final String? binanceError;
 }
 
+/// Which sub-view the Trade tab is currently showing.
+///
+/// `live` — the original execution-control + positions + activity
+/// surface, unchanged from pre-paper-visibility.
+/// `paper` — the paginated paper trade history list (delegates to
+/// :class:`PaperTradesPage`).
+enum _TradeView { live, paper }
+
 class TradePage extends StatefulWidget {
   const TradePage({super.key});
 
@@ -71,6 +85,7 @@ class TradePage extends StatefulWidget {
 }
 
 class _TradePageState extends State<TradePage> {
+  _TradeView _view = _TradeView.live;
   late Future<_TradeBundle> _future;
   LuminRepository? _lastRepo;
   bool _switchingMode = false;
@@ -283,97 +298,126 @@ class _TradePageState extends State<TradePage> {
 
   @override
   Widget build(BuildContext context) {
+    // Paper sub-tab hands the whole body off to the per-trade list page
+    // — that page owns its own AppBar (with the Reset balance overflow)
+    // and refresh control, so we just inline it under the sub-tab strip.
+    if (_view == _TradeView.paper) {
+      return Column(
+        children: [
+          _SubTabStrip(
+            view: _view,
+            onChanged: (v) => setState(() => _view = v),
+          ),
+          const Expanded(child: PaperTradesPage()),
+        ],
+      );
+    }
+    return _buildLiveView(context);
+  }
+
+  Widget _buildLiveView(BuildContext context) {
     final scope = AppConfigScope.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('Trade')),
-      body: RefreshIndicator(
-        color: LuminColors.accent,
-        onRefresh: _refresh,
-        child: FutureBuilder<_TradeBundle>(
-          future: _future,
-          builder: (context, snap) {
-            if (snap.connectionState == ConnectionState.waiting &&
-                !snap.hasData) {
-              return const _TradeLoading();
-            }
-            if (snap.hasError) {
-              return _TradeError(error: snap.error.toString(), onRetry: _refresh);
-            }
-            final data = snap.data!;
-            return ListView(
-              physics: const AlwaysScrollableScrollPhysics(
-                parent: BouncingScrollPhysics(),
-              ),
-              children: [
-                if (!scope.repo.isLive) const PreviewBadge(),
-                _ModeToggle(
-                  // Pill reflects the user's per-user mode (what the
-                  // AutoTradeWatcher will act on).  Falls back to the
-                  // engine-wide mode when the user has no override
-                  // (usingDefaults == true).
-                  mode: _modeIndex(
-                    data.userSettings.mode ?? data.autoMode.mode,
-                  ),
-                  switching: _switchingMode,
-                  onChanged: (i) => _changeMode(_modeName(i)),
-                ),
-                if (data.userSettings.mode != null &&
-                    data.userSettings.mode != data.autoMode.mode)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: LuminSpacing.lg,
-                      vertical: LuminSpacing.xs,
+      body: Column(
+        children: [
+          _SubTabStrip(
+            view: _view,
+            onChanged: (v) => setState(() => _view = v),
+          ),
+          Expanded(
+            child: RefreshIndicator(
+              color: LuminColors.accent,
+              onRefresh: _refresh,
+              child: FutureBuilder<_TradeBundle>(
+                future: _future,
+                builder: (context, snap) {
+                  if (snap.connectionState == ConnectionState.waiting &&
+                      !snap.hasData) {
+                    return const _TradeLoading();
+                  }
+                  if (snap.hasError) {
+                    return _TradeError(
+                        error: snap.error.toString(), onRetry: _refresh);
+                  }
+                  final data = snap.data!;
+                  return ListView(
+                    physics: const AlwaysScrollableScrollPhysics(
+                      parent: BouncingScrollPhysics(),
                     ),
-                    child: Text(
-                      'Engine globally on ${data.autoMode.mode?.toUpperCase() ?? "—"}; '
-                      'your auto-trade overrides to '
-                      '${data.userSettings.mode!.toUpperCase()}.',
-                      style: const TextStyle(
-                        color: LuminColors.textMuted,
-                        fontSize: 11,
-                        height: 1.4,
-                      ),
-                    ),
-                  ),
-                const SizedBox(height: LuminSpacing.md),
-                _ModePnlCard(
-                  autoMode: data.autoMode,
-                  hasBinance: data.binancePositions != null,
-                ),
-                const SizedBox(height: LuminSpacing.md),
-                // Phase 3c — prefer the user's real Binance positions
-                // when they've connected keys; fall back to engine
-                // paper when not connected or fetch errored.
-                if (data.binancePositions != null)
-                  _UserPositionsCard(
-                    positions: data.binancePositions!,
-                    account: data.binanceAccount,
-                  )
-                else ...[
-                  if (data.binanceError != null)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: LuminSpacing.lg,
-                        vertical: LuminSpacing.xs,
-                      ),
-                      child: Text(
-                        data.binanceError!,
-                        style: const TextStyle(
-                          color: LuminColors.loss,
-                          fontSize: 11,
-                          height: 1.4,
+                    children: [
+                      if (!scope.repo.isLive) const PreviewBadge(),
+                      _ModeToggle(
+                        // Pill reflects the user's per-user mode (what the
+                        // AutoTradeWatcher will act on).  Falls back to the
+                        // engine-wide mode when the user has no override
+                        // (usingDefaults == true).
+                        mode: _modeIndex(
+                          data.userSettings.mode ?? data.autoMode.mode,
                         ),
+                        switching: _switchingMode,
+                        onChanged: (i) => _changeMode(_modeName(i)),
                       ),
-                    ),
-                  _OpenPositionsCard(positions: data.positions),
-                ],
-                const SizedBox(height: LuminSpacing.md),
-                _ActivityCard(events: data.activity),
-                const SizedBox(height: LuminSpacing.xl),
-              ],
-            );
-          },
-        ),
+                      if (data.userSettings.mode != null &&
+                          data.userSettings.mode != data.autoMode.mode)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: LuminSpacing.lg,
+                            vertical: LuminSpacing.xs,
+                          ),
+                          child: Text(
+                            'Engine globally on ${data.autoMode.mode?.toUpperCase() ?? "—"}; '
+                            'your auto-trade overrides to '
+                            '${data.userSettings.mode!.toUpperCase()}.',
+                            style: const TextStyle(
+                              color: LuminColors.textMuted,
+                              fontSize: 11,
+                              height: 1.4,
+                            ),
+                          ),
+                        ),
+                      const SizedBox(height: LuminSpacing.md),
+                      _ModePnlCard(
+                        autoMode: data.autoMode,
+                        hasBinance: data.binancePositions != null,
+                      ),
+                      const SizedBox(height: LuminSpacing.md),
+                      // Phase 3c — prefer the user's real Binance positions
+                      // when they've connected keys; fall back to engine
+                      // paper when not connected or fetch errored.
+                      if (data.binancePositions != null)
+                        _UserPositionsCard(
+                          positions: data.binancePositions!,
+                          account: data.binanceAccount,
+                        )
+                      else ...[
+                        if (data.binanceError != null)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: LuminSpacing.lg,
+                              vertical: LuminSpacing.xs,
+                            ),
+                            child: Text(
+                              data.binanceError!,
+                              style: const TextStyle(
+                                color: LuminColors.loss,
+                                fontSize: 11,
+                                height: 1.4,
+                              ),
+                            ),
+                          ),
+                        _OpenPositionsCard(positions: data.positions),
+                      ],
+                      const SizedBox(height: LuminSpacing.md),
+                      _ActivityCard(events: data.activity),
+                      const SizedBox(height: LuminSpacing.xl),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -398,6 +442,115 @@ class _TradePageState extends State<TradePage> {
       default:
         return 'off';
     }
+  }
+}
+
+/// Live | Paper sub-tab strip — sits just below the AppBar and toggles
+/// the body between the existing execution-control surface and the new
+/// paper trade history list.  Visual style mirrors the existing mode
+/// toggle so the page feels coherent at a glance.
+class _SubTabStrip extends StatelessWidget {
+  const _SubTabStrip({required this.view, required this.onChanged});
+  final _TradeView view;
+  final ValueChanged<_TradeView> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: LuminColors.bgDeep,
+      padding: const EdgeInsets.fromLTRB(
+        LuminSpacing.lg,
+        LuminSpacing.sm,
+        LuminSpacing.lg,
+        LuminSpacing.sm,
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: _SubTabButton(
+              label: 'Live',
+              icon: Icons.bolt,
+              selected: view == _TradeView.live,
+              onTap: () => onChanged(_TradeView.live),
+            ),
+          ),
+          const SizedBox(width: LuminSpacing.sm),
+          Expanded(
+            child: _SubTabButton(
+              label: 'Paper',
+              icon: Icons.history,
+              selected: view == _TradeView.paper,
+              onTap: () => onChanged(_TradeView.paper),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SubTabButton extends StatelessWidget {
+  const _SubTabButton({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(LuminRadii.md),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(LuminRadii.md),
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: selected
+                ? LuminColors.accent.withOpacity(0.15)
+                : LuminColors.bgElevated,
+            borderRadius: BorderRadius.circular(LuminRadii.md),
+            border: Border.all(
+              color: selected
+                  ? LuminColors.accent.withOpacity(0.50)
+                  : LuminColors.cardBorder,
+            ),
+          ),
+          alignment: Alignment.center,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 16,
+                color: selected
+                    ? LuminColors.accent
+                    : LuminColors.textSecondary,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  color: selected
+                      ? LuminColors.accent
+                      : LuminColors.textSecondary,
+                  fontSize: 13,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  letterSpacing: 0.3,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
