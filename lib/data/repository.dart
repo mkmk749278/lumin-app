@@ -300,6 +300,183 @@ class Profile {
   }
 }
 
+/// One TP partial-close inside a paper trade record.
+///
+/// The engine fires partial fills as TP1/TP2/TP3 ladders hit — each one
+/// closes a fraction of the position at that level's price and books a
+/// slice of the total realised PnL.  Surfaced on the trade detail page
+/// so subscribers can see exactly how a trade unwound rather than just
+/// the aggregate close.
+class PartialFill {
+  const PartialFill({
+    required this.tpLevel,
+    required this.fraction,
+    required this.fillPrice,
+    required this.pnlUsd,
+    required this.feeUsd,
+    required this.ts,
+  });
+
+  /// 1, 2, or 3 — which TP rung this fill corresponds to.
+  final int tpLevel;
+  /// 0.0–1.0 — proportion of remaining qty closed at this rung.
+  final double fraction;
+  final double fillPrice;
+  final double pnlUsd;
+  final double feeUsd;
+  final DateTime ts;
+
+  factory PartialFill.fromJson(Map<String, dynamic> j) => PartialFill(
+        tpLevel: (j['tp_level'] as num?)?.toInt() ?? 0,
+        fraction: (j['fraction'] as num?)?.toDouble() ?? 0.0,
+        fillPrice: (j['fill_price'] as num?)?.toDouble() ?? 0.0,
+        pnlUsd: (j['pnl_usd'] as num?)?.toDouble() ?? 0.0,
+        feeUsd: (j['fee_usd'] as num?)?.toDouble() ?? 0.0,
+        ts: DateTime.tryParse(j['ts'] as String? ?? '')?.toUtc() ??
+            DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+      );
+}
+
+/// One paper-trade record — open or closed.
+///
+/// Matches the engine ``GET /api/trades?mode=paper`` payload.  Open
+/// trades have ``closedAt`` + the PnL fields null; closed trades carry
+/// the full settlement (gross / fees / net) plus ``roiPctOnMargin``
+/// which is the key metric the Trade tab leads with (margin = notional
+/// / leverage, so a 10x trade that moved +2% on price shows ~+20% ROI).
+class TradeRecord {
+  const TradeRecord({
+    required this.signalId,
+    required this.symbol,
+    required this.side,
+    required this.entry,
+    required this.qty,
+    required this.leverage,
+    required this.positionSizePct,
+    required this.notionalUsd,
+    required this.marginUsd,
+    required this.partialFills,
+    required this.createdAt,
+    this.closeReason,
+    this.closePrice,
+    this.grossPnlUsd,
+    this.feesUsd,
+    this.netPnlUsd,
+    this.roiPctOnMargin,
+    this.closedAt,
+  });
+
+  /// Originating signal id (e.g. ``SIG-2841``).  Used as the order
+  /// number on the detail page.
+  final String signalId;
+  final String symbol;
+  /// ``'long'`` | ``'short'`` — lowercase per the engine contract.
+  final String side;
+  final double entry;
+  final double qty;
+  /// Leverage snapshot at open (e.g. 10.0).  Captured at fill time so
+  /// later config changes don't retroactively rewrite history.
+  final double leverage;
+  /// Position-size % snapshot at open.
+  final double positionSizePct;
+  /// ``entry * qty`` — the gross exposure of the position.
+  final double notionalUsd;
+  /// ``notionalUsd / leverage`` — the actual capital committed.  Used
+  /// as the denominator for ``roiPctOnMargin``.
+  final double marginUsd;
+  final List<PartialFill> partialFills;
+
+  /// One of ``tp1``/``tp2``/``tp3``/``sl_hit``/``invalidated``/
+  /// ``expired``/``cancelled``/``pre_tp_grab``.  Null while the trade
+  /// is still open.
+  final String? closeReason;
+  final double? closePrice;
+  final double? grossPnlUsd;
+  final double? feesUsd;
+  final double? netPnlUsd;
+  /// **Key metric for display** — net PnL as a % of margin committed.
+  /// Honest "what would I have earned on my actual capital outlay"
+  /// number that subscribers asked for.
+  final double? roiPctOnMargin;
+  final DateTime createdAt;
+  final DateTime? closedAt;
+
+  bool get isOpen => closedAt == null;
+
+  factory TradeRecord.fromJson(Map<String, dynamic> j) => TradeRecord(
+        signalId: j['signal_id'] as String? ?? '',
+        symbol: j['symbol'] as String? ?? '',
+        side: j['side'] as String? ?? 'long',
+        entry: (j['entry'] as num?)?.toDouble() ?? 0.0,
+        qty: (j['qty'] as num?)?.toDouble() ?? 0.0,
+        leverage: (j['leverage'] as num?)?.toDouble() ?? 1.0,
+        positionSizePct:
+            (j['position_size_pct'] as num?)?.toDouble() ?? 0.0,
+        notionalUsd: (j['notional_usd'] as num?)?.toDouble() ?? 0.0,
+        marginUsd: (j['margin_usd'] as num?)?.toDouble() ?? 0.0,
+        partialFills: ((j['partial_fills'] as List?) ?? const [])
+            .cast<Map<String, dynamic>>()
+            .map(PartialFill.fromJson)
+            .toList(),
+        closeReason: j['close_reason'] as String?,
+        closePrice: (j['close_price'] as num?)?.toDouble(),
+        grossPnlUsd: (j['gross_pnl_usd'] as num?)?.toDouble(),
+        feesUsd: (j['fees_usd'] as num?)?.toDouble(),
+        netPnlUsd: (j['net_pnl_usd'] as num?)?.toDouble(),
+        roiPctOnMargin: (j['roi_pct_on_margin'] as num?)?.toDouble(),
+        createdAt: DateTime.tryParse(j['created_at'] as String? ?? '')
+                ?.toUtc() ??
+            DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+        closedAt: j['closed_at'] == null
+            ? null
+            : DateTime.tryParse(j['closed_at'] as String)?.toUtc(),
+      );
+}
+
+/// Paginated paper-trade list response.
+///
+/// ``items`` is the page slice; ``total`` is the full count so the page
+/// knows whether to keep loading more.  The infinite-scroll loader on
+/// :class:`PaperTradesPage` halts when ``offset + items.length >= total``.
+class TradeListResponse {
+  const TradeListResponse({required this.items, required this.total});
+  final List<TradeRecord> items;
+  final int total;
+
+  factory TradeListResponse.fromJson(Map<String, dynamic> j) =>
+      TradeListResponse(
+        items: ((j['items'] as List?) ?? const [])
+            .cast<Map<String, dynamic>>()
+            .map(TradeRecord.fromJson)
+            .toList(),
+        total: (j['total'] as num?)?.toInt() ?? 0,
+      );
+}
+
+/// Response from ``POST /api/auto-mode/paper/reset``.
+///
+/// ``resetAt`` is the moment the engine archived the prior ledger and
+/// started a fresh one; ``startingEquityUsd`` is the new equity (always
+/// $1000 in the current implementation, but plumbed through the type
+/// so a future configurable starting balance doesn't break the contract).
+class PaperResetResponse {
+  const PaperResetResponse({
+    required this.resetAt,
+    required this.startingEquityUsd,
+  });
+  final DateTime resetAt;
+  final double startingEquityUsd;
+
+  factory PaperResetResponse.fromJson(Map<String, dynamic> j) =>
+      PaperResetResponse(
+        resetAt: DateTime.tryParse(j['reset_at'] as String? ?? '')
+                ?.toUtc() ??
+            DateTime.now().toUtc(),
+        startingEquityUsd:
+            (j['starting_equity_usd'] as num?)?.toDouble() ?? 1000.0,
+      );
+}
+
 abstract class LuminRepository {
   /// True when the underlying source is the live engine (vs. mocks).
   bool get isLive;
@@ -346,6 +523,22 @@ abstract class LuminRepository {
   /// User profile (Phase 3) — drives SignupPage + Settings → Profile.
   Future<Profile> fetchProfile();
   Future<Profile> updateProfile(Profile partial, {bool acceptTerms = false});
+  /// Per-trade visibility feed — paginated paper-trade records ordered
+  /// most-recent-first.  Drives :class:`PaperTradesPage`.  ``sinceTs``
+  /// + ``symbol`` are pass-through filters the engine applies before
+  /// pagination.
+  Future<TradeListResponse> fetchTrades({
+    String mode = 'paper',
+    int limit = 50,
+    int offset = 0,
+    String? sinceTs,
+    String? symbol,
+  });
+  /// Reset the paper ledger to a fresh $1000 starting equity.  The
+  /// engine archives prior trade history (the audit ledger keeps the
+  /// raw rows) but the live ``/api/trades?mode=paper`` view starts
+  /// empty.  Owner-confirmed via dialog before this fires.
+  Future<PaperResetResponse> resetPaperBalance();
   Future<bool> healthCheck();
 }
 
@@ -655,6 +848,468 @@ class MockRepository implements LuminRepository {
     );
     return _mockProfile;
   }
+
+  // ---- Paper trade ledger -----------------------------------------------
+  //
+  // 15 sample records spanning the distribution the owner asked for so the
+  // PaperTradesPage list + detail surfaces render realistically in offline
+  // mode.  Static so ``const MockRepository()`` stays valid; mutable so
+  // ``resetPaperBalance`` can wipe the ledger and the page sees the empty
+  // state without a process restart.
+  static List<TradeRecord> _mockTrades = _buildMockTrades();
+
+  static List<TradeRecord> _buildMockTrades() {
+    final now = DateTime.now().toUtc();
+    DateTime ago({int days = 0, int hours = 0, int minutes = 0}) => now.subtract(
+        Duration(days: days, hours: hours, minutes: minutes));
+    // Helpers — keep math close so a glance at one row tells the reader
+    // entry/qty/leverage drive notional/margin which drives ROI.
+    TradeRecord rec({
+      required String signalId,
+      required String symbol,
+      required String side,
+      required double entry,
+      required double qty,
+      required double leverage,
+      required double positionSizePct,
+      required DateTime createdAt,
+      String? closeReason,
+      double? closePrice,
+      double? netPnlUsd,
+      double? feesUsd,
+      double? roiPctOnMargin,
+      DateTime? closedAt,
+      List<PartialFill> partialFills = const [],
+    }) {
+      final notional = entry * qty;
+      final margin = notional / leverage;
+      final gross =
+          netPnlUsd != null && feesUsd != null ? netPnlUsd + feesUsd : null;
+      return TradeRecord(
+        signalId: signalId,
+        symbol: symbol,
+        side: side,
+        entry: entry,
+        qty: qty,
+        leverage: leverage,
+        positionSizePct: positionSizePct,
+        notionalUsd: notional,
+        marginUsd: margin,
+        partialFills: partialFills,
+        createdAt: createdAt,
+        closeReason: closeReason,
+        closePrice: closePrice,
+        grossPnlUsd: gross,
+        feesUsd: feesUsd,
+        netPnlUsd: netPnlUsd,
+        roiPctOnMargin: roiPctOnMargin,
+        closedAt: closedAt,
+      );
+    }
+
+    return <TradeRecord>[
+      // 2 open trades — closedAt null, no PnL fields.
+      rec(
+        signalId: 'SIG-2901',
+        symbol: 'ETHUSDT',
+        side: 'long',
+        entry: 2329.0,
+        qty: 0.043,
+        leverage: 10.0,
+        positionSizePct: 2.0,
+        createdAt: ago(minutes: 18),
+      ),
+      rec(
+        signalId: 'SIG-2900',
+        symbol: 'WLDUSDT',
+        side: 'short',
+        entry: 2.412,
+        qty: 41.5,
+        leverage: 10.0,
+        positionSizePct: 2.0,
+        createdAt: ago(hours: 2, minutes: 4),
+      ),
+      // 3 PROFIT_LOCKED — modest to strong wins.
+      rec(
+        signalId: 'SIG-2899',
+        symbol: 'BTCUSDT',
+        side: 'long',
+        entry: 78240.0,
+        qty: 0.00128,
+        leverage: 10.0,
+        positionSizePct: 2.0,
+        createdAt: ago(hours: 5),
+        closeReason: 'tp3',
+        closePrice: 79644.0,
+        netPnlUsd: 17.84,
+        feesUsd: 0.40,
+        roiPctOnMargin: 17.8,
+        closedAt: ago(hours: 3, minutes: 20),
+        partialFills: [
+          PartialFill(
+            tpLevel: 1,
+            fraction: 0.33,
+            fillPrice: 78680.0,
+            pnlUsd: 1.86,
+            feeUsd: 0.13,
+            ts: ago(hours: 4, minutes: 30),
+          ),
+          PartialFill(
+            tpLevel: 2,
+            fraction: 0.33,
+            fillPrice: 79050.0,
+            pnlUsd: 3.42,
+            feeUsd: 0.13,
+            ts: ago(hours: 4),
+          ),
+          PartialFill(
+            tpLevel: 3,
+            fraction: 0.34,
+            fillPrice: 79644.0,
+            pnlUsd: 12.56,
+            feeUsd: 0.14,
+            ts: ago(hours: 3, minutes: 20),
+          ),
+        ],
+      ),
+      rec(
+        signalId: 'SIG-2898',
+        symbol: 'SOLUSDT',
+        side: 'long',
+        entry: 142.85,
+        qty: 0.700,
+        leverage: 10.0,
+        positionSizePct: 2.0,
+        createdAt: ago(days: 1, hours: 2),
+        closeReason: 'tp2',
+        closePrice: 146.40,
+        netPnlUsd: 24.10,
+        feesUsd: 0.40,
+        roiPctOnMargin: 24.1,
+        closedAt: ago(days: 1),
+        partialFills: [
+          PartialFill(
+            tpLevel: 1,
+            fraction: 0.50,
+            fillPrice: 144.50,
+            pnlUsd: 5.78,
+            feeUsd: 0.20,
+            ts: ago(days: 1, hours: 1, minutes: 30),
+          ),
+          PartialFill(
+            tpLevel: 2,
+            fraction: 0.50,
+            fillPrice: 146.40,
+            pnlUsd: 18.32,
+            feeUsd: 0.20,
+            ts: ago(days: 1),
+          ),
+        ],
+      ),
+      rec(
+        signalId: 'SIG-2897',
+        symbol: 'INJUSDT',
+        side: 'long',
+        entry: 24.18,
+        qty: 4.15,
+        leverage: 10.0,
+        positionSizePct: 2.0,
+        createdAt: ago(days: 1, hours: 14),
+        closeReason: 'tp1',
+        closePrice: 24.40,
+        netPnlUsd: 8.80,
+        feesUsd: 0.36,
+        roiPctOnMargin: 8.8,
+        closedAt: ago(days: 1, hours: 13),
+        partialFills: [
+          PartialFill(
+            tpLevel: 1,
+            fraction: 1.0,
+            fillPrice: 24.40,
+            pnlUsd: 9.16,
+            feeUsd: 0.36,
+            ts: ago(days: 1, hours: 13),
+          ),
+        ],
+      ),
+      // 9 BREAKEVEN_EXIT — small +/− after fees.  Mix of close reasons.
+      rec(
+        signalId: 'SIG-2896',
+        symbol: 'BNBUSDT',
+        side: 'long',
+        entry: 612.40,
+        qty: 0.163,
+        leverage: 10.0,
+        positionSizePct: 2.0,
+        createdAt: ago(days: 2, hours: 1),
+        closeReason: 'pre_tp_grab',
+        closePrice: 612.85,
+        netPnlUsd: 0.21,
+        feesUsd: 0.20,
+        roiPctOnMargin: 0.2,
+        closedAt: ago(days: 2),
+      ),
+      rec(
+        signalId: 'SIG-2895',
+        symbol: 'TIAUSDT',
+        side: 'short',
+        entry: 4.812,
+        qty: 20.78,
+        leverage: 10.0,
+        positionSizePct: 2.0,
+        createdAt: ago(days: 2, hours: 3),
+        closeReason: 'pre_tp_grab',
+        closePrice: 4.803,
+        netPnlUsd: -0.32,
+        feesUsd: 0.20,
+        roiPctOnMargin: -0.3,
+        closedAt: ago(days: 2, hours: 2, minutes: 12),
+      ),
+      rec(
+        signalId: 'SIG-2894',
+        symbol: 'ETHUSDT',
+        side: 'short',
+        entry: 2338.0,
+        qty: 0.043,
+        leverage: 10.0,
+        positionSizePct: 2.0,
+        createdAt: ago(days: 2, hours: 6),
+        closeReason: 'invalidated',
+        closePrice: 2337.6,
+        netPnlUsd: -0.18,
+        feesUsd: 0.20,
+        roiPctOnMargin: -0.2,
+        closedAt: ago(days: 2, hours: 5, minutes: 40),
+      ),
+      rec(
+        signalId: 'SIG-2893',
+        symbol: 'WLDUSDT',
+        side: 'long',
+        entry: 2.404,
+        qty: 41.6,
+        leverage: 10.0,
+        positionSizePct: 2.0,
+        createdAt: ago(days: 3, hours: 1),
+        closeReason: 'pre_tp_grab',
+        closePrice: 2.409,
+        netPnlUsd: 0.08,
+        feesUsd: 0.20,
+        roiPctOnMargin: 0.1,
+        closedAt: ago(days: 3),
+      ),
+      rec(
+        signalId: 'SIG-2892',
+        symbol: 'BTCUSDT',
+        side: 'short',
+        entry: 78130.0,
+        qty: 0.00128,
+        leverage: 10.0,
+        positionSizePct: 2.0,
+        createdAt: ago(days: 3, hours: 4),
+        closeReason: 'expired',
+        closePrice: 78165.0,
+        netPnlUsd: -0.24,
+        feesUsd: 0.20,
+        roiPctOnMargin: -0.2,
+        closedAt: ago(days: 3, hours: 3),
+      ),
+      rec(
+        signalId: 'SIG-2891',
+        symbol: 'SOLUSDT',
+        side: 'short',
+        entry: 144.20,
+        qty: 0.693,
+        leverage: 10.0,
+        positionSizePct: 2.0,
+        createdAt: ago(days: 3, hours: 8),
+        closeReason: 'pre_tp_grab',
+        closePrice: 143.90,
+        netPnlUsd: 0.15,
+        feesUsd: 0.20,
+        roiPctOnMargin: 0.2,
+        closedAt: ago(days: 3, hours: 7, minutes: 18),
+      ),
+      rec(
+        signalId: 'SIG-2890',
+        symbol: 'INJUSDT',
+        side: 'short',
+        entry: 24.40,
+        qty: 4.10,
+        leverage: 10.0,
+        positionSizePct: 2.0,
+        createdAt: ago(days: 4, hours: 2),
+        closeReason: 'invalidated',
+        closePrice: 24.42,
+        netPnlUsd: -0.28,
+        feesUsd: 0.20,
+        roiPctOnMargin: -0.3,
+        closedAt: ago(days: 4, hours: 1, minutes: 30),
+      ),
+      rec(
+        signalId: 'SIG-2889',
+        symbol: 'BNBUSDT',
+        side: 'short',
+        entry: 625.10,
+        qty: 0.160,
+        leverage: 10.0,
+        positionSizePct: 2.0,
+        createdAt: ago(days: 4, hours: 6),
+        closeReason: 'pre_tp_grab',
+        closePrice: 624.65,
+        netPnlUsd: 0.18,
+        feesUsd: 0.20,
+        roiPctOnMargin: 0.2,
+        closedAt: ago(days: 4, hours: 5),
+      ),
+      rec(
+        signalId: 'SIG-2888',
+        symbol: 'TIAUSDT',
+        side: 'long',
+        entry: 4.795,
+        qty: 20.85,
+        leverage: 10.0,
+        positionSizePct: 2.0,
+        createdAt: ago(days: 5),
+        closeReason: 'cancelled',
+        closePrice: 4.795,
+        netPnlUsd: -0.20,
+        feesUsd: 0.20,
+        roiPctOnMargin: -0.2,
+        closedAt: ago(days: 4, hours: 23, minutes: 40),
+      ),
+      // 4 INVALIDATED — modest negatives.
+      rec(
+        signalId: 'SIG-2887',
+        symbol: 'WLDUSDT',
+        side: 'long',
+        entry: 2.420,
+        qty: 41.3,
+        leverage: 10.0,
+        positionSizePct: 2.0,
+        createdAt: ago(days: 5, hours: 3),
+        closeReason: 'invalidated',
+        closePrice: 2.401,
+        netPnlUsd: -2.10,
+        feesUsd: 0.20,
+        roiPctOnMargin: -2.1,
+        closedAt: ago(days: 5, hours: 2),
+      ),
+      rec(
+        signalId: 'SIG-2886',
+        symbol: 'ETHUSDT',
+        side: 'short',
+        entry: 2342.0,
+        qty: 0.043,
+        leverage: 10.0,
+        positionSizePct: 2.0,
+        createdAt: ago(days: 5, hours: 8),
+        closeReason: 'invalidated',
+        closePrice: 2349.0,
+        netPnlUsd: -3.20,
+        feesUsd: 0.20,
+        roiPctOnMargin: -3.2,
+        closedAt: ago(days: 5, hours: 7, minutes: 4),
+      ),
+      rec(
+        signalId: 'SIG-2885',
+        symbol: 'SOLUSDT',
+        side: 'long',
+        entry: 141.85,
+        qty: 0.705,
+        leverage: 10.0,
+        positionSizePct: 2.0,
+        createdAt: ago(days: 6, hours: 1),
+        closeReason: 'invalidated',
+        closePrice: 141.20,
+        netPnlUsd: -3.84,
+        feesUsd: 0.20,
+        roiPctOnMargin: -3.8,
+        closedAt: ago(days: 6),
+      ),
+      rec(
+        signalId: 'SIG-2884',
+        symbol: 'INJUSDT',
+        side: 'short',
+        entry: 24.55,
+        qty: 4.07,
+        leverage: 10.0,
+        positionSizePct: 2.0,
+        createdAt: ago(days: 6, hours: 4),
+        closeReason: 'invalidated',
+        closePrice: 24.78,
+        netPnlUsd: -3.10,
+        feesUsd: 0.20,
+        roiPctOnMargin: -3.1,
+        closedAt: ago(days: 6, hours: 3, minutes: 20),
+      ),
+      // 2 SL_HIT — larger negatives.
+      rec(
+        signalId: 'SIG-2883',
+        symbol: 'BTCUSDT',
+        side: 'long',
+        entry: 77900.0,
+        qty: 0.00129,
+        leverage: 10.0,
+        positionSizePct: 2.0,
+        createdAt: ago(days: 6, hours: 14),
+        closeReason: 'sl_hit',
+        closePrice: 77100.0,
+        netPnlUsd: -8.30,
+        feesUsd: 0.40,
+        roiPctOnMargin: -8.3,
+        closedAt: ago(days: 6, hours: 12),
+      ),
+      rec(
+        signalId: 'SIG-2882',
+        symbol: 'BNBUSDT',
+        side: 'short',
+        entry: 612.80,
+        qty: 0.163,
+        leverage: 10.0,
+        positionSizePct: 2.0,
+        createdAt: ago(days: 7, hours: 1),
+        closeReason: 'sl_hit',
+        closePrice: 625.30,
+        netPnlUsd: -12.40,
+        feesUsd: 0.40,
+        roiPctOnMargin: -12.4,
+        closedAt: ago(days: 7),
+      ),
+    ];
+  }
+
+  @override
+  Future<TradeListResponse> fetchTrades({
+    String mode = 'paper',
+    int limit = 50,
+    int offset = 0,
+    String? sinceTs,
+    String? symbol,
+  }) async {
+    // Filter pass mirrors the engine's behaviour so the page paginates
+    // against the same total it would see in live mode.
+    final filtered = _mockTrades.where((t) {
+      if (symbol != null && symbol.isNotEmpty && t.symbol != symbol) {
+        return false;
+      }
+      if (sinceTs != null && sinceTs.isNotEmpty) {
+        final since = DateTime.tryParse(sinceTs);
+        if (since != null && t.createdAt.isBefore(since)) return false;
+      }
+      return true;
+    }).toList();
+    final slice = filtered.skip(offset).take(limit).toList();
+    return TradeListResponse(items: slice, total: filtered.length);
+  }
+
+  @override
+  Future<PaperResetResponse> resetPaperBalance() async {
+    _mockTrades = <TradeRecord>[];
+    return PaperResetResponse(
+      resetAt: DateTime.now().toUtc(),
+      startingEquityUsd: 1000.0,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -876,6 +1531,33 @@ class HttpRepository implements LuminRepository {
       body: partial.toJsonPartial(acceptTerms: acceptTerms),
     )) as Map<String, dynamic>;
     return Profile.fromJson(j);
+  }
+
+  @override
+  Future<TradeListResponse> fetchTrades({
+    String mode = 'paper',
+    int limit = 50,
+    int offset = 0,
+    String? sinceTs,
+    String? symbol,
+  }) async {
+    final query = <String, dynamic>{
+      'mode': mode,
+      'limit': limit,
+      'offset': offset,
+    };
+    if (sinceTs != null && sinceTs.isNotEmpty) query['since_ts'] = sinceTs;
+    if (symbol != null && symbol.isNotEmpty) query['symbol'] = symbol;
+    final j = (await client.get('/api/trades', query: query))
+        as Map<String, dynamic>;
+    return TradeListResponse.fromJson(j);
+  }
+
+  @override
+  Future<PaperResetResponse> resetPaperBalance() async {
+    final j = (await client.post('/api/auto-mode/paper/reset'))
+        as Map<String, dynamic>;
+    return PaperResetResponse.fromJson(j);
   }
 
   // ---- json → mock-class adapters --------------------------------------
