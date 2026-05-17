@@ -423,6 +423,61 @@ class BinanceClient {
     return body as Map<String, dynamic>;
   }
 
+  /// Cancel a single open order on *symbol*.  Used by the Phase 4
+  /// pre-TP partial-close flow to replace the original SL with a new
+  /// breakeven SL after the partial has been banked (the original SL
+  /// would over-close — closePosition=true would flatten the residual
+  /// too).
+  ///
+  /// Idempotent on the caller's side: Binance returns ``-2011 Unknown
+  /// order sent`` when the order was already cancelled or filled;
+  /// callers treat that as a no-op and proceed.
+  Future<Map<String, dynamic>> cancelOrder({
+    required String symbol,
+    int? orderId,
+    String? origClientOrderId,
+  }) async {
+    if (orderId == null && origClientOrderId == null) {
+      throw ArgumentError(
+        'cancelOrder requires either orderId or origClientOrderId',
+      );
+    }
+    final params = <String, dynamic>{
+      'symbol': symbol,
+      if (orderId != null) 'orderId': orderId,
+      if (origClientOrderId != null) 'origClientOrderId': origClientOrderId,
+    };
+    final body = await _signedDelete('/fapi/v1/order', params);
+    return body as Map<String, dynamic>;
+  }
+
+  /// Reduce-only MARKET close for a fraction of an open position.  Used
+  /// by Phase 4 pre-TP execution to bank ``grab_fraction × entry_qty``
+  /// at market when the engine reports the pre-TP threshold fired.
+  /// ``side`` is the close side (SELL for a LONG entry, BUY for SHORT).
+  ///
+  /// ``reduceOnly=true`` ensures the order can never flip the position
+  /// into the opposite direction — even if a race with the SL flatten
+  /// momentarily zeroes the position, the reduce-only guard returns
+  /// ``-2022 reduceOnly Order is rejected`` rather than opening a
+  /// counter-position.
+  Future<Map<String, dynamic>> closePartialMarket({
+    required String symbol,
+    required String side,
+    required double quantity,
+    String? clientOrderId,
+  }) async {
+    final body = await _signedPost('/fapi/v1/order', {
+      'symbol': symbol,
+      'side': side,
+      'type': 'MARKET',
+      'quantity': quantity,
+      'reduceOnly': 'true',
+      if (clientOrderId != null) 'newClientOrderId': clientOrderId,
+    });
+    return body as Map<String, dynamic>;
+  }
+
   // ----- signed primitives -------------------------------------------
 
   Future<dynamic> _signedGet(
@@ -449,6 +504,19 @@ class BinanceClient {
     final uri = Uri.parse('$baseUrl$path?$qs');
     final resp = await _http
         .post(uri, headers: {'X-MBX-APIKEY': apiKey})
+        .timeout(const Duration(seconds: 12));
+    _ensureOk(resp);
+    return resp.body.isEmpty ? null : jsonDecode(resp.body);
+  }
+
+  Future<dynamic> _signedDelete(
+    String path,
+    Map<String, dynamic> params,
+  ) async {
+    final qs = _buildSignedQuery(params);
+    final uri = Uri.parse('$baseUrl$path?$qs');
+    final resp = await _http
+        .delete(uri, headers: {'X-MBX-APIKEY': apiKey})
         .timeout(const Duration(seconds: 12));
     _ensureOk(resp);
     return resp.body.isEmpty ? null : jsonDecode(resp.body);

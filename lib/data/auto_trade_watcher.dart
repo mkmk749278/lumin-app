@@ -190,20 +190,97 @@ class AutoTradeWatcher {
       final signals = await _getRepo()
           .fetchSignals(status: 'all')
           .timeout(const Duration(seconds: 12));
-      final candidates = signals.where((s) => s.status == 'ACTIVE').toList()
+      final active = signals.where((s) => s.status == 'ACTIVE').toList()
         // Newest first — smallest minutesAgo is newest.
         ..sort((a, b) => a.minutesAgo.compareTo(b.minutesAgo));
-      for (final s in candidates) {
+
+      // Pass 1 — new-entry firing.  Skip signals already in the log.
+      for (final s in active) {
         final existing = await _logService.entryFor(uid, s.id);
         if (existing != null) continue;
         await _fireOne(uid, s, settings, mode);
-        // Hard throttle: one firing per tick.
+        // Hard throttle: one entry-firing per tick.
         break;
+      }
+
+      // Pass 2 — per-user pre-TP partial close (Phase 4, live mode only).
+      // Walk active signals where the engine reports preTpHit=true AND
+      // this user has a logged entry whose pre-TP hasn't banked yet.
+      // Paper mode skips — paper accounts don't move on Binance.
+      //
+      // Independent of pass 1 throttle: pre-TP is time-sensitive
+      // (capital preservation requires banking the partial before the
+      // edge evaporates), and one extra broker call per tick is well
+      // inside any rate-limit envelope.
+      if (mode == 'live') {
+        for (final s in active) {
+          if (!s.preTpHit) continue;
+          final existing = await _logService.entryFor(uid, s.id);
+          if (existing == null) continue;       // never entered
+          if (existing.isPaper) continue;       // paper entry; no broker
+          if (existing.preTpBanked) continue;   // already banked locally
+          if (existing.entryOrderId == null) continue; // entry never filled
+          await _firePreTp(uid, s, existing);
+          // Hard throttle: one pre-TP per tick.
+          break;
+        }
       }
     } catch (e) {
       _setStatus(_status.copyWith(lastError: 'Watcher: $e'));
     } finally {
       _tickInFlight = false;
+    }
+  }
+
+  /// Fire the per-user pre-TP partial close for a single signal whose
+  /// engine state shows pre-TP hit.  Reads the user's
+  /// ``PretpSettings.grabFraction`` at fire-time (so a slider change
+  /// since entry is honored).  Live mode only — the caller guarantees
+  /// mode == 'live' and the logged entry isn't paper.
+  Future<void> _firePreTp(
+    int uid,
+    MockSignal signal,
+    OrderLogEntry existing,
+  ) async {
+    final keys = await _keysService.load(uid);
+    if (keys == null) {
+      _setStatus(_status.copyWith(
+        lastError: 'Pre-TP skipped — Binance keys missing on ${signal.symbol}.',
+      ));
+      return;
+    }
+
+    // Resolve the user's grab fraction.  Fallback to 0.50 (engine
+    // default per OWNER_BRIEF B17) when the user hasn't set the slider
+    // — matches the engine's own default-fallback logic in trade_monitor.
+    double fraction = 0.50;
+    try {
+      final pretp = await _getRepo()
+          .fetchUserPretpSettings()
+          .timeout(const Duration(seconds: 8));
+      if (pretp.grabFraction != null) fraction = pretp.grabFraction!;
+    } catch (e) {
+      // Fall through to default; capital preservation still applies.
+      _setStatus(_status.copyWith(
+        lastError: 'Pre-TP grab_fraction fetch failed for '
+            '${signal.symbol}: $e — using engine default 50%.',
+      ));
+    }
+
+    final result = await _executor.executePreTpPartial(
+      userId: uid,
+      logEntry: existing,
+      keys: keys,
+      grabFraction: fraction,
+    );
+    if (result.success && result.entry != null) {
+      _setStatus(_status.copyWith(
+        lastFiredSignalId: signal.id,
+        lastFiredAt: DateTime.now(),
+        clearError: true,
+      ));
+    } else {
+      _setStatus(_status.copyWith(lastError: result.message));
     }
   }
 
