@@ -45,14 +45,28 @@ class _AutoTradeIndicatorState extends State<AutoTradeIndicator> {
     super.dispose();
   }
 
+  /// Tap-to-stop handler.  Behaviour depends on which mode is active:
+  ///
+  /// * Full auto (live / paper) → flips auto-trade mode to ``off``.
+  /// * Passive-protect (mode=off + protect_manual_entries=true) →
+  ///   the kill switch flips ``protect_manual_entries`` to false
+  ///   instead, because the user explicitly opted into manual mode
+  ///   already; the right kill action is to disable the protection
+  ///   add-on, not re-toggle a mode that's already off.
   Future<void> _killSwitch() async {
     if (_killing) return;
     setState(() => _killing = true);
     final scope = AppConfigScope.of(context);
     try {
-      await scope.repo.updateUserAutoTradeSettings(
-        const AutoTradeSettings(mode: 'off'),
-      );
+      if (_status.passiveProtect && _status.mode == 'off') {
+        await scope.repo.updateUserPretpSettings(
+          const PretpSettings(protectManualEntries: false),
+        );
+      } else {
+        await scope.repo.updateUserAutoTradeSettings(
+          const AutoTradeSettings(mode: 'off'),
+        );
+      }
       await scope.autoTradeWatcher.refreshSettings();
     } catch (e) {
       if (mounted) {
@@ -76,6 +90,10 @@ class _AutoTradeIndicatorState extends State<AutoTradeIndicator> {
 
     final isLive = _status.mode == 'live';
     final isPaper = _status.mode == 'paper';
+    final isProtect = _status.passiveProtect && _status.mode == 'off';
+    // Protect mode uses the same accent as paper — both are
+    // non-risky background activity; live keeps the warn colour
+    // to signal real-money exposure.
     final accent = showError && !running
         ? LuminColors.loss
         : isLive
@@ -87,7 +105,9 @@ class _AutoTradeIndicatorState extends State<AutoTradeIndicator> {
             ? 'AUTO LIVE'
             : isPaper
                 ? 'AUTO PAPER'
-                : 'AUTO';
+                : isProtect
+                    ? 'AUTO PROTECT'
+                    : 'AUTO';
 
     return Material(
       color: accent.withOpacity(0.12),
@@ -194,6 +214,11 @@ class _AutoTradeIndicatorState extends State<AutoTradeIndicator> {
               ? '${delta.inMinutes}m'
               : '${delta.inHours}h';
       return 'Last fired ${_status.lastFiredSignalId ?? ""} • $age ago';
+    }
+    if (_status.passiveProtect && _status.mode == 'off') {
+      return _status.lastTickAt != null
+          ? 'Watching manual entries for pre-TP threshold…'
+          : 'Protecting manual entries…';
     }
     if (_status.lastTickAt != null) {
       return 'Watching for new signals…';

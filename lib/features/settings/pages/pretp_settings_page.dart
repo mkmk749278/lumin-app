@@ -48,6 +48,14 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
   double _atrMult = 0.30;
   double _feeFloor = 0.12;
 
+  /// OWNER_BRIEF B17 (2026-05-17) — when ON, the AutoTradeWatcher keeps
+  /// polling for pre-TP partial closes on manually-taken entries even
+  /// when auto-trade ``mode == 'off'``.  Default ON delivers capital
+  /// preservation to manual operators without an explicit opt-in.
+  /// OFF respects "off means off" for users who want pure manual
+  /// control with no background broker activity.
+  bool _protectManualEntries = true;
+
   bool _regimeTrending = true;
   bool _regimeRanging = true;
   bool _regimeChoppy = false;
@@ -102,6 +110,9 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
         // clamp in `_coerce_pretp` should already guarantee this).
         if (s.grabFraction != null) {
           _grabPct = s.grabFraction!.clamp(0.30, 1.00);
+        }
+        if (s.protectManualEntries != null) {
+          _protectManualEntries = s.protectManualEntries!;
         }
         _usingDefaults = s.usingDefaults ?? true;
         if (s.regimeAllowlist != null) {
@@ -166,11 +177,19 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
       atrMultiplier: _atrMult,
       feeFloorPct: _feeFloor,
       grabFraction: _grabPct,
+      protectManualEntries: _protectManualEntries,
     );
     try {
       final saved = await repo.updateUserPretpSettings(partial);
       if (!mounted) return;
       setState(() => _usingDefaults = saved.usingDefaults ?? false);
+      // OWNER_BRIEF B17 (2026-05-17) — the watcher decides whether to
+      // poll based on protectManualEntries.  Refresh so the change
+      // takes effect immediately (start watcher in protect-only mode
+      // when flipping ON; stop when flipping OFF) without waiting for
+      // the next 15s tick or an app reopen.
+      // ignore: use_build_context_synchronously
+      AppConfigScope.of(context).autoTradeWatcher.refreshSettings();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Pre-TP settings saved'),
@@ -279,6 +298,8 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
         if (!isLive) const PreviewBadge(),
         _scopeBanner(),
         _masterCard(),
+        const SizedBox(height: LuminSpacing.md),
+        _manualEntryProtectionCard(),
         const SizedBox(height: LuminSpacing.md),
         _thresholdsCard(),
         const SizedBox(height: LuminSpacing.md),
@@ -397,6 +418,99 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
               value: _enabled,
               activeColor: LuminColors.accent,
               onChanged: (v) => setState(() => _enabled = v),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// OWNER_BRIEF B17 (2026-05-17) — pre-TP coverage for manual entries.
+  ///
+  /// When ON, the AutoTradeWatcher keeps polling for pre-TP partial
+  /// closes on manually-taken entries even when auto-trade is OFF.
+  /// Closes the capital-preservation loop for the manual-operator
+  /// cohort (hand-picked entries via Take Signal) — without this, a
+  /// manual user gets entry + SL + TP1 placed but eats the full SL
+  /// when price reverses post-MFE.  Default ON.
+  ///
+  /// Disabled (greyed) when the master Pre-TP toggle is off — there's
+  /// no pre-TP behaviour to extend if the master switch is off.
+  Widget _manualEntryProtectionCard() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
+      child: LuminCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.security_outlined,
+                  color: _enabled
+                      ? LuminColors.accent
+                      : LuminColors.textMuted,
+                  size: 18,
+                ),
+                const SizedBox(width: LuminSpacing.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Protect manual entries',
+                        style: TextStyle(
+                          color: _enabled
+                              ? LuminColors.textPrimary
+                              : LuminColors.textMuted,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _protectManualEntries
+                            ? 'Pre-TP partials apply to Take-Signal entries '
+                                'even when Auto-trade is off.'
+                            : 'Manual entries get entry + SL + TP1 only — '
+                                'no pre-TP partial close.',
+                        style: const TextStyle(
+                          color: LuminColors.textSecondary,
+                          fontSize: 11,
+                          height: 1.3,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Switch(
+                  value: _protectManualEntries,
+                  activeColor: LuminColors.accent,
+                  onChanged: _enabled
+                      ? (v) => setState(() => _protectManualEntries = v)
+                      : null,
+                ),
+              ],
+            ),
+            // Subscriber-facing explanation of the asymmetry.  Same math
+            // doctrine as the grab-fraction preview: be transparent about
+            // why this default is ON.
+            const SizedBox(height: LuminSpacing.sm),
+            Padding(
+              padding: const EdgeInsets.only(left: LuminSpacing.lg + 8),
+              child: Text(
+                _protectManualEntries
+                    ? 'Watcher stays running in protect-only mode; one '
+                        'broker call when a pre-TP threshold fires. No '
+                        'new entries are opened.'
+                    : 'No background broker activity. Manual entries '
+                        'run their original SL/TP only.',
+                style: const TextStyle(
+                  color: LuminColors.textMuted,
+                  fontSize: 11,
+                  height: 1.4,
+                ),
+              ),
             ),
           ],
         ),

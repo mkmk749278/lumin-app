@@ -36,19 +36,31 @@ class AutoTradeStatus {
   const AutoTradeStatus({
     required this.running,
     required this.mode,
+    this.passiveProtect = false,
     this.lastTickAt,
     this.lastError,
     this.lastFiredSignalId,
     this.lastFiredAt,
   });
 
-  /// True when the poll loop is active.  Implies mode != off and
-  /// (for live) keys present.
+  /// True when the poll loop is active.  Implies one of:
+  ///   * mode in (live, paper) — full auto-trade is running, OR
+  ///   * passiveProtect is true — mode is off but the watcher is
+  ///     polling in protect-only mode to deliver pre-TP partials
+  ///     on manual entries.
   final bool running;
 
   /// Cached user setting — ``off`` / ``paper`` / ``live`` / null
   /// (when nothing has been loaded yet).
   final String? mode;
+
+  /// OWNER_BRIEF B17 (2026-05-17) — true when the watcher is running
+  /// in protect-only mode: ``mode == 'off'`` but the user has
+  /// ``protect_manual_entries = true`` AND live Binance keys connected.
+  /// In this state only pass 2 (pre-TP partial closes) executes; no
+  /// new entries are opened.  The AUTO banner copy uses this flag
+  /// to distinguish "AUTO LIVE" from "PROTECTING MANUAL ENTRIES".
+  final bool passiveProtect;
 
   final DateTime? lastTickAt;
   final String? lastError;
@@ -58,6 +70,7 @@ class AutoTradeStatus {
   AutoTradeStatus copyWith({
     bool? running,
     String? mode,
+    bool? passiveProtect,
     DateTime? lastTickAt,
     String? lastError,
     String? lastFiredSignalId,
@@ -68,6 +81,7 @@ class AutoTradeStatus {
     return AutoTradeStatus(
       running: running ?? this.running,
       mode: mode ?? this.mode,
+      passiveProtect: passiveProtect ?? this.passiveProtect,
       lastTickAt: lastTickAt ?? this.lastTickAt,
       lastError: clearError ? null : (lastError ?? this.lastError),
       lastFiredSignalId:
@@ -108,29 +122,55 @@ class AutoTradeWatcher {
   final _statusController = StreamController<AutoTradeStatus>.broadcast();
   Stream<AutoTradeStatus> get statusStream => _statusController.stream;
 
-  /// Start the loop if cached mode is live/paper.  Idempotent — safe
-  /// to call from NavShell.initState every time.
+  /// Start the loop if cached mode is live/paper, OR if mode is off
+  /// but the user has ``protect_manual_entries = true`` AND live
+  /// Binance keys connected (passive-protect mode).  Idempotent —
+  /// safe to call from NavShell.initState every time.
   Future<void> ensureRunning() async {
     if (_timer != null) return;
     final settings = await _safeFetchSettings();
     final mode = settings?.mode;
-    _setStatus(_status.copyWith(mode: mode));
-    if (mode == 'live' || mode == 'paper') {
+    final passive = await _shouldRunPassive(mode);
+    _setStatus(_status.copyWith(mode: mode, passiveProtect: passive));
+    if (mode == 'live' || mode == 'paper' || passive) {
       _start();
     }
   }
 
-  /// Called by the Auto-trade settings page after Save so the watcher
-  /// picks up a fresh mode without waiting for its next tick.
+  /// Called by the Auto-trade settings page or Pre-TP settings page
+  /// after Save so the watcher picks up the new mode or
+  /// protect_manual_entries flag without waiting for its next tick.
   Future<void> refreshSettings() async {
     final settings = await _safeFetchSettings();
     final mode = settings?.mode;
-    _setStatus(_status.copyWith(mode: mode, clearError: true));
-    if (mode == 'off' || mode == null) {
+    final passive = await _shouldRunPassive(mode);
+    _setStatus(_status.copyWith(
+      mode: mode,
+      passiveProtect: passive,
+      clearError: true,
+    ));
+    if ((mode == 'off' || mode == null) && !passive) {
       stop();
       return;
     }
     if (_timer == null) _start();
+  }
+
+  /// Resolve whether passive-protect mode applies right now.  Returns
+  /// true iff ``mode == 'off'`` AND the user has
+  /// ``protect_manual_entries = true`` AND live keys are present.
+  /// Other branches return false — full-auto or stop covers them.
+  Future<bool> _shouldRunPassive(String? mode) async {
+    if (mode != 'off' && mode != null) return false;
+    final uid = _getUserId();
+    if (uid == null) return false;
+    // Keys are required because passive-protect calls Binance partial-close.
+    final keys = await _keysService.load(uid);
+    if (keys == null) return false;
+    final pretp = await _safeFetchPretpSettings();
+    // Engine default is True; treat null (no override yet) as True so the
+    // first-time user gets protection without an explicit save.
+    return pretp?.protectManualEntries ?? true;
   }
 
   void _start() {
@@ -168,12 +208,17 @@ class AutoTradeWatcher {
       }
       final settings = await _safeFetchSettings();
       final mode = settings?.mode;
+      final passive = await _shouldRunPassive(mode);
       _setStatus(_status.copyWith(
         mode: mode,
+        passiveProtect: passive,
         lastTickAt: DateTime.now(),
         clearError: true,
       ));
-      if (settings == null || mode == null || mode == 'off') {
+      // Stop only when neither full-auto nor passive applies.  When
+      // passive applies (mode=off + protect_manual_entries=true + keys),
+      // proceed straight to pass 2; pass 1 entry-firing is skipped.
+      if (settings == null || mode == null || (mode == 'off' && !passive)) {
         stop();
         return;
       }
@@ -194,25 +239,31 @@ class AutoTradeWatcher {
         // Newest first — smallest minutesAgo is newest.
         ..sort((a, b) => a.minutesAgo.compareTo(b.minutesAgo));
 
-      // Pass 1 — new-entry firing.  Skip signals already in the log.
-      for (final s in active) {
-        final existing = await _logService.entryFor(uid, s.id);
-        if (existing != null) continue;
-        await _fireOne(uid, s, settings, mode);
-        // Hard throttle: one entry-firing per tick.
-        break;
+      // Pass 1 — new-entry firing.  Skipped entirely in passive-protect
+      // mode (mode=off): the user has explicitly opted out of opening
+      // new entries via auto-trade.  We only stay running to bank
+      // pre-TP partials on entries they've already taken manually.
+      if (!passive) {
+        for (final s in active) {
+          final existing = await _logService.entryFor(uid, s.id);
+          if (existing != null) continue;
+          await _fireOne(uid, s, settings, mode);
+          // Hard throttle: one entry-firing per tick.
+          break;
+        }
       }
 
-      // Pass 2 — per-user pre-TP partial close (Phase 4, live mode only).
-      // Walk active signals where the engine reports preTpHit=true AND
-      // this user has a logged entry whose pre-TP hasn't banked yet.
-      // Paper mode skips — paper accounts don't move on Binance.
+      // Pass 2 — per-user pre-TP partial close (Phase 4).  Walk active
+      // signals where the engine reports preTpHit=true AND this user
+      // has a logged entry whose pre-TP hasn't banked yet.  Runs in
+      // both full-auto live mode and passive-protect mode; paper-only
+      // mode skips because paper accounts don't move on Binance.
       //
       // Independent of pass 1 throttle: pre-TP is time-sensitive
       // (capital preservation requires banking the partial before the
       // edge evaporates), and one extra broker call per tick is well
       // inside any rate-limit envelope.
-      if (mode == 'live') {
+      if (mode == 'live' || passive) {
         for (final s in active) {
           if (!s.preTpHit) continue;
           final existing = await _logService.entryFor(uid, s.id);
@@ -365,6 +416,20 @@ class AutoTradeWatcher {
       return await _getRepo()
           .fetchUserAutoTradeSettings()
           .timeout(const Duration(seconds: 10));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Fetch the user's per-user pretp overrides for the passive-protect
+  /// decision.  Returns null on any error so callers can fall back to
+  /// the engine default (treat null as protect=true) without crashing
+  /// the watcher loop on a transient network error.
+  Future<PretpSettings?> _safeFetchPretpSettings() async {
+    try {
+      return await _getRepo()
+          .fetchUserPretpSettings()
+          .timeout(const Duration(seconds: 8));
     } catch (_) {
       return null;
     }
