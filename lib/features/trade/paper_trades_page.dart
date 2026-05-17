@@ -6,9 +6,18 @@
 /// ROI% pill, entry/exit/qty/notional grid, fees + net PnL + timestamps.
 /// Tap a row → :class:`PaperTradeDetailPage`.
 ///
-/// The "Reset balance" action lives in the app-bar overflow menu;
-/// firing it shows a confirm dialog, then calls
-/// ``repo.resetPaperBalance()`` and refreshes.
+/// The app-bar overflow menu carries two destructive actions:
+///
+///   * **Close all open positions** — flattens the paper book at zero-
+///     move fills (entry price; fees only) via
+///     ``POST /api/auto-mode/paper/close-all``.  The reset endpoint
+///     refuses while open positions exist (B12 lifecycle guard) and
+///     directs users here, so this is the prerequisite step for the
+///     reset flow.
+///   * **Reset balance** — zeros cumulative paper PnL and archives the
+///     ledger via ``POST /api/auto-mode/paper/reset``.  Owner-confirmed
+///     via dialog before firing; falls back to a "Close all first?"
+///     prompt when the 409-open-positions error surfaces.
 import 'package:flutter/material.dart';
 
 import '../../data/app_config.dart';
@@ -192,6 +201,13 @@ class _PaperTradesPageState extends State<PaperTradesPage> {
       ),
     );
     if (ok != true || !mounted) return;
+    await _doReset();
+  }
+
+  /// Inner reset call — pulled out of ``_confirmReset`` so the
+  /// 409 → close-all → retry recovery flow can call it without
+  /// re-prompting for confirmation.
+  Future<void> _doReset() async {
     final repo = AppConfigScope.of(context).repo;
     setState(() => _resetting = true);
     try {
@@ -209,9 +225,164 @@ class _PaperTradesPageState extends State<PaperTradesPage> {
       await _refresh();
     } catch (e) {
       if (!mounted) return;
+      final msg = e.toString();
+      // Engine PR #401 — reset refuses while open positions exist
+      // (B12 lifecycle guard).  The 409 detail explicitly directs the
+      // user to close-all-first; offer a one-tap recovery path inline
+      // instead of just surfacing the raw error.
+      final isOpenPositionsConflict = msg.contains('409') &&
+          (msg.contains('open positions') || msg.contains('orphaned'));
+      if (isOpenPositionsConflict) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+              'Open paper positions block reset. Close them first?',
+            ),
+            duration: const Duration(seconds: 6),
+            backgroundColor: LuminColors.warn,
+            action: SnackBarAction(
+              label: 'CLOSE ALL',
+              textColor: LuminColors.bgDeep,
+              onPressed: _closeAllThenReset,
+            ),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Reset failed: $e'),
+            duration: const Duration(seconds: 4),
+            backgroundColor: LuminColors.loss,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _resetting = false);
+    }
+  }
+
+  /// SnackBar-action handler for the 409 recovery flow: flatten the
+  /// paper book then immediately retry the reset.  No extra dialog —
+  /// the surrounding snackbar's "Open positions block reset" already
+  /// communicates the destructive intent.
+  Future<void> _closeAllThenReset() async {
+    if (_resetting) return;
+    final repo = AppConfigScope.of(context).repo;
+    setState(() => _resetting = true);
+    try {
+      final resp = await repo.closeAllPaperPositions();
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Reset failed: $e'),
+          content: Text(
+            'Closed ${resp.closedCount} paper position'
+            '${resp.closedCount == 1 ? "" : "s"} (PnL '
+            '${resp.realisedPnlTotal >= 0 ? "+" : ""}'
+            '\$${resp.realisedPnlTotal.toStringAsFixed(2)}). Retrying reset…',
+          ),
+          duration: const Duration(seconds: 3),
+          backgroundColor: LuminColors.success,
+        ),
+      );
+      // ``_doReset`` re-sets ``_resetting`` itself, so release first.
+      if (mounted) setState(() => _resetting = false);
+      await _doReset();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Close all failed: $e'),
+          duration: const Duration(seconds: 4),
+          backgroundColor: LuminColors.loss,
+        ),
+      );
+      if (mounted) setState(() => _resetting = false);
+    }
+  }
+
+  /// Confirm + fire ``closeAllPaperPositions`` from the explicit
+  /// overflow-menu entry (independent of any reset attempt).  Does
+  /// NOT auto-retry reset — user picked Close-all on its own merit.
+  Future<void> _confirmCloseAll() async {
+    if (_resetting) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: LuminColors.bgCard,
+        title: const Row(
+          children: [
+            Icon(Icons.close_fullscreen, color: LuminColors.warn, size: 20),
+            SizedBox(width: LuminSpacing.sm),
+            Expanded(
+              child: Text(
+                'Close all open positions?',
+                style: TextStyle(
+                  color: LuminColors.textPrimary,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: const Text(
+          'Every open paper position will close at its entry price '
+          '(zero-move fill, fees only). The reset action will then '
+          'be unblocked. This cannot be undone.',
+          style: TextStyle(
+            color: LuminColors.textPrimary,
+            fontSize: 13,
+            height: 1.4,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: LuminColors.textSecondary),
+            ),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: LuminColors.warn,
+              foregroundColor: LuminColors.bgDeep,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text(
+              'Close all',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final repo = AppConfigScope.of(context).repo;
+    setState(() => _resetting = true);
+    try {
+      final resp = await repo.closeAllPaperPositions();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            resp.closedCount == 0
+                ? 'Paper book already flat — nothing to close.'
+                : 'Closed ${resp.closedCount} paper position'
+                    '${resp.closedCount == 1 ? "" : "s"} (realised PnL '
+                    '${resp.realisedPnlTotal >= 0 ? "+" : ""}'
+                    '\$${resp.realisedPnlTotal.toStringAsFixed(2)}).',
+          ),
+          duration: const Duration(seconds: 3),
+          backgroundColor: LuminColors.success,
+        ),
+      );
+      await _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Close all failed: $e'),
           duration: const Duration(seconds: 4),
           backgroundColor: LuminColors.loss,
         ),
@@ -236,9 +407,21 @@ class _PaperTradesPageState extends State<PaperTradesPage> {
           PopupMenuButton<String>(
             tooltip: 'More',
             onSelected: (v) {
+              if (v == 'close_all') _confirmCloseAll();
               if (v == 'reset') _confirmReset();
             },
             itemBuilder: (_) => [
+              const PopupMenuItem<String>(
+                value: 'close_all',
+                child: Row(
+                  children: [
+                    Icon(Icons.close_fullscreen,
+                        color: LuminColors.warn, size: 18),
+                    SizedBox(width: LuminSpacing.sm),
+                    Text('Close all open positions'),
+                  ],
+                ),
+              ),
               const PopupMenuItem<String>(
                 value: 'reset',
                 child: Row(
