@@ -654,6 +654,7 @@ abstract class LuminRepository {
     int offset = 0,
     String? sinceTs,
     String? symbol,
+    bool includeOpen = false,
   });
   /// Reset the paper ledger to a fresh $1000 starting equity.  The
   /// engine archives prior trade history (the audit ledger keeps the
@@ -1462,9 +1463,13 @@ class MockRepository implements LuminRepository {
     int offset = 0,
     String? sinceTs,
     String? symbol,
+    bool includeOpen = false,
   }) async {
     // Filter pass mirrors the engine's behaviour so the page paginates
-    // against the same total it would see in live mode.
+    // against the same total it would see in live mode.  ``includeOpen``
+    // is engine-side concept (rows without ``closed_at`` are filtered by
+    // default); the mock fixture already only contains closed rows, so
+    // the flag is a no-op here.  The HTTP impl forwards it to the server.
     final filtered = _mockTrades.where((t) {
       if (symbol != null && symbol.isNotEmpty && t.symbol != symbol) {
         return false;
@@ -1735,6 +1740,7 @@ class HttpRepository implements LuminRepository {
     int offset = 0,
     String? sinceTs,
     String? symbol,
+    bool includeOpen = false,
   }) async {
     final query = <String, dynamic>{
       'mode': mode,
@@ -1743,6 +1749,11 @@ class HttpRepository implements LuminRepository {
     };
     if (sinceTs != null && sinceTs.isNotEmpty) query['since_ts'] = sinceTs;
     if (symbol != null && symbol.isNotEmpty) query['symbol'] = symbol;
+    // Owner 2026-05-17 — the Paper tab needs to surface OPEN paper positions
+    // alongside closed history.  The engine defaults this to ``false`` (per
+    // ``src/api/paper_trade_routes.py``); the Paper tab passes ``true`` so
+    // the list isn't artificially empty when trades are still active.
+    if (includeOpen) query['include_open'] = 'true';
     final j = (await client.get('/api/trades', query: query))
         as Map<String, dynamic>;
     return TradeListResponse.fromJson(j);

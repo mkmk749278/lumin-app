@@ -83,6 +83,10 @@ class _PaperTradesPageState extends State<PaperTradesPage> {
         mode: 'paper',
         limit: _pageSize,
         offset: 0,
+        // Owner 2026-05-17 — Paper tab must surface OPEN positions alongside
+        // closed history (the previous default of closed-only hid all current
+        // activity; the page appeared "old" / empty during live paper runs).
+        includeOpen: true,
       );
       if (!mounted) return;
       setState(() {
@@ -109,6 +113,7 @@ class _PaperTradesPageState extends State<PaperTradesPage> {
         mode: 'paper',
         limit: _pageSize,
         offset: _items.length,
+        includeOpen: true,
       );
       if (!mounted) return;
       setState(() {
