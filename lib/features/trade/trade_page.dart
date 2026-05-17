@@ -1,20 +1,31 @@
-/// Trade — auto-execution control + open positions + activity log.
+/// Trade — top-level Live and Paper tabs, each with its own on/off toggle.
 ///
-/// Phase 3c: when the user has Binance keys connected, this page shows
-/// their real Binance positions (queried live from
-/// ``GET /fapi/v2/positionRisk``) instead of the engine-wide paper
-/// view.  Falls back to engine paper positions when no keys are
-/// connected so the page still renders something useful.
+/// Owner 2026-05-17 redesign — replaced the tri-state Off/Paper/Live card
+/// inside the Live body (which caused "two paper modes" confusion when
+/// mode=paper made the Live tab render paper positions) with two
+/// independent per-tab binary toggles:
 ///
-/// The Off/Paper/Live mode toggle writes the **per-user** auto-trade
-/// setting via ``repo.updateUserAutoTradeSettings`` (Phase 2 endpoint)
-/// and kicks the AutoTradeWatcher (Phase 3b-2) to pick up the new
-/// mode without waiting for its next tick.
+///   * **Live tab**: shows ONLY live execution.  Binary toggle flips
+///     mode ``'live' <-> 'off'``.  Binance positions render when the
+///     user has keys connected and the toggle is on; an off-state
+///     notice otherwise.
+///   * **Paper tab**: shows ONLY paper trading.  Binary toggle flips
+///     mode ``'paper' <-> 'off'``.  Renders paper P&L + open positions
+///     + trade history (with ``include_open=true`` so live activity
+///     surfaces alongside closed history).
 ///
-/// 2026-05 — Paper visibility: a top-of-screen Live | Paper toggle
-/// hands the body off to :class:`PaperTradesPage` for the per-trade
-/// list view.  The existing Live surface (mode control + open
-/// positions + activity) is preserved verbatim under the Live tab.
+/// The two tabs are mutually exclusive at the engine — the ``mode`` field
+/// is a single tri-state string, so turning ON one auto-forces the other
+/// OFF on the next refresh.  Each tab's toggle is a view onto the shared
+/// state from that tab's perspective.
+///
+/// Phase 3c carries forward: when the user has Binance keys connected,
+/// the Live tab queries their real Binance positions via
+/// ``GET /fapi/v2/positionRisk``.
+///
+/// Mode flip writes to the **per-user** ``user_auto_trade_settings``
+/// table (Phase 2 endpoint) and kicks the AutoTradeWatcher (Phase 3b-2)
+/// to pick up the new mode without waiting for its next tick.
 import 'package:flutter/material.dart';
 
 import '../../data/app_config.dart';
@@ -69,12 +80,9 @@ class _TradeBundle {
   final String? binanceError;
 }
 
-/// Which sub-view the Trade tab is currently showing.
-///
-/// `live` — the original execution-control + positions + activity
-/// surface, unchanged from pre-paper-visibility.
-/// `paper` — the paginated paper trade history list (delegates to
-/// :class:`PaperTradesPage`).
+/// Which top-tab the Trade page is currently showing.  Each owns its
+/// own on/off toggle for the corresponding mode; see ``_buildLiveBody``
+/// and ``_buildPaperBody`` for the per-tab content.
 enum _TradeView { live, paper }
 
 class TradePage extends StatefulWidget {
@@ -298,25 +306,23 @@ class _TradePageState extends State<TradePage> {
 
   @override
   Widget build(BuildContext context) {
-    // Paper sub-tab hands the whole body off to the per-trade list page
-    // — that page owns its own AppBar (with the Reset balance overflow)
-    // and refresh control, so we just inline it under the sub-tab strip.
-    if (_view == _TradeView.paper) {
-      return Column(
-        children: [
-          _SubTabStrip(
-            view: _view,
-            onChanged: (v) => setState(() => _view = v),
-          ),
-          const Expanded(child: PaperTradesPage()),
-        ],
-      );
-    }
-    return _buildLiveView(context);
-  }
-
-  Widget _buildLiveView(BuildContext context) {
-    final scope = AppConfigScope.of(context);
+    // Owner 2026-05-17 redesign — the Trade page has two top-level tabs
+    // (Live and Paper), each fully self-contained with its own binary
+    // on/off toggle.  The previous tri-state mode card inside the Live
+    // body confused users: when mode=paper the "Live" tab rendered paper
+    // P&L + paper positions, making it look like two separate paper
+    // modes were running.  The fix:
+    //
+    //   * Live tab: shows ONLY live-execution content (Binance positions
+    //     when keys are connected).  Has a single Live toggle that flips
+    //     mode 'live' <-> 'off'.
+    //   * Paper tab: shows ONLY paper content (P&L + open positions +
+    //     trade history).  Has a single Paper toggle that flips mode
+    //     'paper' <-> 'off'.
+    //
+    // The two toggles are mutually exclusive at the engine layer (mode
+    // is a single string).  Turning ON one automatically forces the
+    // other to OFF on the next refresh — _activeMode resolution below.
     return Scaffold(
       appBar: AppBar(title: const Text('Trade')),
       body: Column(
@@ -341,84 +347,170 @@ class _TradePageState extends State<TradePage> {
                         error: snap.error.toString(), onRetry: _refresh);
                   }
                   final data = snap.data!;
-                  return ListView(
-                    physics: const AlwaysScrollableScrollPhysics(
-                      parent: BouncingScrollPhysics(),
-                    ),
-                    children: [
-                      if (!scope.repo.isLive) const PreviewBadge(),
-                      _ModeToggle(
-                        // Pill reflects the user's per-user mode (what the
-                        // AutoTradeWatcher will act on).  Falls back to the
-                        // engine-wide mode when the user has no override
-                        // (usingDefaults == true).
-                        mode: _modeIndex(
-                          data.userSettings.mode ?? data.autoMode.mode,
-                        ),
-                        switching: _switchingMode,
-                        onChanged: (i) => _changeMode(_modeName(i)),
-                      ),
-                      if (data.userSettings.mode != null &&
-                          data.userSettings.mode != data.autoMode.mode)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: LuminSpacing.lg,
-                            vertical: LuminSpacing.xs,
-                          ),
-                          child: Text(
-                            'Engine globally on ${data.autoMode.mode?.toUpperCase() ?? "—"}; '
-                            'your auto-trade overrides to '
-                            '${data.userSettings.mode!.toUpperCase()}.',
-                            style: const TextStyle(
-                              color: LuminColors.textMuted,
-                              fontSize: 11,
-                              height: 1.4,
-                            ),
-                          ),
-                        ),
-                      const SizedBox(height: LuminSpacing.md),
-                      _ModePnlCard(
-                        autoMode: data.autoMode,
-                        hasBinance: data.binancePositions != null,
-                      ),
-                      const SizedBox(height: LuminSpacing.md),
-                      // Phase 3c — prefer the user's real Binance positions
-                      // when they've connected keys; fall back to engine
-                      // paper when not connected or fetch errored.
-                      if (data.binancePositions != null)
-                        _UserPositionsCard(
-                          positions: data.binancePositions!,
-                          account: data.binanceAccount,
-                        )
-                      else ...[
-                        if (data.binanceError != null)
-                          Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: LuminSpacing.lg,
-                              vertical: LuminSpacing.xs,
-                            ),
-                            child: Text(
-                              data.binanceError!,
-                              style: const TextStyle(
-                                color: LuminColors.loss,
-                                fontSize: 11,
-                                height: 1.4,
-                              ),
-                            ),
-                          ),
-                        _OpenPositionsCard(positions: data.positions),
-                      ],
-                      const SizedBox(height: LuminSpacing.md),
-                      _ActivityCard(events: data.activity),
-                      const SizedBox(height: LuminSpacing.xl),
-                    ],
-                  );
+                  return _view == _TradeView.paper
+                      ? _buildPaperBody(context, data)
+                      : _buildLiveBody(context, data);
                 },
               ),
             ),
           ),
         ],
       ),
+    );
+  }
+
+  /// Live-tab body.  Owner 2026-05-17 — no longer renders paper data
+  /// (the tri-state Off/Paper/Live card lived here pre-redesign; with
+  /// mode=paper it caused the "Live" tab to display paper positions,
+  /// indistinguishable from the Paper tab).  Now strictly:
+  ///
+  ///   * Live on/off toggle (mode 'live' <-> 'off' — the Paper toggle
+  ///     in the Paper tab handles paper mode independently).
+  ///   * Binance positions when the user has keys + live mode active,
+  ///     otherwise an off-state notice.
+  Widget _buildLiveBody(BuildContext context, _TradeBundle data) {
+    final scope = AppConfigScope.of(context);
+    // The effective mode that the auto-trader will act on — user override
+    // if present, engine-wide otherwise.
+    final activeMode = data.userSettings.mode ?? data.autoMode.mode;
+    final liveActive = activeMode == 'live';
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(
+        parent: BouncingScrollPhysics(),
+      ),
+      children: [
+        if (!scope.repo.isLive) const PreviewBadge(),
+        _BinaryModeToggle(
+          label: 'Live auto-trade',
+          subtitle: liveActive
+              ? 'Engine is firing real Binance orders.'
+              : 'Off — turn on to enable live auto-execution.',
+          icon: Icons.bolt,
+          activeColor: LuminColors.loss, // LIVE = caution colour
+          isOn: liveActive,
+          switching: _switchingMode,
+          onChanged: (on) => _changeMode(on ? 'live' : 'off'),
+        ),
+        if (!liveActive)
+          _OffStateNotice(
+            label: 'Live mode off',
+            description: activeMode == 'paper'
+                ? 'Paper mode is currently on — see the Paper tab. Turn '
+                  'this toggle on to switch to live execution.'
+                : 'Flip the toggle above to enable real Binance orders.',
+          )
+        else ...[
+          const SizedBox(height: LuminSpacing.md),
+          // Phase 3c — prefer the user's real Binance positions when
+          // they've connected keys; otherwise show an actionable hint.
+          if (data.binancePositions != null)
+            _UserPositionsCard(
+              positions: data.binancePositions!,
+              account: data.binanceAccount,
+            )
+          else ...[
+            if (data.binanceError != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: LuminSpacing.lg,
+                  vertical: LuminSpacing.xs,
+                ),
+                child: Text(
+                  data.binanceError!,
+                  style: const TextStyle(
+                    color: LuminColors.loss,
+                    fontSize: 11,
+                    height: 1.4,
+                  ),
+                ),
+              )
+            else
+              const _OffStateNotice(
+                label: 'No Binance keys connected',
+                description:
+                    'Connect your Futures keys in Settings → Binance to '
+                    'see your live positions here.',
+              ),
+          ],
+          const SizedBox(height: LuminSpacing.md),
+          _ActivityCard(events: data.activity),
+          const SizedBox(height: LuminSpacing.xl),
+        ],
+      ],
+    );
+  }
+
+  /// Paper-tab body.  Owner 2026-05-17 — previously delegated entirely
+  /// to PaperTradesPage (showing only the closed trade list).  Now the
+  /// Paper tab carries everything paper:
+  ///
+  ///   * Paper on/off toggle (mode 'paper' <-> 'off').
+  ///   * Paper P&L card (the engine-wide paper book, since the engine-
+  ///     side paper broker is currently single-tenant; per-user paper
+  ///     ledger lands in Phase 4).
+  ///   * Paper open positions.
+  ///   * Paper trade history (PaperTradesPage inline).
+  Widget _buildPaperBody(BuildContext context, _TradeBundle data) {
+    final scope = AppConfigScope.of(context);
+    final activeMode = data.userSettings.mode ?? data.autoMode.mode;
+    final paperActive = activeMode == 'paper';
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(
+        parent: BouncingScrollPhysics(),
+      ),
+      children: [
+        if (!scope.repo.isLive) const PreviewBadge(),
+        _BinaryModeToggle(
+          label: 'Paper trading',
+          subtitle: paperActive
+              ? 'Engine simulates fills — no real orders, zero risk.'
+              : 'Off — turn on to simulate trades without real money.',
+          icon: Icons.science_outlined,
+          activeColor: LuminColors.warn, // Paper = caution colour, less than live
+          isOn: paperActive,
+          switching: _switchingMode,
+          onChanged: (on) => _changeMode(on ? 'paper' : 'off'),
+        ),
+        if (!paperActive)
+          _OffStateNotice(
+            label: 'Paper mode off',
+            description: activeMode == 'live'
+                ? 'Live mode is currently on — see the Live tab. Turn this '
+                  'toggle on to switch to paper simulation.'
+                : 'Flip the toggle above to start simulating fills.',
+          )
+        else ...[
+          const SizedBox(height: LuminSpacing.md),
+          _ModePnlCard(
+            autoMode: data.autoMode,
+            hasBinance: false, // Paper view always shows engine paper P&L
+          ),
+          const SizedBox(height: LuminSpacing.md),
+          _OpenPositionsCard(positions: data.positions),
+          const SizedBox(height: LuminSpacing.md),
+        ],
+        // History below is independent of mode state — even when paper
+        // is off, the user wants to see their past simulated trades.
+        // PaperTradesPage owns its own header / pagination / refresh.
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
+          child: Text(
+            'PAPER HISTORY',
+            style: TextStyle(
+              color: LuminColors.textMuted,
+              fontSize: 10,
+              letterSpacing: 1.2,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        const SizedBox(height: LuminSpacing.sm),
+        // Embed the trade list as a sliver — physics: NeverScrollable so
+        // the parent ListView drives the scroll; this lets the toggle +
+        // P&L card scroll naturally above the trade history.
+        const _EmbeddedPaperTrades(),
+        const SizedBox(height: LuminSpacing.xl),
+      ],
     );
   }
 
@@ -1539,6 +1631,197 @@ class _TradeError extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Binary on/off toggle for a single mode (live or paper).  Owner
+/// 2026-05-17 redesign — replaces the tri-state `_ModeToggle` card in
+/// the Live body.  Each top-tab now hosts its own instance so the
+/// user toggles the mode FROM the tab that displays it.
+///
+/// Visual style mirrors a hero card: large icon, label + descriptive
+/// subtitle, prominent Switch.  ``activeColor`` is per-mode (LIVE uses
+/// the loss/red accent for caution; Paper uses warn/amber).
+class _BinaryModeToggle extends StatelessWidget {
+  const _BinaryModeToggle({
+    required this.label,
+    required this.subtitle,
+    required this.icon,
+    required this.activeColor,
+    required this.isOn,
+    required this.switching,
+    required this.onChanged,
+  });
+
+  final String label;
+  final String subtitle;
+  final IconData icon;
+  final Color activeColor;
+  final bool isOn;
+  final bool switching;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final border = isOn ? activeColor : LuminColors.cardBorder;
+    final iconColor = isOn ? activeColor : LuminColors.textMuted;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        LuminSpacing.lg,
+        LuminSpacing.md,
+        LuminSpacing.lg,
+        LuminSpacing.xs,
+      ),
+      child: Container(
+        padding: const EdgeInsets.all(LuminSpacing.md),
+        decoration: BoxDecoration(
+          color: LuminColors.bgCard,
+          borderRadius: BorderRadius.circular(LuminRadii.md),
+          border: Border.all(
+            color: border,
+            width: isOn ? 1.5 : 1.0,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: iconColor.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(LuminRadii.sm),
+              ),
+              child: Icon(icon, color: iconColor, size: 20),
+            ),
+            const SizedBox(width: LuminSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      color: LuminColors.textPrimary,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      color: LuminColors.textSecondary,
+                      fontSize: 11,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (switching)
+              const Padding(
+                padding: EdgeInsets.only(left: LuminSpacing.md),
+                child: SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              )
+            else
+              Switch(
+                value: isOn,
+                activeColor: activeColor,
+                onChanged: onChanged,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Lightweight notice rendered when a tab's mode is off.  Less heavy
+/// than _OffStateCard — fits naturally below the toggle without a
+/// competing CTA, since the toggle IS the CTA.
+class _OffStateNotice extends StatelessWidget {
+  const _OffStateNotice({required this.label, required this.description});
+  final String label;
+  final String description;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(LuminSpacing.lg),
+      child: Container(
+        padding: const EdgeInsets.all(LuminSpacing.md),
+        decoration: BoxDecoration(
+          color: LuminColors.bgCard,
+          borderRadius: BorderRadius.circular(LuminRadii.md),
+          border: Border.all(color: LuminColors.cardBorder),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(
+                  Icons.info_outline,
+                  color: LuminColors.textMuted,
+                  size: 16,
+                ),
+                const SizedBox(width: LuminSpacing.sm),
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: LuminColors.textPrimary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: LuminSpacing.sm),
+            Text(
+              description,
+              style: const TextStyle(
+                color: LuminColors.textSecondary,
+                fontSize: 11,
+                height: 1.4,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Embedded paper-trades list — wraps PaperTradesPage for use inside
+/// the Paper tab's scrollable parent.  PaperTradesPage owns its own
+/// AppBar + Scaffold; we strip those by mounting it inside a sized
+/// container that the parent ListView drives.
+///
+/// Implementation: PaperTradesPage is a full Scaffold; embedding it
+/// raw inside the parent ListView would duplicate the AppBar and
+/// crash on conflicting scroll controllers.  We give it a fixed-height
+/// constraint and let its own ScrollController handle pagination —
+/// the parent ListView's scroll physics defer to the embedded view
+/// once the user reaches the trade-list region.  Future improvement:
+/// extract a non-Scaffold widget from PaperTradesPage that this can
+/// directly host without the height constraint.
+class _EmbeddedPaperTrades extends StatelessWidget {
+  const _EmbeddedPaperTrades();
+
+  @override
+  Widget build(BuildContext context) {
+    final viewportHeight = MediaQuery.of(context).size.height;
+    // 60% of viewport — enough to show ~4 trade cards without the
+    // parent ListView feeling cramped; the embedded list's own scroll
+    // takes over when the user dives into history.
+    return SizedBox(
+      height: viewportHeight * 0.60,
+      child: const PaperTradesPage(),
     );
   }
 }
