@@ -37,6 +37,13 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
   // Local edit state — populated from ``fetchUserPretpSettings`` on init,
   // mutated by user toggles, written back via ``updateUserPretpSettings``.
   bool _enabled = true;
+  // Grab fraction (OWNER_BRIEF B17, 2026-05-17 doctrine): fraction of the
+  // position closed at market when pre-TP threshold hits.  Engine default
+  // 0.50; hard floor 0.30 (no user can collapse to the pre-2026-05-17
+  // SL-to-BE-only behaviour); ceiling 1.00 (fully bank, leave nothing
+  // riding).  The slider's UI bounds mirror these B17 constraints — the
+  // backend clamps defensively too, so even an out-of-range PUT lands
+  // safely, but enforcing in the slider gives immediate visual feedback.
   double _grabPct = 0.50;
   double _atrMult = 0.30;
   double _feeFloor = 0.12;
@@ -90,6 +97,12 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
         _enabled = s.enabled ?? _enabled;
         _atrMult = s.atrMultiplier ?? _atrMult;
         _feeFloor = s.feeFloorPct ?? _feeFloor;
+        // OWNER_BRIEF B17 — clamp to [0.30, 1.00] in case an older server
+        // returned an out-of-range value (defense in depth; the server-side
+        // clamp in `_coerce_pretp` should already guarantee this).
+        if (s.grabFraction != null) {
+          _grabPct = s.grabFraction!.clamp(0.30, 1.00);
+        }
         _usingDefaults = s.usingDefaults ?? true;
         if (s.regimeAllowlist != null) {
           final tokens = s.regimeAllowlist!.toSet();
@@ -152,6 +165,7 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
       setupAllowlist: setupAllowlist,
       atrMultiplier: _atrMult,
       feeFloorPct: _feeFloor,
+      grabFraction: _grabPct,
     );
     try {
       final saved = await repo.updateUserPretpSettings(partial);
@@ -327,8 +341,9 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
                   ),
                   const SizedBox(height: 2),
                   const Text(
-                    'Saved to your profile. Takes effect when auto-trade '
-                    'execution ships (Phase 3).',
+                    'Saved to your profile. Engine-side pre-TP fires a real '
+                    'partial close on the owner\'s auto-trade today; per-user '
+                    'execution ships when your Binance keys are wired (Phase 4).',
                     style: TextStyle(
                       color: LuminColors.textSecondary,
                       fontSize: 11,
@@ -407,16 +422,39 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
             ),
             const SizedBox(height: LuminSpacing.md),
             _slider(
-              label: 'Grab fraction (of TP1 distance)',
+              label: 'Grab fraction',
+              // OWNER_BRIEF B17: range [0.30, 1.00].  30% floor prevents
+              // pre-2026-05-17 SL-to-BE-only collapse; 100% fully banks
+              // the partial.  14 divisions = 5% steps across the range.
               value: '${(_grabPct * 100).toStringAsFixed(0)}%',
               slider: Slider(
                 value: _grabPct,
-                min: 0.20,
-                max: 0.80,
-                divisions: 12,
+                min: 0.30,
+                max: 1.00,
+                divisions: 14,
                 activeColor: LuminColors.accent,
                 inactiveColor: LuminColors.cardBorder,
                 onChanged: _enabled ? (v) => setState(() => _grabPct = v) : null,
+              ),
+            ),
+            // Preview: explain what the chosen fraction does in plain text.
+            // Cleared-up doctrine post-2026-05-17 — pre-TP is a REAL partial
+            // close, not just a SL-to-BE move.  Showing the math here so
+            // subscribers can pick a fraction with eyes open.
+            Padding(
+              padding: const EdgeInsets.only(
+                left: LuminSpacing.sm,
+                bottom: LuminSpacing.md,
+              ),
+              child: Text(
+                'At pre-TP: ${(_grabPct * 100).toStringAsFixed(0)}% closed at market, '
+                '${((1.0 - _grabPct) * 100).toStringAsFixed(0)}% rides to TP1 '
+                'with SL at entry (breakeven).',
+                style: const TextStyle(
+                  color: LuminColors.textSecondary,
+                  fontSize: 11,
+                  height: 1.4,
+                ),
               ),
             ),
             _slider(

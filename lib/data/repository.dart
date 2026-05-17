@@ -144,6 +144,7 @@ class PretpSettings {
     this.feeFloorPct,
     this.minAgeSec,
     this.maxAgeSec,
+    this.grabFraction,
     this.usingDefaults,
   });
 
@@ -155,6 +156,13 @@ class PretpSettings {
   final double? feeFloorPct;
   final int? minAgeSec;
   final int? maxAgeSec;
+
+  /// Fraction of the position to close at market when the pre-TP threshold
+  /// hits.  Backend enforces a 30%-100% range (OWNER_BRIEF B17 — hard 30%
+  /// floor prevents the pre-2026-05-17 SL-to-BE-only collapse; 100% ceiling
+  /// fully banks the partial).  Engine default 50%.  Null means "use the
+  /// engine default" for this field.
+  final double? grabFraction;
 
   /// Only present on per-user responses (``/api/settings/user/pretp``).
   /// True when the user has no override row — every field above is the
@@ -175,6 +183,7 @@ class PretpSettings {
         feeFloorPct: (j['fee_floor_pct'] as num?)?.toDouble(),
         minAgeSec: (j['min_age_sec'] as num?)?.toInt(),
         maxAgeSec: (j['max_age_sec'] as num?)?.toInt(),
+        grabFraction: (j['grab_fraction'] as num?)?.toDouble(),
         usingDefaults: j['using_defaults'] as bool?,
       );
 
@@ -190,6 +199,7 @@ class PretpSettings {
     if (feeFloorPct != null) out['fee_floor_pct'] = feeFloorPct;
     if (minAgeSec != null) out['min_age_sec'] = minAgeSec;
     if (maxAgeSec != null) out['max_age_sec'] = maxAgeSec;
+    if (grabFraction != null) out['grab_fraction'] = grabFraction;
     return out;
   }
 }
