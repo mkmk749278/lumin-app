@@ -36,6 +36,12 @@ class OrderLogEntry {
     this.entryPriceTarget,
     this.slPrice,
     this.tpPrice,
+    this.preTpClosedAt,
+    this.preTpQty,
+    this.preTpOrderId,
+    this.preTpFillPrice,
+    this.breakevenStopOrderId,
+    this.grabFractionApplied,
   });
 
   /// Engine's signal_id — the idempotency key.  Also wired into
@@ -91,8 +97,88 @@ class OrderLogEntry {
   /// Rounded TP1 price actually sent (or recorded for paper).
   final double? tpPrice;
 
+  /// Phase 4 — per-user pre-TP execution.  When the engine reports
+  /// ``preTpHit=true`` on this signal, the AutoTradeWatcher fires a
+  /// market reduce-only close for ``grab_fraction × quantity`` and
+  /// records the timestamp here.  Null until the partial fires.  Acts
+  /// as the local idempotency guard so a duplicate watcher tick is a
+  /// no-op (Binance's clientOrderId guard is the second line).
+  final DateTime? preTpClosedAt;
+
+  /// Filter-rounded quantity actually closed at pre-TP fire.  May be
+  /// less than ``quantity × grabFraction`` if the symbol's step size
+  /// rounded down.  Null while the partial hasn't fired.
+  final double? preTpQty;
+
+  /// Binance order ID for the pre-TP reduce-only MARKET close.  Null
+  /// until fired or when the partial-close call itself failed
+  /// post-cancel of the original SL.
+  final int? preTpOrderId;
+
+  /// avgPrice from the pre-TP partial close response.  Useful for
+  /// "Banked @ \$X" UX next to the original entry.
+  final double? preTpFillPrice;
+
+  /// Binance order ID for the new STOP_MARKET placed at entry price
+  /// (breakeven) on the residual position after pre-TP banked.  Null
+  /// when either the original SL cancel succeeded but BE replacement
+  /// failed (UX surfaces a warning), or when pre-TP hasn't fired.
+  final int? breakevenStopOrderId;
+
+  /// The user's ``grab_fraction`` (clamped 0.30-1.00) at the time the
+  /// pre-TP fired.  Recorded for audit so users can see "you had it
+  /// set to 60% at the time" if they later change it.
+  final double? grabFractionApplied;
+
   bool get isPaper => executionMode == 'auto-paper';
   bool get isAuto => executionMode.startsWith('auto-');
+
+  /// True iff the Phase 4 per-user pre-TP partial has banked.  Used
+  /// by the AutoTradeWatcher's pre-TP scan to skip already-banked
+  /// entries without re-checking the engine.
+  bool get preTpBanked => preTpClosedAt != null;
+
+  OrderLogEntry copyWith({
+    double? quantity,
+    int? entryOrderId,
+    int? stopOrderId,
+    int? tpOrderId,
+    double? avgFillPrice,
+    double? slPrice,
+    double? tpPrice,
+    DateTime? preTpClosedAt,
+    double? preTpQty,
+    int? preTpOrderId,
+    double? preTpFillPrice,
+    int? breakevenStopOrderId,
+    double? grabFractionApplied,
+    bool clearStopOrderId = false,
+  }) {
+    return OrderLogEntry(
+      signalId: signalId,
+      symbol: symbol,
+      side: side,
+      quantity: quantity ?? this.quantity,
+      entryOrderId: entryOrderId ?? this.entryOrderId,
+      stopOrderId: clearStopOrderId ? null : (stopOrderId ?? this.stopOrderId),
+      tpOrderId: tpOrderId ?? this.tpOrderId,
+      placedAt: placedAt,
+      testnet: testnet,
+      avgFillPrice: avgFillPrice ?? this.avgFillPrice,
+      executionMode: executionMode,
+      entryPriceTarget: entryPriceTarget,
+      slPrice: slPrice ?? this.slPrice,
+      tpPrice: tpPrice ?? this.tpPrice,
+      preTpClosedAt: preTpClosedAt ?? this.preTpClosedAt,
+      preTpQty: preTpQty ?? this.preTpQty,
+      preTpOrderId: preTpOrderId ?? this.preTpOrderId,
+      preTpFillPrice: preTpFillPrice ?? this.preTpFillPrice,
+      breakevenStopOrderId:
+          breakevenStopOrderId ?? this.breakevenStopOrderId,
+      grabFractionApplied:
+          grabFractionApplied ?? this.grabFractionApplied,
+    );
+  }
 
   Map<String, dynamic> toJson() => {
         'signal_id': signalId,
@@ -109,6 +195,15 @@ class OrderLogEntry {
         if (entryPriceTarget != null) 'entry_price_target': entryPriceTarget,
         if (slPrice != null) 'sl_price': slPrice,
         if (tpPrice != null) 'tp_price': tpPrice,
+        if (preTpClosedAt != null)
+          'pre_tp_closed_at': preTpClosedAt!.toIso8601String(),
+        if (preTpQty != null) 'pre_tp_qty': preTpQty,
+        if (preTpOrderId != null) 'pre_tp_order_id': preTpOrderId,
+        if (preTpFillPrice != null) 'pre_tp_fill_price': preTpFillPrice,
+        if (breakevenStopOrderId != null)
+          'breakeven_stop_order_id': breakevenStopOrderId,
+        if (grabFractionApplied != null)
+          'grab_fraction_applied': grabFractionApplied,
       };
 
   factory OrderLogEntry.fromJson(Map<String, dynamic> j) => OrderLogEntry(
@@ -126,6 +221,16 @@ class OrderLogEntry {
         entryPriceTarget: (j['entry_price_target'] as num?)?.toDouble(),
         slPrice: (j['sl_price'] as num?)?.toDouble(),
         tpPrice: (j['tp_price'] as num?)?.toDouble(),
+        preTpClosedAt: j['pre_tp_closed_at'] != null
+            ? DateTime.parse(j['pre_tp_closed_at'] as String)
+            : null,
+        preTpQty: (j['pre_tp_qty'] as num?)?.toDouble(),
+        preTpOrderId: (j['pre_tp_order_id'] as num?)?.toInt(),
+        preTpFillPrice: (j['pre_tp_fill_price'] as num?)?.toDouble(),
+        breakevenStopOrderId:
+            (j['breakeven_stop_order_id'] as num?)?.toInt(),
+        grabFractionApplied:
+            (j['grab_fraction_applied'] as num?)?.toDouble(),
       );
 }
 

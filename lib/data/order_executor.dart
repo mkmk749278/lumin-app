@@ -254,6 +254,185 @@ class OrderExecutor {
     }
   }
 
+  /// Phase 4 — per-user pre-TP partial close.
+  ///
+  /// Called by :class:`AutoTradeWatcher` (live mode only) when it
+  /// detects an ACTIVE signal where the engine reports
+  /// ``preTpHit == true`` and the local order log has no
+  /// ``preTpClosedAt`` for the user's entry.  Capital-preservation
+  /// doctrine (OWNER_BRIEF §3.2a, B17): bank the user-configured
+  /// fraction (clamped 0.30-1.00) at market, then replace the
+  /// original SL with a new STOP_MARKET at entry price (breakeven)
+  /// on the residual position.
+  ///
+  /// Idempotency layers:
+  ///   1. Caller checks ``logEntry.preTpClosedAt == null`` before
+  ///      invoking — local first-line guard.
+  ///   2. Each broker call uses a deterministic ``clientOrderId``
+  ///      (``lumin-pretp-{signalId}`` and ``lumin-be-{signalId}``)
+  ///      so Binance rejects duplicates returned by the same call.
+  ///   3. On success the updated entry is overwritten in the log
+  ///      with ``preTpClosedAt`` set so a duplicate watcher tick
+  ///      short-circuits at layer (1).
+  ///
+  /// Partial failure handling: cancel-then-replace splits the SL
+  /// move into two broker calls.  We accept the partial-close fill
+  /// even if the BE-SL replacement fails — the residual is left
+  /// without an SL until the user notices.  Failure mode is logged
+  /// in ``ExecutionResult.message`` and surfaced as a status banner
+  /// by the watcher so the user can place the BE SL on Binance.
+  Future<ExecutionResult> executePreTpPartial({
+    required int userId,
+    required OrderLogEntry logEntry,
+    required BinanceKeys keys,
+    required double grabFraction,
+  }) async {
+    // First-line idempotency.  Caller should already have checked
+    // this; redundant check guards against direct callers (tests).
+    if (logEntry.preTpClosedAt != null) {
+      return ExecutionResult(
+        success: true,
+        entry: logEntry,
+        message: 'Pre-TP already banked at '
+            '${logEntry.preTpClosedAt!.toIso8601String()}.',
+      );
+    }
+
+    // Clamp the user fraction into the B17 bounds defensively even
+    // though the settings page already constrains the slider and the
+    // backend rejects out-of-range writes.  ``clamp`` returns ``num``
+    // when called on ``double``; coerce back so we keep ``double``
+    // throughout the qty math.
+    final double fraction = grabFraction.clamp(0.30, 1.00).toDouble();
+    if (logEntry.entryOrderId == null || logEntry.quantity <= 0) {
+      return _fail(
+        'Pre-TP skipped: no entry on file for ${logEntry.symbol}.',
+      );
+    }
+    if (logEntry.avgFillPrice == null || logEntry.avgFillPrice! <= 0) {
+      return _fail(
+        'Pre-TP skipped: missing entry fill price for ${logEntry.symbol}.',
+      );
+    }
+
+    final client = BinanceClient(
+      apiKey: keys.apiKey,
+      apiSecret: keys.apiSecret,
+      testnet: keys.testnet,
+    );
+    try {
+      final filters = await client.getSymbolFilters(logEntry.symbol);
+      final partialQtyRaw = logEntry.quantity * fraction;
+      final partialQty = filters.roundQty(partialQtyRaw);
+      if (partialQty <= 0.0) {
+        return _fail(
+          'Pre-TP skipped: ${fraction * 100}% of ${logEntry.quantity} '
+          '${logEntry.symbol} rounds below minQty (${filters.minQty}).',
+        );
+      }
+
+      // Close side is the opposite of the entry side.  reduce-only
+      // is enforced inside ``closePartialMarket``.
+      final closeSide = logEntry.side == 'BUY' ? 'SELL' : 'BUY';
+
+      // 1. MARKET reduce-only close for the partial.
+      final partialFill = await client.closePartialMarket(
+        symbol: logEntry.symbol,
+        side: closeSide,
+        quantity: partialQty,
+        clientOrderId: 'lumin-pretp-${logEntry.signalId}',
+      );
+      final partialOrderId = (partialFill['orderId'] as num?)?.toInt();
+      final partialAvg = (partialFill['avgPrice'] as num?)?.toDouble() ?? 0.0;
+
+      // 2. Cancel the original SL.  closePosition=true on the
+      //    original SL would flatten the residual at trigger time,
+      //    which we now want at breakeven instead.  Swallow the
+      //    "-2011 Unknown order" race — if the SL fired in the
+      //    same window we'll detect it on the next status poll.
+      String? cancelWarning;
+      if (logEntry.stopOrderId != null) {
+        try {
+          await client.cancelOrder(
+            symbol: logEntry.symbol,
+            orderId: logEntry.stopOrderId,
+          );
+        } on BinanceError catch (e) {
+          if (e.code != -2011) {
+            cancelWarning =
+                'Original SL cancel failed (${e.message}); BE SL not placed.';
+          }
+        }
+      }
+
+      // 3. Place new STOP_MARKET at entry price (breakeven) on the
+      //    residual.  closePosition=true so any DCA add or residual
+      //    gets flattened on trigger.
+      int? beStopId;
+      String? beWarning;
+      if (cancelWarning == null) {
+        final bePrice = filters.roundPrice(
+          logEntry.avgFillPrice!,
+          floor: logEntry.side == 'BUY', // LONG: floor; SHORT: ceil
+        );
+        try {
+          final beOrder = await client.createStopOrder(
+            symbol: logEntry.symbol,
+            side: closeSide,
+            stopType: 'STOP_MARKET',
+            stopPrice: bePrice,
+            closePosition: true,
+            clientOrderId: 'lumin-be-${logEntry.signalId}',
+          );
+          beStopId = (beOrder['orderId'] as num?)?.toInt();
+        } on BinanceError catch (e) {
+          beWarning = 'BE SL placement failed: ${e.message}';
+        }
+      }
+
+      final updated = logEntry.copyWith(
+        preTpClosedAt: DateTime.now().toUtc(),
+        preTpQty: partialQty,
+        preTpOrderId: partialOrderId,
+        preTpFillPrice: partialAvg > 0 ? partialAvg : null,
+        breakevenStopOrderId: beStopId,
+        grabFractionApplied: fraction,
+        // Clear the original stopOrderId if cancel succeeded so the
+        // log reflects what's actually live on Binance.
+        clearStopOrderId: cancelWarning == null,
+      );
+      await _logService.record(userId, updated);
+
+      if (cancelWarning != null || beWarning != null) {
+        return ExecutionResult(
+          success: false,
+          entry: updated,
+          message: [
+            'Pre-TP banked: ${(fraction * 100).toStringAsFixed(0)}% '
+                '(${partialQty} @ ~${partialAvg.toStringAsFixed(4)})',
+            if (cancelWarning != null) cancelWarning,
+            if (beWarning != null) beWarning,
+            'Residual still open; place BE SL on Binance.',
+          ].join('\n'),
+        );
+      }
+      return ExecutionResult(
+        success: true,
+        entry: updated,
+        message: 'Pre-TP banked ${(fraction * 100).toStringAsFixed(0)}% '
+            '($partialQty ${logEntry.symbol} @ '
+            '${partialAvg > 0 ? "\$${partialAvg.toStringAsFixed(4)}" : "market"}), '
+            'SL moved to breakeven on residual.',
+      );
+    } on BinanceError catch (e) {
+      return _fail('Pre-TP: ${e.message} (code ${e.code ?? "?"})');
+    } catch (e) {
+      return _fail('Pre-TP: $e');
+    } finally {
+      client.dispose();
+    }
+  }
+
   /// Paper-mode recording — same shape as a live entry but without
   /// any Binance call.  Used by :class:`AutoTradeWatcher` when the
   /// user's auto-trade mode is ``paper``.  Sizes against the same
