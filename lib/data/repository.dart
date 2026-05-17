@@ -589,6 +589,38 @@ class PaperResetResponse {
       );
 }
 
+/// Response from ``POST /api/auto-mode/paper/close-all``.
+///
+/// Engine PR #403 (2026-05-16) added this endpoint to flatten the paper
+/// book on demand — the user-facing companion to ``/api/auto-mode/paper/
+/// reset``'s B12 lifecycle guard, which refuses while open positions
+/// exist.  The two-step user flow is: close-all → reset.  Each
+/// returned position is closed at its entry price (zero-move fill,
+/// fees only) so the reset that follows can land cleanly.
+class PaperCloseAllResponse {
+  const PaperCloseAllResponse({
+    required this.closedCount,
+    required this.realisedPnlTotal,
+  });
+
+  /// Number of paper positions that were open and got closed.  Zero
+  /// when the book was already flat (idempotent — no error fires).
+  final int closedCount;
+
+  /// Sum of realised PnL across the batch.  Slightly negative in
+  /// general (round-trip fees on the zero-move fills); engine PR #403's
+  /// docstring notes this is behaviourally correct — a Binance flatten
+  /// pays the same fees.
+  final double realisedPnlTotal;
+
+  factory PaperCloseAllResponse.fromJson(Map<String, dynamic> j) =>
+      PaperCloseAllResponse(
+        closedCount: (j['closed_count'] as num?)?.toInt() ?? 0,
+        realisedPnlTotal:
+            (j['realised_pnl_total'] as num?)?.toDouble() ?? 0.0,
+      );
+}
+
 abstract class LuminRepository {
   /// True when the underlying source is the live engine (vs. mocks).
   bool get isLive;
@@ -661,6 +693,13 @@ abstract class LuminRepository {
   /// raw rows) but the live ``/api/trades?mode=paper`` view starts
   /// empty.  Owner-confirmed via dialog before this fires.
   Future<PaperResetResponse> resetPaperBalance();
+  /// Flatten the paper book — close every open paper position at its
+  /// entry price (engine PR #403).  Pairs with ``resetPaperBalance`` to
+  /// implement the two-step user flow: close-all → reset.  The reset
+  /// endpoint refuses while open positions exist (B12 lifecycle guard,
+  /// mirrored from the live-mode preservation doctrine), and the
+  /// 409 error explicitly directs users here.
+  Future<PaperCloseAllResponse> closeAllPaperPositions();
   Future<bool> healthCheck();
 }
 
@@ -1492,6 +1531,17 @@ class MockRepository implements LuminRepository {
       startingEquityUsd: 1000.0,
     );
   }
+
+  @override
+  Future<PaperCloseAllResponse> closeAllPaperPositions() async {
+    // The mock fixture never has live open positions, so this is a
+    // no-op that returns zero counts.  The UI flow is exercised against
+    // the HTTP impl in the real app.
+    return const PaperCloseAllResponse(
+      closedCount: 0,
+      realisedPnlTotal: 0.0,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1764,6 +1814,13 @@ class HttpRepository implements LuminRepository {
     final j = (await client.post('/api/auto-mode/paper/reset'))
         as Map<String, dynamic>;
     return PaperResetResponse.fromJson(j);
+  }
+
+  @override
+  Future<PaperCloseAllResponse> closeAllPaperPositions() async {
+    final j = (await client.post('/api/auto-mode/paper/close-all'))
+        as Map<String, dynamic>;
+    return PaperCloseAllResponse.fromJson(j);
   }
 
   // ---- json → mock-class adapters --------------------------------------
