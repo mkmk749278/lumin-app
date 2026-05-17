@@ -145,6 +145,7 @@ class PretpSettings {
     this.minAgeSec,
     this.maxAgeSec,
     this.grabFraction,
+    this.protectManualEntries,
     this.usingDefaults,
   });
 
@@ -163,6 +164,15 @@ class PretpSettings {
   /// fully banks the partial).  Engine default 50%.  Null means "use the
   /// engine default" for this field.
   final double? grabFraction;
+
+  /// OWNER_BRIEF B17 (2026-05-17) — when true, the AutoTradeWatcher
+  /// keeps polling for pre-TP partial closes on manually-taken entries
+  /// even when auto-trade ``mode == 'off'``.  Default true extends
+  /// capital-preservation doctrine to manual operators (the most
+  /// engaged subscriber cohort).  False respects "off means off" for
+  /// users who want pure manual control.  Null on responses where the
+  /// backend hasn't seen a user override (engine default true).
+  final bool? protectManualEntries;
 
   /// Only present on per-user responses (``/api/settings/user/pretp``).
   /// True when the user has no override row — every field above is the
@@ -184,6 +194,7 @@ class PretpSettings {
         minAgeSec: (j['min_age_sec'] as num?)?.toInt(),
         maxAgeSec: (j['max_age_sec'] as num?)?.toInt(),
         grabFraction: (j['grab_fraction'] as num?)?.toDouble(),
+        protectManualEntries: j['protect_manual_entries'] as bool?,
         usingDefaults: j['using_defaults'] as bool?,
       );
 
@@ -200,6 +211,9 @@ class PretpSettings {
     if (minAgeSec != null) out['min_age_sec'] = minAgeSec;
     if (maxAgeSec != null) out['max_age_sec'] = maxAgeSec;
     if (grabFraction != null) out['grab_fraction'] = grabFraction;
+    if (protectManualEntries != null) {
+      out['protect_manual_entries'] = protectManualEntries;
+    }
     return out;
   }
 }
