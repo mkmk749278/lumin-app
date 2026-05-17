@@ -194,6 +194,108 @@ class PretpSettings {
   }
 }
 
+/// Invalidation settings — backend ``GET / PUT /api/settings/user/invalidation``.
+///
+/// OWNER_BRIEF B17 (2026-05-17 doctrine): per-user invalidation aggressiveness.
+/// Three preset modes (``loose`` / ``standard`` / ``tight``) cover the common
+/// cases.  Advanced-section overrides are exposed for users who want fine
+/// control without committing to a preset; NULL means "use the preset's
+/// value for this knob".
+///
+/// Engine-side TradeMonitor is owner-only auto-trade today and uses the
+/// engine default (``INVALIDATION_MODE_DEFAULT``).  Per-user values stored
+/// here are consumed by the app-side OrderExecutor in Phase 4 when users
+/// have their own Binance keys.
+class InvalidationSettings {
+  const InvalidationSettings({
+    this.mode,
+    this.minAgeSec,
+    this.momentumThresholdMult,
+    this.emaCrossoverEnabled,
+    this.regimeShiftEnabled,
+    this.trailingKillEnabled,
+    this.trailingMfeRThreshold,
+    this.trailingRetracePct,
+    this.usingDefaults,
+  });
+
+  /// Preset aggressiveness — ``loose`` / ``standard`` / ``tight``.
+  /// * ``loose``    — only the SL itself + max-hold can close.
+  /// * ``standard`` — engine baseline + MFE protection (default).
+  /// * ``tight``    — standard + ATR-trailing kill at MFE >= 0.3R.
+  final String? mode;
+
+  /// Earliest signal age (seconds) at which invalidation may fire.
+  final int? minAgeSec;
+
+  /// Multiplier applied to the engine's ATR-adaptive momentum threshold.
+  /// ``<1.0`` = more sensitive (kill earlier); ``>1.0`` = less sensitive.
+  final double? momentumThresholdMult;
+
+  /// Whether 5m EMA9/EMA21 cross-against-thesis triggers a kill.
+  final bool? emaCrossoverEnabled;
+
+  /// Whether a regime flip opposing direction triggers a kill.
+  final bool? regimeShiftEnabled;
+
+  /// Whether the ATR-trailing kill is active (tight-mode signature).
+  final bool? trailingKillEnabled;
+
+  /// MFE threshold (as a multiple of SL distance) above which the
+  /// ATR-trailing kill becomes armed.  Default 0.3R per B17.
+  final double? trailingMfeRThreshold;
+
+  /// Retracement fraction of the MFE peak at which the trailing kill
+  /// fires.  Default 0.50 (50% retrace) per B17.  Range [0.0, 1.0].
+  final double? trailingRetracePct;
+
+  /// Only present on per-user responses.  True when the user has no
+  /// override row — every field above is the engine default.
+  final bool? usingDefaults;
+
+  factory InvalidationSettings.fromJson(Map<String, dynamic> j) =>
+      InvalidationSettings(
+        mode: j['mode'] as String?,
+        minAgeSec: (j['min_age_sec'] as num?)?.toInt(),
+        momentumThresholdMult:
+            (j['momentum_threshold_mult'] as num?)?.toDouble(),
+        emaCrossoverEnabled: j['ema_crossover_enabled'] as bool?,
+        regimeShiftEnabled: j['regime_shift_enabled'] as bool?,
+        trailingKillEnabled: j['trailing_kill_enabled'] as bool?,
+        trailingMfeRThreshold:
+            (j['trailing_mfe_r_threshold'] as num?)?.toDouble(),
+        trailingRetracePct: (j['trailing_retrace_pct'] as num?)?.toDouble(),
+        usingDefaults: j['using_defaults'] as bool?,
+      );
+
+  /// Serialise only the non-null fields so a partial PUT doesn't wipe
+  /// settings the user didn't touch.
+  Map<String, dynamic> toJsonPartial() {
+    final out = <String, dynamic>{};
+    if (mode != null) out['mode'] = mode;
+    if (minAgeSec != null) out['min_age_sec'] = minAgeSec;
+    if (momentumThresholdMult != null) {
+      out['momentum_threshold_mult'] = momentumThresholdMult;
+    }
+    if (emaCrossoverEnabled != null) {
+      out['ema_crossover_enabled'] = emaCrossoverEnabled;
+    }
+    if (regimeShiftEnabled != null) {
+      out['regime_shift_enabled'] = regimeShiftEnabled;
+    }
+    if (trailingKillEnabled != null) {
+      out['trailing_kill_enabled'] = trailingKillEnabled;
+    }
+    if (trailingMfeRThreshold != null) {
+      out['trailing_mfe_r_threshold'] = trailingMfeRThreshold;
+    }
+    if (trailingRetracePct != null) {
+      out['trailing_retrace_pct'] = trailingRetracePct;
+    }
+    return out;
+  }
+}
+
 /// Auto-trade settings — backend ``GET / PUT /api/settings/auto-trade``.
 ///
 /// Bundles execution mode + sizing knobs into one round-trip so the
@@ -520,6 +622,15 @@ abstract class LuminRepository {
   Future<AutoTradeSettings> updateUserAutoTradeSettings(
     AutoTradeSettings partial,
   );
+  /// Per-user invalidation overrides (OWNER_BRIEF B17, 2026-05-17).
+  /// Three preset modes (loose / standard / tight) + advanced knobs.
+  /// Engine-side TradeMonitor is owner-only auto-trade today; per-user
+  /// values are consumed by the app-side OrderExecutor when Phase 4
+  /// per-user execution lands.
+  Future<InvalidationSettings> fetchUserInvalidationSettings();
+  Future<InvalidationSettings> updateUserInvalidationSettings(
+    InvalidationSettings partial,
+  );
   /// User profile (Phase 3) — drives SignupPage + Settings → Profile.
   Future<Profile> fetchProfile();
   Future<Profile> updateProfile(Profile partial, {bool acceptTerms = false});
@@ -808,6 +919,62 @@ class MockRepository implements LuminRepository {
       usingDefaults: false,
     );
     return _mockUserAutoTrade;
+  }
+
+  // Per-user invalidation overrides (OWNER_BRIEF B17).  Mock store mirrors
+  // the ``_mockUserPretp`` pattern — single in-memory record, ``usingDefaults``
+  // flips off on first touch, fields cascade through engine defaults.
+  static InvalidationSettings _mockUserInvalidation = const InvalidationSettings(
+    usingDefaults: true,
+  );
+  // Engine defaults baseline used by the mock when no override is set — keeps
+  // the mocked Settings page rendering live-looking values until a real backend
+  // call hydrates them.
+  static const InvalidationSettings _mockInvalidationDefaults =
+      InvalidationSettings(
+    mode: 'standard',
+    trailingMfeRThreshold: 0.30,
+    trailingRetracePct: 0.50,
+    emaCrossoverEnabled: true,
+    regimeShiftEnabled: true,
+    trailingKillEnabled: false,
+    momentumThresholdMult: 1.0,
+  );
+
+  @override
+  Future<InvalidationSettings> fetchUserInvalidationSettings() async =>
+      _mockUserInvalidation;
+
+  @override
+  Future<InvalidationSettings> updateUserInvalidationSettings(
+    InvalidationSettings partial,
+  ) async {
+    _mockUserInvalidation = InvalidationSettings(
+      mode: partial.mode ??
+          _mockUserInvalidation.mode ??
+          _mockInvalidationDefaults.mode,
+      minAgeSec: partial.minAgeSec ?? _mockUserInvalidation.minAgeSec,
+      momentumThresholdMult: partial.momentumThresholdMult ??
+          _mockUserInvalidation.momentumThresholdMult ??
+          _mockInvalidationDefaults.momentumThresholdMult,
+      emaCrossoverEnabled: partial.emaCrossoverEnabled ??
+          _mockUserInvalidation.emaCrossoverEnabled ??
+          _mockInvalidationDefaults.emaCrossoverEnabled,
+      regimeShiftEnabled: partial.regimeShiftEnabled ??
+          _mockUserInvalidation.regimeShiftEnabled ??
+          _mockInvalidationDefaults.regimeShiftEnabled,
+      trailingKillEnabled: partial.trailingKillEnabled ??
+          _mockUserInvalidation.trailingKillEnabled ??
+          _mockInvalidationDefaults.trailingKillEnabled,
+      trailingMfeRThreshold: partial.trailingMfeRThreshold ??
+          _mockUserInvalidation.trailingMfeRThreshold ??
+          _mockInvalidationDefaults.trailingMfeRThreshold,
+      trailingRetracePct: partial.trailingRetracePct ??
+          _mockUserInvalidation.trailingRetracePct ??
+          _mockInvalidationDefaults.trailingRetracePct,
+      usingDefaults: false,
+    );
+    return _mockUserInvalidation;
   }
 
   // Profile (Phase 3) — in mock mode we keep a tiny static profile so
@@ -1513,6 +1680,24 @@ class HttpRepository implements LuminRepository {
       body: partial.toJsonPartial(),
     )) as Map<String, dynamic>;
     return AutoTradeSettings.fromJson(j);
+  }
+
+  @override
+  Future<InvalidationSettings> fetchUserInvalidationSettings() async {
+    final j = (await client.get('/api/settings/user/invalidation'))
+        as Map<String, dynamic>;
+    return InvalidationSettings.fromJson(j);
+  }
+
+  @override
+  Future<InvalidationSettings> updateUserInvalidationSettings(
+    InvalidationSettings partial,
+  ) async {
+    final j = (await client.put(
+      '/api/settings/user/invalidation',
+      body: partial.toJsonPartial(),
+    )) as Map<String, dynamic>;
+    return InvalidationSettings.fromJson(j);
   }
 
   @override
