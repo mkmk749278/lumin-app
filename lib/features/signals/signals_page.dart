@@ -53,6 +53,20 @@ extension _SubFilterStr on _ClosedSubFilter {
   }
 }
 
+/// Detect post-pre-TP-grab BE-ratchet state.  The engine moves
+/// ``stop_loss`` to ``entry`` after pre-TP fires (per OWNER_BRIEF
+/// §3.2a capital-preservation doctrine) so subscribers can recognise
+/// "this signal is now risk-free; residual riding for TP1".  Both
+/// signals — the explicit ``preTpHit`` flag and the numeric SL==entry
+/// equivalence — are honoured so the badge still surfaces if a
+/// pre-PR-411 cached signal didn't get the flag set.
+bool _isBreakeven(MockSignal s) {
+  if (s.preTpHit) return true;
+  if (s.entry <= 0) return false;
+  // Allow for float-precision wobble within 1e-9 of full equality.
+  return (s.sl - s.entry).abs() / s.entry < 1e-6;
+}
+
 bool _matchesSubFilter(MockSignal s, _ClosedSubFilter f) {
   switch (f) {
     case _ClosedSubFilter.all:
@@ -566,6 +580,32 @@ class _SignalCard extends StatelessWidget {
                   ),
                 ),
               ),
+              if (sig.preTpHit) ...[
+                const SizedBox(width: LuminSpacing.sm),
+                // Pre-TP banked badge — signals to the subscriber that
+                // partial profit was already taken and the residual is
+                // riding under a breakeven stop.  Explains the
+                // "SL: BE" rendering in the price row below.
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: LuminSpacing.sm,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: LuminColors.success.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(LuminRadii.sm),
+                  ),
+                  child: const Text(
+                    '✓ BANKED',
+                    style: TextStyle(
+                      color: LuminColors.success,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
+              ],
               const Spacer(),
               Container(
                 padding: const EdgeInsets.symmetric(
@@ -607,8 +647,20 @@ class _SignalCard extends StatelessWidget {
               Expanded(
                 child: _PriceCol(
                   label: 'SL',
-                  value: formatPrice(sig.sl),
-                  color: LuminColors.loss,
+                  // BE-ratchet detection: after pre-TP fires, the engine
+                  // moves stop_loss to entry — sig.sl == sig.entry by
+                  // design.  Without this UX hint the card showed the
+                  // same numeric price for ENTRY and SL columns (owner-
+                  // reported 2026-05-18 confusion: "looks like SL ==
+                  // entry, instant trigger?").  Pre-TP banked → render
+                  // "BE" with the success accent (it's protection, not
+                  // a risk-loss row anymore).
+                  value: _isBreakeven(sig)
+                      ? 'BE'
+                      : formatPrice(sig.sl),
+                  color: _isBreakeven(sig)
+                      ? LuminColors.success
+                      : LuminColors.loss,
                 ),
               ),
               Expanded(
@@ -749,7 +801,10 @@ class _SignalCard extends StatelessWidget {
             _DetailRow('Entry', formatPrice(sig.entry)),
             if (sig.currentPrice > 0)
               _DetailRow('Current', formatPrice(sig.currentPrice)),
-            _DetailRow('SL', formatPrice(sig.sl)),
+            _DetailRow(
+              'SL',
+              _isBreakeven(sig) ? 'BE (banked)' : formatPrice(sig.sl),
+            ),
             _DetailRow('TP1', formatPrice(sig.tp1)),
             _DetailRow('TP2', formatPrice(sig.tp2)),
             _DetailRow('PnL', formatPct(sig.pnlPct)),
