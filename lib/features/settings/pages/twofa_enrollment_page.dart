@@ -118,10 +118,14 @@ class _TwoFaEnrollmentPageState extends State<TwoFaEnrollmentPage> {
       return;
     }
     try {
-      final assertion = TotpMultiFactorGenerator.getAssertionForEnrollment(
-        _secret!,
-        code,
-      );
+      // ``getAssertionForEnrollment`` is async in the Flutter SDK
+      // wrapper (returns Future<MultiFactorAssertion>) — missing the
+      // ``await`` was the original release-build compile failure:
+      // ``MultiFactor.enroll`` expects a non-Future
+      // MultiFactorAssertion, the type mismatch only surfaces in
+      // release-mode strict checks.
+      final assertion = await TotpMultiFactorGenerator
+          .getAssertionForEnrollment(_secret!, code);
       await user.multiFactor.enroll(
         assertion,
         displayName: 'Lumin 2FA',
