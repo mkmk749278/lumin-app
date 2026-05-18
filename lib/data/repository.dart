@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import '../shared/tokens.dart';
 import 'api_client.dart';
 import 'mock_data.dart';
+import 'swr_cache.dart';
 
 class AutoModeStatus {
   const AutoModeStatus({
@@ -646,6 +647,33 @@ abstract class LuminRepository {
     int limit = 50,
     String? setupClass,
   });
+
+  /// Stale-while-revalidate variant of ``fetchSignals``.  Default
+  /// implementation just wraps the future as a single-event stream so
+  /// mock/test impls don't need to opt in; ``HttpRepository`` overrides
+  /// to actually cache + emit stale-then-fresh.  See
+  /// :class:`SwrCache` for the pattern rationale.
+  Stream<List<MockSignal>> watchSignals({
+    String status = 'all',
+    int limit = 50,
+    String? setupClass,
+  }) =>
+      Stream.fromFuture(fetchSignals(
+        status: status,
+        limit: limit,
+        setupClass: setupClass,
+      ));
+
+  /// Drop the cached ``watchSignals`` entries — called from
+  /// pull-to-refresh so the next resubscribe re-fetches instead of
+  /// serving stale.  No-op on impls without a cache (Mock).
+  void invalidateSignalsCache({
+    String status = 'all',
+    int limit = 50,
+    String? setupClass,
+  }) {
+    // Default no-op.  HttpRepository overrides.
+  }
   Future<List<MockPosition>> fetchPositions();
   Future<List<MockActivityEvent>> fetchActivity({
     int limit = 50,
@@ -755,6 +783,31 @@ class MockRepository implements LuminRepository {
     }
     return filtered.take(limit).toList();
   }
+
+  /// Mock impl: no caching needed (the source is in-memory anyway).
+  /// Implements the abstract API as a single-event stream so the page
+  /// code path is uniform across Live and Mock scopes.
+  @override
+  Stream<List<MockSignal>> watchSignals({
+    String status = 'all',
+    int limit = 50,
+    String? setupClass,
+  }) =>
+      Stream.fromFuture(fetchSignals(
+        status: status,
+        limit: limit,
+        setupClass: setupClass,
+      ));
+
+  /// Mock impl: no-op.  ``implements LuminRepository`` requires this
+  /// even though the abstract has a default body — Dart doesn't
+  /// inherit method bodies across ``implements``.
+  @override
+  void invalidateSignalsCache({
+    String status = 'all',
+    int limit = 50,
+    String? setupClass,
+  }) {}
 
   @override
   Future<List<MockPosition>> fetchPositions() async => mockPositions;
@@ -1567,8 +1620,53 @@ class HttpRepository implements LuminRepository {
 
   final LuminApiClient client;
 
+  /// Per-instance SWR cache.  In-memory only — survives tab switches +
+  /// lifecycle pauses but not cold start.  AppConfigScope drops the
+  /// whole HttpRepository on Live↔Mock toggle / sign-out so the cache
+  /// dies with it; no explicit ``clear()`` plumbing required.
+  final SwrCache _swr = SwrCache();
+
   @override
   bool get isLive => true;
+
+  String _signalsKey({
+    required String status,
+    required int limit,
+    String? setupClass,
+  }) =>
+      'signals:$status:$limit:${setupClass ?? "_"}';
+
+  /// Override the abstract default so ``/api/signals`` traffic dedups
+  /// across AutoTradeWatcher + Pulse + Signals subscribers — they all
+  /// see the same cached payload for the TTL window instead of each
+  /// firing a separate round-trip.
+  @override
+  Stream<List<MockSignal>> watchSignals({
+    String status = 'all',
+    int limit = 50,
+    String? setupClass,
+  }) {
+    final key = _signalsKey(status: status, limit: limit, setupClass: setupClass);
+    return _swr.watch<List<MockSignal>>(
+      key,
+      fetch: () => fetchSignals(
+        status: status,
+        limit: limit,
+        setupClass: setupClass,
+      ),
+    );
+  }
+
+  @override
+  void invalidateSignalsCache({
+    String status = 'all',
+    int limit = 50,
+    String? setupClass,
+  }) {
+    _swr.invalidate(
+      _signalsKey(status: status, limit: limit, setupClass: setupClass),
+    );
+  }
 
   @override
   Future<MockEngineSnapshot> fetchPulse() async {
