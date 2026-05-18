@@ -30,6 +30,7 @@ import '../../../data/app_config.dart';
 import '../../../data/repository.dart';
 import '../../../data/server_side_execution_models.dart';
 import '../../../shared/tokens.dart';
+import 'twofa_enrollment_page.dart';
 
 class ServerSideExecutionPage extends StatefulWidget {
   const ServerSideExecutionPage({super.key});
@@ -45,6 +46,34 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
   bool _submitting = false;
   BinanceConnectSuccess? _success;
   BinanceConnectError? _error;
+  // 2FA gate (PR-12).  Refreshed on initState + after navigating
+  // back from the enrollment page.  ``null`` while we're checking;
+  // ``true`` once enrolled; ``false`` if the user needs to enroll
+  // before the connect form is shown.
+  bool? _mfaEnrolled;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshMfaStatus();
+  }
+
+  Future<void> _refreshMfaStatus() async {
+    final enrolled = await isMfaEnrolled();
+    if (!mounted) return;
+    setState(() => _mfaEnrolled = enrolled);
+  }
+
+  Future<void> _goToEnrollment() async {
+    await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => const TwoFaEnrollmentPage()),
+    );
+    // Refresh on return regardless of return value — covers the
+    // case where the user enrolls successfully then taps Continue
+    // (returns true) AND the case where they enroll then back-button
+    // out (returns null but enrollment did persist).
+    await _refreshMfaStatus();
+  }
 
   @override
   void dispose() {
@@ -124,7 +153,16 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
         children: [
           _doctrineCard(),
           const SizedBox(height: LuminSpacing.lg),
-          _connectForm(),
+          // 2FA gate (PR-12).  While ``_mfaEnrolled`` is null we show
+          // a small loader; once resolved we either show the
+          // enrollment CTA (not enrolled — connect form is HIDDEN)
+          // or the connect form (enrolled).
+          if (_mfaEnrolled == null)
+            const Center(child: CircularProgressIndicator())
+          else if (_mfaEnrolled == false)
+            _twoFaGateCard()
+          else
+            _connectForm(),
           if (_error != null) ...[
             const SizedBox(height: LuminSpacing.lg),
             _errorCard(_error!),
@@ -137,6 +175,57 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
       ),
     );
   }
+
+  Widget _twoFaGateCard() => Container(
+        padding: const EdgeInsets.all(LuminSpacing.md),
+        decoration: BoxDecoration(
+          color: LuminColors.bgCard,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: LuminColors.warn, width: 1),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.lock_outline,
+                    color: LuminColors.warn, size: 20),
+                SizedBox(width: LuminSpacing.sm),
+                Text(
+                  '2FA required',
+                  style: TextStyle(
+                    color: LuminColors.warn,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: LuminSpacing.sm),
+            const Text(
+              'Enable two-factor authentication on your Lumin account '
+              'before connecting Binance for server-side trading.  '
+              'You\'ll use 2FA only for sensitive operations like '
+              'connecting / disconnecting your key or raising your '
+              'position cap.',
+              style: TextStyle(
+                color: LuminColors.textPrimary,
+                fontSize: 12,
+                height: 1.5,
+              ),
+            ),
+            const SizedBox(height: LuminSpacing.md),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _goToEnrollment,
+                icon: const Icon(Icons.shield_outlined),
+                label: const Text('Set up 2FA'),
+              ),
+            ),
+          ],
+        ),
+      );
 
   Widget _doctrineCard() => Container(
         padding: const EdgeInsets.all(LuminSpacing.md),
