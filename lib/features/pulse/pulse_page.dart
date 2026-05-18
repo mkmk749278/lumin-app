@@ -14,19 +14,10 @@ import '../../shared/widgets/lumin_card.dart';
 import '../../shared/widgets/preview_badge.dart';
 import '../trade/paper_trades_page.dart';
 
-class _PulseBundle {
-  const _PulseBundle({
-    required this.engine,
-    required this.recent,
-    required this.tickers,
-    required this.pnlHistory,
-  });
-  final MockEngineSnapshot engine;
-  final List<MockSignal> recent;
-  final List<MockTicker> tickers;
-  final PnlHistory pnlHistory;
-}
-
+// _PulseBundle promoted to ``PulseBundle`` in lib/data/repository.dart
+// (Phase 2b perf push) so the repository can cache the assembled bundle
+// as a single SwrCache entry; the page now consumes it via
+// ``watchPulseBundle()`` instead of bundling four fetches itself.
 class PulsePage extends StatefulWidget {
   const PulsePage({super.key});
 
@@ -35,7 +26,12 @@ class PulsePage extends StatefulWidget {
 }
 
 class _PulsePageState extends State<PulsePage> {
-  late Future<_PulseBundle> _future;
+  // Stream-based load (Phase 2b perf push) — yields the cached
+  // PulseBundle synchronously on subscribe when HttpRepository has a
+  // fresh SWR entry, then yields fresh data when the network
+  // round-trip completes.  First paint on tab re-entry goes from
+  // "spinner during 200-2000ms RTT" to instant.
+  late Stream<PulseBundle> _stream;
   LuminRepository? _lastRepo;
 
   @override
@@ -44,43 +40,25 @@ class _PulsePageState extends State<PulsePage> {
     final repo = AppConfigScope.of(context).repo;
     if (repo != _lastRepo) {
       _lastRepo = repo;
-      _future = _load(repo);
+      _resubscribe();
     }
   }
 
-  Future<_PulseBundle> _load(LuminRepository repo) async {
-    final results = await Future.wait([
-      repo.fetchPulse(),
-      repo.fetchSignals(status: 'all', limit: 3),
-      // Tickers can fail or come back empty (e.g. early boot before the
-      // historical-data store is seeded).  Catch + return an empty list so
-      // a missing strip never blocks the rest of the Pulse page.
-      repo.fetchTickers().catchError((_) => <MockTicker>[]),
-      // PnL history powers the dashboard chart + weekly/monthly cards.
-      // On a pre-engine-#338 backend this 404s; catch + return an empty
-      // history so older deployments still render the page.
-      repo.fetchPnlHistory(days: 30).catchError(
-            (_) => const PnlHistory(
-              mode: 'off',
-              days: 30,
-              items: <PnlPoint>[],
-              weeklyPnlUsd: 0.0,
-              monthlyPnlUsd: 0.0,
-            ),
-          ),
-    ]);
-    return _PulseBundle(
-      engine: results[0] as MockEngineSnapshot,
-      recent: (results[1] as List).cast<MockSignal>(),
-      tickers: (results[2] as List).cast<MockTicker>(),
-      pnlHistory: results[3] as PnlHistory,
-    );
+  void _resubscribe() {
+    final repo = AppConfigScope.of(context).repo;
+    setState(() {
+      _stream = repo.watchPulseBundle();
+    });
   }
 
   Future<void> _refresh() async {
+    // Pull-to-refresh: drop the SWR entry so the next emit re-fetches
+    // instead of serving stale.  We deliberately don't await the stream
+    // — StreamBuilder repaints when fresh data lands, and
+    // RefreshIndicator releases its spinner immediately.
     final repo = AppConfigScope.of(context).repo;
-    setState(() => _future = _load(repo));
-    await _future;
+    repo.invalidatePulseBundleCache();
+    _resubscribe();
   }
 
   @override
@@ -91,14 +69,13 @@ class _PulsePageState extends State<PulsePage> {
       body: RefreshIndicator(
         color: LuminColors.accent,
         onRefresh: _refresh,
-        child: FutureBuilder<_PulseBundle>(
-          future: _future,
+        child: StreamBuilder<PulseBundle>(
+          stream: _stream,
           builder: (context, snap) {
-            if (snap.connectionState == ConnectionState.waiting &&
-                !snap.hasData) {
+            if (!snap.hasData && snap.connectionState != ConnectionState.done) {
               return const _PulseSkeleton();
             }
-            if (snap.hasError) {
+            if (snap.hasError && !snap.hasData) {
               return _ErrorView(
                 error: snap.error.toString(),
                 onRetry: _refresh,
@@ -1007,6 +984,12 @@ class _RecentSignalRow extends StatelessWidget {
 // Loading + error views (shared across pages)
 // ---------------------------------------------------------------------------
 
+/// Section-shaped placeholder rendered while the SWR cache has no
+/// entry yet (typically cold start).  Mirrors the real Pulse page
+/// layout: engine card + regime bar + PnL card + chart card + budget
+/// card + ticker strip + signals card.  Static gray boxes — no
+/// shimmer dep added in this phase; the layout match alone delivers
+/// the perceived-speed win.
 class _PulseSkeleton extends StatelessWidget {
   const _PulseSkeleton();
 
@@ -1016,26 +999,43 @@ class _PulseSkeleton extends StatelessWidget {
       physics: const AlwaysScrollableScrollPhysics(
         parent: BouncingScrollPhysics(),
       ),
+      padding: const EdgeInsets.symmetric(
+        horizontal: LuminSpacing.md,
+        vertical: LuminSpacing.sm,
+      ),
       children: const [
-        SizedBox(height: LuminSpacing.xxl),
-        Center(
-          child: SizedBox(
-            width: 24,
-            height: 24,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              color: LuminColors.accent,
-            ),
-          ),
-        ),
+        _PulseSkeletonCard(height: 92), // EngineStatus
         SizedBox(height: LuminSpacing.md),
-        Center(
-          child: Text(
-            'Connecting to engine…',
-            style: TextStyle(color: LuminColors.textSecondary, fontSize: 12),
-          ),
-        ),
+        _PulseSkeletonCard(height: 44), // RegimeBar
+        SizedBox(height: LuminSpacing.md),
+        _PulseSkeletonCard(height: 96), // TodayPnl
+        SizedBox(height: LuminSpacing.md),
+        _PulseSkeletonCard(height: 180), // PnlChart
+        SizedBox(height: LuminSpacing.md),
+        _PulseSkeletonCard(height: 64), // DailyLossBudget
+        SizedBox(height: LuminSpacing.md),
+        _PulseSkeletonCard(height: 56), // Ticker strip
+        SizedBox(height: LuminSpacing.md),
+        _PulseSkeletonCard(height: 156), // RecentSignals (3 rows)
+        SizedBox(height: LuminSpacing.xl),
       ],
+    );
+  }
+}
+
+class _PulseSkeletonCard extends StatelessWidget {
+  const _PulseSkeletonCard({required this.height});
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: height,
+      decoration: BoxDecoration(
+        color: LuminColors.bgCard,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: LuminColors.cardBorder),
+      ),
     );
   }
 }

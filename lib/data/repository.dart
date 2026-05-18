@@ -636,6 +636,55 @@ class PaperCloseAllResponse {
       );
 }
 
+/// Composed payload the Pulse page renders.  Lives here (not in
+/// pulse_page.dart) so the repository can construct + cache it as a
+/// single SwrCache entry — single cache hit on tab re-entry, single
+/// emit per refresh cycle.  Plain data class; no logic.
+class PulseBundle {
+  const PulseBundle({
+    required this.engine,
+    required this.recent,
+    required this.tickers,
+    required this.pnlHistory,
+  });
+  final MockEngineSnapshot engine;
+  final List<MockSignal> recent;
+  final List<MockTicker> tickers;
+  final PnlHistory pnlHistory;
+}
+
+/// Top-level assembler so the abstract default + each concrete
+/// implementation can share one fan-out path.  Top-level (not a
+/// method on LuminRepository) because Dart doesn't inherit method
+/// bodies across ``implements`` — putting the body here is the
+/// cleanest way to avoid duplicating it across Mock + Http.
+///
+/// Tickers + pnl history catch errors and fall back to empty
+/// payloads so a missing strip or a pre-engine-#338 deployment
+/// never blocks the rest of the page.
+Future<PulseBundle> assemblePulseBundle(LuminRepository repo) async {
+  final results = await Future.wait([
+    repo.fetchPulse(),
+    repo.fetchSignals(status: 'all', limit: 3),
+    repo.fetchTickers().catchError((_) => <MockTicker>[]),
+    repo.fetchPnlHistory(days: 30).catchError(
+          (_) => const PnlHistory(
+            mode: 'off',
+            days: 30,
+            items: <PnlPoint>[],
+            weeklyPnlUsd: 0.0,
+            monthlyPnlUsd: 0.0,
+          ),
+        ),
+  ]);
+  return PulseBundle(
+    engine: results[0] as MockEngineSnapshot,
+    recent: (results[1] as List).cast<MockSignal>(),
+    tickers: (results[2] as List).cast<MockTicker>(),
+    pnlHistory: results[3] as PnlHistory,
+  );
+}
+
 abstract class LuminRepository {
   /// True when the underlying source is the live engine (vs. mocks).
   bool get isLive;
@@ -672,6 +721,20 @@ abstract class LuminRepository {
     int limit = 50,
     String? setupClass,
   }) {
+    // Default no-op.  HttpRepository overrides.
+  }
+
+  /// Stream the composed Pulse bundle (engine snapshot + recent
+  /// signals + tickers + pnl history) with SWR semantics.  Default
+  /// impl assembles the four sub-fetches in parallel and wraps the
+  /// result as a single-event stream so non-cached impls have a
+  /// uniform interface; ``HttpRepository`` caches the assembled bundle.
+  Stream<PulseBundle> watchPulseBundle() async* {
+    yield await assemblePulseBundle(this);
+  }
+
+  /// Drop the cached Pulse bundle — pull-to-refresh entry point.
+  void invalidatePulseBundleCache() {
     // Default no-op.  HttpRepository overrides.
   }
   Future<List<MockPosition>> fetchPositions();
@@ -808,6 +871,16 @@ class MockRepository implements LuminRepository {
     int limit = 50,
     String? setupClass,
   }) {}
+
+  /// Mock impl: same fanout-then-emit as the abstract default — no
+  /// caching needed since the underlying fetches are in-memory anyway.
+  @override
+  Stream<PulseBundle> watchPulseBundle() async* {
+    yield await assemblePulseBundle(this);
+  }
+
+  @override
+  void invalidatePulseBundleCache() {}
 
   @override
   Future<List<MockPosition>> fetchPositions() async => mockPositions;
@@ -1666,6 +1739,26 @@ class HttpRepository implements LuminRepository {
     _swr.invalidate(
       _signalsKey(status: status, limit: limit, setupClass: setupClass),
     );
+  }
+
+  static const _kPulseBundleKey = 'pulse_bundle';
+
+  /// SWR-cached bundle.  Single cache entry for the whole bundle —
+  /// tab re-entry within TTL renders synchronously from cache while
+  /// a background refresh fires.  Concurrent subscribers (the user
+  /// scrolling around + pull-to-refresh) share one fetch via the
+  /// SwrCache's in-flight dedup.
+  @override
+  Stream<PulseBundle> watchPulseBundle() {
+    return _swr.watch<PulseBundle>(
+      _kPulseBundleKey,
+      fetch: () => assemblePulseBundle(this),
+    );
+  }
+
+  @override
+  void invalidatePulseBundleCache() {
+    _swr.invalidate(_kPulseBundleKey);
   }
 
   @override
