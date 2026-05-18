@@ -52,6 +52,13 @@ jobs:
           else
             echo "android/ exists — skipping scaffolding"
           fi
+          # flutter create -t app also drops a default test/widget_test.dart
+          # that references a non-existent ``MyApp`` constructor (this app's
+          # root widget is ``LuminApp``).  Until #28 / Phase 4 added real
+          # tests, ``flutter test`` was never wired so this stub never
+          # surfaced; once wired it fails compile in lockstep with our real
+          # tests.  Drop the stub so our test/ tree is what runs.
+          rm -f test/widget_test.dart
 
       - name: Inject INTERNET permission into release manifest
         run: |
