@@ -26,6 +26,8 @@
 /// Mode flip writes to the **per-user** ``user_auto_trade_settings``
 /// table (Phase 2 endpoint) and kicks the AutoTradeWatcher (Phase 3b-2)
 /// to pick up the new mode without waiting for its next tick.
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../data/app_config.dart';
@@ -105,7 +107,14 @@ class TradePage extends StatefulWidget {
 
 class _TradePageState extends State<TradePage> {
   _TradeView _view = _TradeView.live;
-  late Future<_TradeBundle> _future;
+  // Phase 2c — engine slice as a SWR stream + Binance slice as a
+  // parallel future; combined into a single Stream<_TradeBundle> via
+  // a StreamController so the page-side build path stays
+  // StreamBuilder-driven (matching Phase 2a/2b's Signals + Pulse
+  // migration).
+  late Stream<_TradeBundle> _stream;
+  StreamSubscription<TradeEngineSnapshot>? _engineSub;
+  StreamController<_TradeBundle>? _bundleController;
   LuminRepository? _lastRepo;
   bool _switchingMode = false;
 
@@ -115,42 +124,64 @@ class _TradePageState extends State<TradePage> {
     final repo = AppConfigScope.of(context).repo;
     if (repo != _lastRepo) {
       _lastRepo = repo;
-      _future = _load(repo);
+      _resubscribe();
     }
   }
 
-  Future<_TradeBundle> _load(LuminRepository repo) async {
-    // PERF (2026-05-18): fire engine + Binance fetches concurrently.
-    // Before this change, ``_augmentWithBinance`` ran *after* the engine
-    // Future.wait completed — total wait was engine + binance even though
-    // the two are independent.  Now both pipelines start at t=0 and we
-    // join at the bundle assembly.  Saves the smaller of the two
-    // round-trips off every Trade-tab load + every pull-to-refresh.
+  @override
+  void dispose() {
+    _engineSub?.cancel();
+    _bundleController?.close();
+    super.dispose();
+  }
+
+  void _resubscribe() {
+    _engineSub?.cancel();
+    _bundleController?.close();
+    final repo = AppConfigScope.of(context).repo;
     final uid = AppConfigScope.of(context).userId;
-    final binanceFuture = _fetchBinanceSlice(uid);
+    final controller = StreamController<_TradeBundle>();
+    _bundleController = controller;
 
-    final engineResults = await Future.wait([
-      repo.fetchAutoMode(),
-      repo.fetchPositions(),
-      repo.fetchActivity(limit: 30),
-      repo.fetchUserAutoTradeSettings().catchError(
-        // Anonymous device JWTs → 404.  Fall back to "no overrides"
-        // so the page still renders; the mode pill follows engine
-        // until the user signs in with phone.
-        (_) => const AutoTradeSettings(usingDefaults: true),
-      ),
-    ]);
-    final binance = await binanceFuture;
+    TradeEngineSnapshot? engine;
+    _BinanceSlice? binance;
 
-    return _TradeBundle(
-      autoMode: engineResults[0] as AutoModeStatus,
-      positions: (engineResults[1] as List).cast<MockPosition>(),
-      activity: (engineResults[2] as List).cast<MockActivityEvent>(),
-      userSettings: engineResults[3] as AutoTradeSettings,
-      binanceAccount: binance.account,
-      binancePositions: binance.positions,
-      binanceError: binance.error,
+    void emit() {
+      if (engine == null) return;
+      if (controller.isClosed) return;
+      controller.add(_TradeBundle(
+        autoMode: engine!.autoMode,
+        positions: engine!.positions,
+        activity: engine!.activity,
+        userSettings: engine!.userSettings,
+        binanceAccount: binance?.account,
+        binancePositions: binance?.positions,
+        binanceError: binance?.error,
+      ));
+    }
+
+    // Engine: SWR — emits cached (instant) + fresh (on RTT).
+    _engineSub = repo.watchTradeEngineSnapshot().listen(
+      (snap) {
+        engine = snap;
+        emit();
+      },
+      onError: (Object e, StackTrace st) {
+        if (!controller.isClosed) controller.addError(e, st);
+      },
     );
+
+    // Binance: one-shot future in parallel.  Errors are folded into
+    // _BinanceSlice.error rather than rethrown so a Binance failure
+    // doesn't blank out the page (matches PR #32 semantics).
+    _fetchBinanceSlice(uid).then((slice) {
+      binance = slice;
+      emit();
+    });
+
+    setState(() {
+      _stream = controller.stream;
+    });
   }
 
   /// Independently fetch the user's Binance account + positions in
@@ -189,9 +220,14 @@ class _TradePageState extends State<TradePage> {
   }
 
   Future<void> _refresh() async {
+    // Pull-to-refresh: invalidate the engine SWR entry so the next
+    // emit refetches; ``_resubscribe`` rebuilds the bundle controller
+    // and starts a fresh Binance slice future.  We don't await
+    // anything — StreamBuilder drives the UI update; spinner releases
+    // immediately (consistent with Phase 2a / 2b refresh UX).
     final repo = AppConfigScope.of(context).repo;
-    setState(() => _future = _load(repo));
-    await _future;
+    repo.invalidateTradeEngineSnapshotCache();
+    _resubscribe();
   }
 
   /// Real-money confirmation modal before flipping per-user mode →
@@ -347,14 +383,19 @@ class _TradePageState extends State<TradePage> {
             child: RefreshIndicator(
               color: LuminColors.accent,
               onRefresh: _refresh,
-              child: FutureBuilder<_TradeBundle>(
-                future: _future,
+              child: StreamBuilder<_TradeBundle>(
+                stream: _stream,
                 builder: (context, snap) {
-                  if (snap.connectionState == ConnectionState.waiting &&
-                      !snap.hasData) {
+                  // First emit happens when engine slice lands (cached
+                  // or fresh).  Binance slice may still be in flight
+                  // — bundle's binance* fields will be null and the
+                  // page falls back to engine paper positions, same as
+                  // PR #32's pre-Binance window.
+                  if (!snap.hasData &&
+                      snap.connectionState != ConnectionState.done) {
                     return const _TradeLoading();
                   }
-                  if (snap.hasError) {
+                  if (snap.hasError && !snap.hasData) {
                     return _TradeError(
                         error: snap.error.toString(), onRetry: _refresh);
                   }
@@ -1569,6 +1610,11 @@ class _ActivityRow extends StatelessWidget {
   }
 }
 
+/// Section-shaped skeleton rendered before the first engine emit lands
+/// (cold start with no cache).  Mirrors the Trade page layout: mode
+/// pill row + balance card + positions list (3 row placeholders) +
+/// activity log (4 row placeholders).  Static gray boxes — same
+/// rationale as Phase 2a/2b's skeletons.
 class _TradeLoading extends StatelessWidget {
   const _TradeLoading();
 
@@ -1578,19 +1624,49 @@ class _TradeLoading extends StatelessWidget {
       physics: const AlwaysScrollableScrollPhysics(
         parent: BouncingScrollPhysics(),
       ),
+      padding: const EdgeInsets.symmetric(
+        horizontal: LuminSpacing.md,
+        vertical: LuminSpacing.sm,
+      ),
       children: const [
-        SizedBox(height: LuminSpacing.xxl),
-        Center(
-          child: SizedBox(
-            width: 24,
-            height: 24,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              color: LuminColors.accent,
-            ),
-          ),
-        ),
+        _TradeSkeletonCard(height: 48), // Mode pill
+        SizedBox(height: LuminSpacing.md),
+        _TradeSkeletonCard(height: 104), // Balance / PnL card
+        SizedBox(height: LuminSpacing.md),
+        _TradeSkeletonCard(height: 72), // Position row
+        SizedBox(height: LuminSpacing.sm),
+        _TradeSkeletonCard(height: 72), // Position row
+        SizedBox(height: LuminSpacing.sm),
+        _TradeSkeletonCard(height: 72), // Position row
+        SizedBox(height: LuminSpacing.md),
+        _TradeSkeletonCard(height: 56), // Activity header
+        SizedBox(height: LuminSpacing.sm),
+        _TradeSkeletonCard(height: 44), // Activity row
+        SizedBox(height: LuminSpacing.sm),
+        _TradeSkeletonCard(height: 44), // Activity row
+        SizedBox(height: LuminSpacing.sm),
+        _TradeSkeletonCard(height: 44), // Activity row
+        SizedBox(height: LuminSpacing.sm),
+        _TradeSkeletonCard(height: 44), // Activity row
+        SizedBox(height: LuminSpacing.xl),
       ],
+    );
+  }
+}
+
+class _TradeSkeletonCard extends StatelessWidget {
+  const _TradeSkeletonCard({required this.height});
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: height,
+      decoration: BoxDecoration(
+        color: LuminColors.bgCard,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: LuminColors.cardBorder),
+      ),
     );
   }
 }

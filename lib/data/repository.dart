@@ -653,6 +653,48 @@ class PulseBundle {
   final PnlHistory pnlHistory;
 }
 
+/// Engine-side payload the Trade page consumes.  Pure repo data —
+/// no Binance / no secure-storage / no context dependency, so the
+/// repo can cache it via SwrCache the same way as PulseBundle.  The
+/// page composes this with its locally-fetched Binance slice
+/// (kept page-local because the secure-storage key lookup needs
+/// user-context).
+class TradeEngineSnapshot {
+  const TradeEngineSnapshot({
+    required this.autoMode,
+    required this.userSettings,
+    required this.positions,
+    required this.activity,
+  });
+  final AutoModeStatus autoMode;
+  final AutoTradeSettings userSettings;
+  final List<MockPosition> positions;
+  final List<MockActivityEvent> activity;
+}
+
+/// Top-level assembler — same rationale as ``assemblePulseBundle``
+/// (Dart doesn't inherit method bodies across ``implements``).
+/// ``fetchUserAutoTradeSettings`` 404s for anonymous device JWTs;
+/// catch + fall back to the "no overrides" sentinel so the mode pill
+/// follows engine until phone sign-in lands.
+Future<TradeEngineSnapshot> assembleTradeEngineSnapshot(
+    LuminRepository repo) async {
+  final results = await Future.wait([
+    repo.fetchAutoMode(),
+    repo.fetchPositions(),
+    repo.fetchActivity(limit: 30),
+    repo.fetchUserAutoTradeSettings().catchError(
+          (_) => const AutoTradeSettings(usingDefaults: true),
+        ),
+  ]);
+  return TradeEngineSnapshot(
+    autoMode: results[0] as AutoModeStatus,
+    positions: (results[1] as List).cast<MockPosition>(),
+    activity: (results[2] as List).cast<MockActivityEvent>(),
+    userSettings: results[3] as AutoTradeSettings,
+  );
+}
+
 /// Top-level assembler so the abstract default + each concrete
 /// implementation can share one fan-out path.  Top-level (not a
 /// method on LuminRepository) because Dart doesn't inherit method
@@ -735,6 +777,18 @@ abstract class LuminRepository {
 
   /// Drop the cached Pulse bundle — pull-to-refresh entry point.
   void invalidatePulseBundleCache() {
+    // Default no-op.  HttpRepository overrides.
+  }
+
+  /// Stream the engine-side Trade payload (auto-mode, positions,
+  /// activity, user-settings) with SWR semantics.  Page composes
+  /// this with its locally-fetched Binance slice.
+  Stream<TradeEngineSnapshot> watchTradeEngineSnapshot() async* {
+    yield await assembleTradeEngineSnapshot(this);
+  }
+
+  /// Drop the cached Trade engine snapshot — pull-to-refresh entry.
+  void invalidateTradeEngineSnapshotCache() {
     // Default no-op.  HttpRepository overrides.
   }
   Future<List<MockPosition>> fetchPositions();
@@ -881,6 +935,14 @@ class MockRepository implements LuminRepository {
 
   @override
   void invalidatePulseBundleCache() {}
+
+  @override
+  Stream<TradeEngineSnapshot> watchTradeEngineSnapshot() async* {
+    yield await assembleTradeEngineSnapshot(this);
+  }
+
+  @override
+  void invalidateTradeEngineSnapshotCache() {}
 
   @override
   Future<List<MockPosition>> fetchPositions() async => mockPositions;
@@ -1742,6 +1804,7 @@ class HttpRepository implements LuminRepository {
   }
 
   static const _kPulseBundleKey = 'pulse_bundle';
+  static const _kTradeEngineKey = 'trade_engine_snapshot';
 
   /// SWR-cached bundle.  Single cache entry for the whole bundle —
   /// tab re-entry within TTL renders synchronously from cache while
@@ -1759,6 +1822,22 @@ class HttpRepository implements LuminRepository {
   @override
   void invalidatePulseBundleCache() {
     _swr.invalidate(_kPulseBundleKey);
+  }
+
+  /// Phase 2c — SWR for the Trade page's engine slice.  Binance slice
+  /// stays page-local (needs user-context for the secure-storage
+  /// key lookup); only the engine side benefits from caching.
+  @override
+  Stream<TradeEngineSnapshot> watchTradeEngineSnapshot() {
+    return _swr.watch<TradeEngineSnapshot>(
+      _kTradeEngineKey,
+      fetch: () => assembleTradeEngineSnapshot(this),
+    );
+  }
+
+  @override
+  void invalidateTradeEngineSnapshotCache() {
+    _swr.invalidate(_kTradeEngineKey);
   }
 
   @override
