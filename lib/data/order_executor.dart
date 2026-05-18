@@ -32,6 +32,18 @@ import 'mock_data.dart';
 import 'order_log.dart';
 import 'repository.dart';
 
+/// Defensive number coercion for Binance Futures REST response fields
+/// that ship as JSON strings (``avgPrice``, ``price``, ``stopPrice`` —
+/// all string-typed per the v1 contract).  A direct ``as num?`` cast on
+/// these throws TypeError at runtime; this helper handles either shape
+/// so a Binance API contract drift (string → num or vice versa) can't
+/// silently brick the executor.
+double _readDouble(Object? v) {
+  if (v is num) return v.toDouble();
+  if (v is String) return double.tryParse(v) ?? 0.0;
+  return 0.0;
+}
+
 class ExecutionResult {
   const ExecutionResult({
     required this.success,
@@ -182,7 +194,7 @@ class OrderExecutor {
         clientOrderId: entryClientId,
       );
       final entryId = (entryOrder['orderId'] as num?)?.toInt();
-      final avgPrice = (entryOrder['avgPrice'] as num?)?.toDouble() ?? 0.0;
+      final avgPrice = _readDouble(entryOrder['avgPrice']);
 
       // 2. Stop-Loss — closePosition flattens the lot at trigger.
       int? stopId;
@@ -352,7 +364,7 @@ class OrderExecutor {
         clientOrderId: 'lumin-pretp-${logEntry.signalId}',
       );
       final partialOrderId = (partialFill['orderId'] as num?)?.toInt();
-      final partialAvg = (partialFill['avgPrice'] as num?)?.toDouble() ?? 0.0;
+      final partialAvg = _readDouble(partialFill['avgPrice']);
 
       // 2. Cancel the original SL.  closePosition=true on the
       //    original SL would flatten the residual at trigger time,
