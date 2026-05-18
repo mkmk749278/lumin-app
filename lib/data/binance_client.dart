@@ -45,6 +45,44 @@ class BinanceError implements Exception {
   String toString() => 'BinanceError($statusCode, code=$code): $message';
 }
 
+/// Abstract surface ``OrderExecutor`` consumes from ``BinanceClient``.
+/// Only the methods the executor actually calls — keeps the test
+/// fake's blast radius tight and decouples test compile from the
+/// rest of BinanceClient's surface (getServerTime, getMarkPrice,
+/// listenKey lifecycle, etc.).  ``BinanceClient`` implements this
+/// interface so production wiring is unchanged.
+abstract class BinanceClientApi {
+  Future<BinanceSymbolFilters> getSymbolFilters(String symbol);
+  Future<void> setLeverage(String symbol, int leverage);
+  Future<Map<String, dynamic>> createMarketOrder({
+    required String symbol,
+    required String side,
+    required double quantity,
+    String? clientOrderId,
+  });
+  Future<Map<String, dynamic>> createStopOrder({
+    required String symbol,
+    required String side,
+    required String stopType,
+    required double stopPrice,
+    double? quantity,
+    bool closePosition = false,
+    String? clientOrderId,
+  });
+  Future<Map<String, dynamic>> cancelOrder({
+    required String symbol,
+    int? orderId,
+    String? origClientOrderId,
+  });
+  Future<Map<String, dynamic>> closePartialMarket({
+    required String symbol,
+    required String side,
+    required double quantity,
+    String? clientOrderId,
+  });
+  void dispose();
+}
+
 /// Decoded subset of ``GET /fapi/v2/account`` response.  Keeps only
 /// the fields the app surfaces (balance + position summary); the
 /// full payload has dozens of fields we don't care about yet.
@@ -247,7 +285,7 @@ class BinanceSymbolFilters {
   }
 }
 
-class BinanceClient {
+class BinanceClient implements BinanceClientApi {
   BinanceClient({
     required this.apiKey,
     required this.apiSecret,
@@ -326,6 +364,7 @@ class BinanceClient {
   /// Symbol exchange-info subset — ``stepSize`` for qty rounding +
   /// ``tickSize`` for price rounding + ``minQty`` for minimum order.
   /// Cached at the call site; this is the unsigned public endpoint.
+  @override
   Future<BinanceSymbolFilters> getSymbolFilters(String symbol) async {
     final uri = Uri.parse('$baseUrl/fapi/v1/exchangeInfo');
     final resp = await _http.get(uri).timeout(const Duration(seconds: 12));
@@ -363,6 +402,7 @@ class BinanceClient {
   /// Set per-symbol leverage.  Binance Futures requires this to be
   /// configured before placing an order at that leverage; doing it
   /// per-symbol-per-call is idempotent + cheap.
+  @override
   Future<void> setLeverage(String symbol, int leverage) async {
     await _signedPost('/fapi/v1/leverage', {
       'symbol': symbol,
@@ -378,6 +418,7 @@ class BinanceClient {
   /// ``newClientOrderId`` is set to the engine's signal_id so we get
   /// idempotency against accidental retries (a duplicate POST with the
   /// same client order ID returns the existing fill).
+  @override
   Future<Map<String, dynamic>> createMarketOrder({
     required String symbol,
     required String side,
@@ -401,6 +442,7 @@ class BinanceClient {
   /// open at the time, which is what we want for SL — even if a
   /// later DCA adds more.  TP1 uses ``quantity`` instead so partial
   /// TP-takes don't close the runner.
+  @override
   Future<Map<String, dynamic>> createStopOrder({
     required String symbol,
     required String side,
@@ -432,6 +474,7 @@ class BinanceClient {
   /// Idempotent on the caller's side: Binance returns ``-2011 Unknown
   /// order sent`` when the order was already cancelled or filled;
   /// callers treat that as a no-op and proceed.
+  @override
   Future<Map<String, dynamic>> cancelOrder({
     required String symbol,
     int? orderId,
@@ -461,6 +504,7 @@ class BinanceClient {
   /// momentarily zeroes the position, the reduce-only guard returns
   /// ``-2022 reduceOnly Order is rejected`` rather than opening a
   /// counter-position.
+  @override
   Future<Map<String, dynamic>> closePartialMarket({
     required String symbol,
     required String side,
@@ -568,5 +612,6 @@ class BinanceClient {
     );
   }
 
+  @override
   void dispose() => _http.close();
 }

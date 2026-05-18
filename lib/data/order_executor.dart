@@ -32,6 +32,18 @@ import 'mock_data.dart';
 import 'order_log.dart';
 import 'repository.dart';
 
+/// Defensive number coercion for Binance Futures REST response fields
+/// that ship as JSON strings (``avgPrice``, ``price``, ``stopPrice`` —
+/// all string-typed per the v1 contract).  A direct ``as num?`` cast on
+/// these throws TypeError at runtime; this helper handles either shape
+/// so a Binance API contract drift (string → num or vice versa) can't
+/// silently brick the executor.
+double _readDouble(Object? v) {
+  if (v is num) return v.toDouble();
+  if (v is String) return double.tryParse(v) ?? 0.0;
+  return 0.0;
+}
+
 class ExecutionResult {
   const ExecutionResult({
     required this.success,
@@ -58,11 +70,28 @@ class ExecutionResult {
   final OrderLogEntry? alreadyTaken;
 }
 
+/// Factory for the Binance client used by ``OrderExecutor``.  Default
+/// constructs a real :class:`BinanceClient`; tests inject a fake that
+/// implements :class:`BinanceClientApi` to exercise the broker-call
+/// paths without touching the network.
+typedef BinanceClientFactory = BinanceClientApi Function(BinanceKeys keys);
+
+BinanceClientApi _defaultBinanceClientFactory(BinanceKeys keys) =>
+    BinanceClient(
+      apiKey: keys.apiKey,
+      apiSecret: keys.apiSecret,
+      testnet: keys.testnet,
+    );
+
 class OrderExecutor {
-  OrderExecutor({OrderLogService? logService})
-      : _logService = logService ?? OrderLogService();
+  OrderExecutor({
+    OrderLogService? logService,
+    BinanceClientFactory? clientFactory,
+  })  : _logService = logService ?? OrderLogService(),
+        _clientFactory = clientFactory ?? _defaultBinanceClientFactory;
 
   final OrderLogService _logService;
+  final BinanceClientFactory _clientFactory;
 
   /// Compose + place the order triplet for a signal.  ``signal`` is
   /// the engine's view (entry / SL / TP1 / direction / symbol);
@@ -111,11 +140,7 @@ class OrderExecutor {
     final side = signal.direction == 'LONG' ? 'BUY' : 'SELL';
     final closeSide = side == 'BUY' ? 'SELL' : 'BUY';
 
-    final client = BinanceClient(
-      apiKey: keys.apiKey,
-      apiSecret: keys.apiSecret,
-      testnet: keys.testnet,
-    );
+    final client = _clientFactory(keys);
 
     try {
       // Symbol filters — required for qty + price rounding to avoid
@@ -169,7 +194,7 @@ class OrderExecutor {
         clientOrderId: entryClientId,
       );
       final entryId = (entryOrder['orderId'] as num?)?.toInt();
-      final avgPrice = (entryOrder['avgPrice'] as num?)?.toDouble() ?? 0.0;
+      final avgPrice = _readDouble(entryOrder['avgPrice']);
 
       // 2. Stop-Loss — closePosition flattens the lot at trigger.
       int? stopId;
@@ -315,11 +340,7 @@ class OrderExecutor {
       );
     }
 
-    final client = BinanceClient(
-      apiKey: keys.apiKey,
-      apiSecret: keys.apiSecret,
-      testnet: keys.testnet,
-    );
+    final client = _clientFactory(keys);
     try {
       final filters = await client.getSymbolFilters(logEntry.symbol);
       final partialQtyRaw = logEntry.quantity * fraction;
@@ -343,7 +364,7 @@ class OrderExecutor {
         clientOrderId: 'lumin-pretp-${logEntry.signalId}',
       );
       final partialOrderId = (partialFill['orderId'] as num?)?.toInt();
-      final partialAvg = (partialFill['avgPrice'] as num?)?.toDouble() ?? 0.0;
+      final partialAvg = _readDouble(partialFill['avgPrice']);
 
       // 2. Cancel the original SL.  closePosition=true on the
       //    original SL would flatten the residual at trigger time,
