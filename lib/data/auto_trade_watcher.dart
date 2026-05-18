@@ -232,8 +232,23 @@ class AutoTradeWatcher {
           return;
         }
       }
+      // Phase 3 perf — fetch via the SWR-cached ``watchSignals``
+      // stream rather than the bare ``fetchSignals`` future.  Effect:
+      // the watcher's 15s tick populates the SwrCache key that
+      // PulsePage + SignalsPage subscribers also read from.  Before
+      // this change, the three consumers each fired their own
+      // /api/signals round-trip; after, the watcher is the canonical
+      // fetcher and the pages get instant cache hits on subscribe.
+      //
+      // ``limit: 100`` matches the Signals page's request so the
+      // cached payload covers both the page's full list and the
+      // 3-signal Pulse preview (sliced in ``assemblePulseBundle``).
+      // ``.first`` returns whichever emit lands first (stale or
+      // fresh) — the watcher's tick logic only needs ACTIVE-status
+      // snapshot, so SWR's stale-then-fresh semantics are fine here.
       final signals = await _getRepo()
-          .fetchSignals(status: 'all')
+          .watchSignals(status: 'all', limit: 100)
+          .first
           .timeout(const Duration(seconds: 12));
       final active = signals.where((s) => s.status == 'ACTIVE').toList()
         // Newest first — smallest minutesAgo is newest.

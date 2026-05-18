@@ -704,10 +704,19 @@ Future<TradeEngineSnapshot> assembleTradeEngineSnapshot(
 /// Tickers + pnl history catch errors and fall back to empty
 /// payloads so a missing strip or a pre-engine-#338 deployment
 /// never blocks the rest of the page.
+///
+/// Phase 3 perf — recent-signals fetch goes through ``watchSignals``
+/// (limit=100, same as SignalsPage + AutoTradeWatcher) and slices to
+/// 3 client-side so all three consumers share one SwrCache entry
+/// (key ``signals:all:100:_``).  Watcher's 15s tick keeps the cache
+/// warm; Pulse subscribers get instant cache hits.
 Future<PulseBundle> assemblePulseBundle(LuminRepository repo) async {
   final results = await Future.wait([
     repo.fetchPulse(),
-    repo.fetchSignals(status: 'all', limit: 3),
+    repo
+        .watchSignals(status: 'all', limit: 100)
+        .first
+        .then((sigs) => sigs.take(3).toList()),
     repo.fetchTickers().catchError((_) => <MockTicker>[]),
     repo.fetchPnlHistory(days: 30).catchError(
           (_) => const PnlHistory(
