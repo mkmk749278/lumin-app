@@ -81,7 +81,12 @@ class SignalsPage extends StatefulWidget {
 class _SignalsPageState extends State<SignalsPage> {
   _SignalFilter _filter = _SignalFilter.all;
   _ClosedSubFilter _subFilter = _ClosedSubFilter.all;
-  late Future<List<MockSignal>> _future;
+  // Stream-based load (Phase 2a perf push) — yields cached signals
+  // synchronously on subscribe when ``HttpRepository`` has a fresh SWR
+  // entry, then yields fresh data when the network round-trip
+  // completes.  First paint goes from "spinner during 200-2000ms RTT"
+  // to "instant cached list + seamless refresh".
+  late Stream<List<MockSignal>> _stream;
   LuminRepository? _lastRepo;
 
   @override
@@ -90,20 +95,26 @@ class _SignalsPageState extends State<SignalsPage> {
     final repo = AppConfigScope.of(context).repo;
     if (repo != _lastRepo) {
       _lastRepo = repo;
-      _refetch();
+      _resubscribe();
     }
   }
 
-  void _refetch() {
+  void _resubscribe() {
     final repo = AppConfigScope.of(context).repo;
     setState(() {
-      _future = repo.fetchSignals(status: _filter.apiValue, limit: 100);
+      _stream = repo.watchSignals(status: _filter.apiValue, limit: 100);
     });
   }
 
   Future<void> _refresh() async {
-    _refetch();
-    await _future;
+    // Pull-to-refresh: drop the SWR entry so the new stream re-fetches
+    // (the user explicitly asked for fresh), then resubscribe.  We
+    // deliberately don't await the stream — StreamBuilder repaints
+    // when fresh data lands, and RefreshIndicator releases its spinner
+    // immediately so the gesture feels responsive.
+    final repo = AppConfigScope.of(context).repo;
+    repo.invalidateSignalsCache(status: _filter.apiValue, limit: 100);
+    _resubscribe();
   }
 
   void _setFilter(_SignalFilter f) {
@@ -113,7 +124,7 @@ class _SignalsPageState extends State<SignalsPage> {
       // Reset sub-filter when switching primary chip — hidden when not Closed.
       _subFilter = _ClosedSubFilter.all;
     });
-    _refetch();
+    _resubscribe();
   }
 
   void _setSubFilter(_ClosedSubFilter f) {
@@ -139,14 +150,20 @@ class _SignalsPageState extends State<SignalsPage> {
             child: RefreshIndicator(
               color: LuminColors.accent,
               onRefresh: _refresh,
-              child: FutureBuilder<List<MockSignal>>(
-                future: _future,
+              child: StreamBuilder<List<MockSignal>>(
+                stream: _stream,
                 builder: (context, snap) {
-                  if (snap.connectionState == ConnectionState.waiting &&
-                      !snap.hasData) {
-                    return const _SignalsLoading();
+                  // Stale-while-revalidate: ``HttpRepository.watchSignals``
+                  // emits cached payload synchronously when a fresh
+                  // entry sits in the SWR cache, then emits fresh from
+                  // the network.  When neither has landed yet we show
+                  // skeleton cards (looks like the real list, no
+                  // spinner) — perceived-speed win over the prior
+                  // CircularProgressIndicator.
+                  if (!snap.hasData && snap.connectionState != ConnectionState.done) {
+                    return const _SignalsSkeleton();
                   }
-                  if (snap.hasError) {
+                  if (snap.hasError && !snap.hasData) {
                     return _SignalsError(
                       error: snap.error.toString(),
                       onRetry: _refresh,
@@ -356,28 +373,81 @@ class _SignalsEmpty extends StatelessWidget {
   }
 }
 
-class _SignalsLoading extends StatelessWidget {
-  const _SignalsLoading();
+/// Skeleton placeholder rendered while the SWR cache has no entry yet
+/// (typically cold start).  Five gray-box cards shaped like real
+/// signal cards — gives the user something to look at while the
+/// network round-trip completes, instead of a spinner over a blank
+/// background.  No shimmer animation in v1 — adds a flutter_shimmer
+/// dep we don't have yet; the static placeholder is already a big
+/// perceived-speed win over CircularProgressIndicator.
+class _SignalsSkeleton extends StatelessWidget {
+  const _SignalsSkeleton();
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
+    return ListView.separated(
       physics: const AlwaysScrollableScrollPhysics(
         parent: BouncingScrollPhysics(),
       ),
-      children: const [
-        SizedBox(height: LuminSpacing.xxl),
-        Center(
-          child: SizedBox(
-            width: 24,
-            height: 24,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              color: LuminColors.accent,
-            ),
+      padding: const EdgeInsets.symmetric(
+        horizontal: LuminSpacing.md,
+        vertical: LuminSpacing.sm,
+      ),
+      itemCount: 5,
+      separatorBuilder: (_, __) => const SizedBox(height: LuminSpacing.sm),
+      itemBuilder: (_, __) => const _SkeletonCard(),
+    );
+  }
+}
+
+class _SkeletonCard extends StatelessWidget {
+  const _SkeletonCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(LuminSpacing.md),
+      decoration: BoxDecoration(
+        color: LuminColors.bgCard,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: LuminColors.cardBorder),
+      ),
+      child: const Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _SkeletonBox(width: 80, height: 16),
+              SizedBox(width: LuminSpacing.sm),
+              _SkeletonBox(width: 48, height: 16),
+              Spacer(),
+              _SkeletonBox(width: 60, height: 16),
+            ],
           ),
-        ),
-      ],
+          SizedBox(height: LuminSpacing.sm),
+          _SkeletonBox(width: double.infinity, height: 12),
+          SizedBox(height: LuminSpacing.xs),
+          _SkeletonBox(width: 180, height: 12),
+        ],
+      ),
+    );
+  }
+}
+
+class _SkeletonBox extends StatelessWidget {
+  const _SkeletonBox({required this.width, required this.height});
+  final double width;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: LuminColors.bgElevated,
+        borderRadius: BorderRadius.circular(4),
+      ),
     );
   }
 }
