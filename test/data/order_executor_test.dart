@@ -16,43 +16,24 @@
 ///
 /// Broker-call paths in ``placeFromSignal`` and ``executePreTpPartial``
 /// instantiate ``BinanceClient`` internally and are deferred until we
-/// add a client factory (test/v2 in this audit summary).
+/// add a client factory.
 library;
 
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lumin/data/binance_keys_service.dart';
 import 'package:lumin/data/mock_data.dart';
 import 'package:lumin/data/order_executor.dart';
 import 'package:lumin/data/order_log.dart';
 import 'package:lumin/data/repository.dart';
-import 'package:lumin/data/binance_keys_service.dart';
 
-class _FakeSecureStorage implements FlutterSecureStorage {
+class _FakeKvStore implements SecureKvStore {
   final Map<String, String> data = {};
 
   @override
-  Future<String?> read({
-    required String key,
-    IOSOptions? iOptions,
-    AndroidOptions? aOptions,
-    LinuxOptions? lOptions,
-    WebOptions? webOptions,
-    MacOsOptions? mOptions,
-    WindowsOptions? wOptions,
-  }) async =>
-      data[key];
+  Future<String?> read(String key) async => data[key];
 
   @override
-  Future<void> write({
-    required String key,
-    required String? value,
-    IOSOptions? iOptions,
-    AndroidOptions? aOptions,
-    LinuxOptions? lOptions,
-    WebOptions? webOptions,
-    MacOsOptions? mOptions,
-    WindowsOptions? wOptions,
-  }) async {
+  Future<void> write(String key, String? value) async {
     if (value == null) {
       data.remove(key);
     } else {
@@ -61,21 +42,7 @@ class _FakeSecureStorage implements FlutterSecureStorage {
   }
 
   @override
-  Future<void> delete({
-    required String key,
-    IOSOptions? iOptions,
-    AndroidOptions? aOptions,
-    LinuxOptions? lOptions,
-    WebOptions? webOptions,
-    MacOsOptions? mOptions,
-    WindowsOptions? wOptions,
-  }) async {
-    data.remove(key);
-  }
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) =>
-      super.noSuchMethod(invocation);
+  Future<void> delete(String key) async => data.remove(key);
 }
 
 MockSignal _signal({String id = 'sig-1', String direction = 'LONG'}) =>
@@ -123,8 +90,8 @@ OrderLogEntry _seededEntry(String signalId) => OrderLogEntry(
 void main() {
   group('OrderExecutor.placeFromSignal idempotency', () {
     test('short-circuits with alreadyTaken when log already has the signal_id', () async {
-      final storage = _FakeSecureStorage();
-      final logService = OrderLogService(storage: storage);
+      final storage = _FakeKvStore();
+      final logService = OrderLogService(store: storage);
       final executor = OrderExecutor(logService: logService);
 
       await logService.record(1, _seededEntry('sig-1'));
@@ -150,8 +117,8 @@ void main() {
     });
 
     test('rejects with clean message when positionSizePct missing', () async {
-      final storage = _FakeSecureStorage();
-      final logService = OrderLogService(storage: storage);
+      final storage = _FakeKvStore();
+      final logService = OrderLogService(store: storage);
       final executor = OrderExecutor(logService: logService);
 
       final result = await executor.placeFromSignal(
@@ -171,8 +138,8 @@ void main() {
     });
 
     test('rejects with clean message when leverageCap missing', () async {
-      final storage = _FakeSecureStorage();
-      final logService = OrderLogService(storage: storage);
+      final storage = _FakeKvStore();
+      final logService = OrderLogService(store: storage);
       final executor = OrderExecutor(logService: logService);
 
       final result = await executor.placeFromSignal(
@@ -191,8 +158,8 @@ void main() {
 
   group('OrderExecutor.recordPaper', () {
     test('produces an auto-paper entry with sizing-derived qty', () async {
-      final storage = _FakeSecureStorage();
-      final logService = OrderLogService(storage: storage);
+      final storage = _FakeKvStore();
+      final logService = OrderLogService(store: storage);
       final executor = OrderExecutor(logService: logService);
 
       final result = await executor.recordPaper(
@@ -222,8 +189,8 @@ void main() {
     });
 
     test('clamps leverage above 30 down to the B12 hard cap', () async {
-      final storage = _FakeSecureStorage();
-      final logService = OrderLogService(storage: storage);
+      final storage = _FakeKvStore();
+      final logService = OrderLogService(store: storage);
       final executor = OrderExecutor(logService: logService);
 
       final result = await executor.recordPaper(
@@ -243,8 +210,8 @@ void main() {
     });
 
     test('idempotency: re-recording the same signal_id returns alreadyTaken', () async {
-      final storage = _FakeSecureStorage();
-      final logService = OrderLogService(storage: storage);
+      final storage = _FakeKvStore();
+      final logService = OrderLogService(store: storage);
       final executor = OrderExecutor(logService: logService);
 
       await executor.recordPaper(
@@ -277,8 +244,8 @@ void main() {
     });
 
     test('rejects with clean message when paper settings incomplete', () async {
-      final storage = _FakeSecureStorage();
-      final logService = OrderLogService(storage: storage);
+      final storage = _FakeKvStore();
+      final logService = OrderLogService(store: storage);
       final executor = OrderExecutor(logService: logService);
 
       final result = await executor.recordPaper(

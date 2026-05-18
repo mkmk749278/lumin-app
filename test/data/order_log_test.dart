@@ -11,42 +11,26 @@
 ///   4. ``OrderLogService.clear`` wipes only the target user.
 ///
 /// Storage is faked with an in-memory ``Map`` shim implementing the
-/// ``FlutterSecureStorage`` interface so the tests run under
-/// ``flutter test`` without touching platform channels.
+/// ``SecureKvStore`` seam exposed by ``order_log.dart`` so the tests
+/// run under ``flutter test`` without touching platform channels or
+/// the ``flutter_secure_storage`` federated-plugin interface.
 library;
 
 import 'dart:convert';
 
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lumin/data/order_log.dart';
 
-class _FakeSecureStorage implements FlutterSecureStorage {
+/// In-memory implementation of OrderLogService's storage seam.  No
+/// platform-channel touch, no flutter_secure_storage version coupling.
+class _FakeKvStore implements SecureKvStore {
   final Map<String, String> data = {};
 
   @override
-  Future<String?> read({
-    required String key,
-    IOSOptions? iOptions,
-    AndroidOptions? aOptions,
-    LinuxOptions? lOptions,
-    WebOptions? webOptions,
-    MacOsOptions? mOptions,
-    WindowsOptions? wOptions,
-  }) async =>
-      data[key];
+  Future<String?> read(String key) async => data[key];
 
   @override
-  Future<void> write({
-    required String key,
-    required String? value,
-    IOSOptions? iOptions,
-    AndroidOptions? aOptions,
-    LinuxOptions? lOptions,
-    WebOptions? webOptions,
-    MacOsOptions? mOptions,
-    WindowsOptions? wOptions,
-  }) async {
+  Future<void> write(String key, String? value) async {
     if (value == null) {
       data.remove(key);
     } else {
@@ -55,23 +39,7 @@ class _FakeSecureStorage implements FlutterSecureStorage {
   }
 
   @override
-  Future<void> delete({
-    required String key,
-    IOSOptions? iOptions,
-    AndroidOptions? aOptions,
-    LinuxOptions? lOptions,
-    WebOptions? webOptions,
-    MacOsOptions? mOptions,
-    WindowsOptions? wOptions,
-  }) async {
-    data.remove(key);
-  }
-
-  // Methods we don't exercise — fall through to noSuchMethod, which the
-  // analyzer accepts as a stand-in for the rest of the implicit interface.
-  @override
-  dynamic noSuchMethod(Invocation invocation) =>
-      super.noSuchMethod(invocation);
+  Future<void> delete(String key) async => data.remove(key);
 }
 
 OrderLogEntry _entry({
@@ -181,8 +149,8 @@ void main() {
 
   group('OrderLogService idempotency + persistence', () {
     test('record + entryFor round-trip via storage', () async {
-      final storage = _FakeSecureStorage();
-      final svc = OrderLogService(storage: storage);
+      final storage = _FakeKvStore();
+      final svc = OrderLogService(store: storage);
 
       await svc.record(7, _entry(id: 'sig-1'));
       final found = await svc.entryFor(7, 'sig-1');
@@ -194,8 +162,8 @@ void main() {
     });
 
     test('namespaces per userId so users do not collide', () async {
-      final storage = _FakeSecureStorage();
-      final svc = OrderLogService(storage: storage);
+      final storage = _FakeKvStore();
+      final svc = OrderLogService(store: storage);
 
       await svc.record(7, _entry(id: 'sig-1'));
       await svc.record(8, _entry(id: 'sig-2'));
@@ -207,8 +175,8 @@ void main() {
     });
 
     test('prunes oldest entries beyond the 200-entry cap, retaining newest by placedAt', () async {
-      final storage = _FakeSecureStorage();
-      final svc = OrderLogService(storage: storage);
+      final storage = _FakeKvStore();
+      final svc = OrderLogService(store: storage);
 
       // Insert 205 entries with increasing placedAt — newest is sig-204.
       // The cap is 200; oldest 5 should be evicted, newest 200 kept.
@@ -236,8 +204,8 @@ void main() {
     });
 
     test('clear wipes one user without disturbing others', () async {
-      final storage = _FakeSecureStorage();
-      final svc = OrderLogService(storage: storage);
+      final storage = _FakeKvStore();
+      final svc = OrderLogService(store: storage);
 
       await svc.record(1, _entry(id: 'sig-a'));
       await svc.record(2, _entry(id: 'sig-b'));
@@ -250,17 +218,17 @@ void main() {
     });
 
     test('load returns empty map on corrupt blob (defensive against partial writes)', () async {
-      final storage = _FakeSecureStorage();
+      final storage = _FakeKvStore();
       // Stuff malformed JSON into the user's slot.
       storage.data['order_log.user.5'] = '{not valid json';
-      final svc = OrderLogService(storage: storage);
+      final svc = OrderLogService(store: storage);
 
       expect((await svc.load(5)).isEmpty, true);
       expect(await svc.entryFor(5, 'anything'), isNull);
     });
 
     test('load skips malformed individual entries but keeps the rest', () async {
-      final storage = _FakeSecureStorage();
+      final storage = _FakeKvStore();
       // One good entry + one entry missing required fields.
       storage.data['order_log.user.9'] = jsonEncode({
         'sig-good': {
@@ -275,7 +243,7 @@ void main() {
           // 'symbol' missing → fromJson throws → entry skipped.
         },
       });
-      final svc = OrderLogService(storage: storage);
+      final svc = OrderLogService(store: storage);
       final log = await svc.load(9);
 
       expect(log.containsKey('sig-good'), true);
@@ -283,8 +251,8 @@ void main() {
     });
 
     test('re-recording the same signal_id overwrites, not appends', () async {
-      final storage = _FakeSecureStorage();
-      final svc = OrderLogService(storage: storage);
+      final storage = _FakeKvStore();
+      final svc = OrderLogService(store: storage);
 
       await svc.record(1, _entry(id: 'sig-1'));
       // Same id, post-pre-TP entry — simulates the Phase-4 overwrite flow

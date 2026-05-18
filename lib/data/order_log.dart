@@ -20,6 +20,32 @@ import 'dart:convert';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+/// Minimal key-value store interface — the subset of
+/// FlutterSecureStorage that OrderLogService actually uses.  Letting
+/// callers inject an arbitrary impl makes the service trivially
+/// testable without the federated-plugin platform-interface dance that
+/// flutter_secure_storage 9.x's architecture would otherwise require.
+abstract class SecureKvStore {
+  Future<String?> read(String key);
+  Future<void> write(String key, String? value);
+  Future<void> delete(String key);
+}
+
+class _FlutterSecureStorageKv implements SecureKvStore {
+  const _FlutterSecureStorageKv(this._storage);
+  final FlutterSecureStorage _storage;
+
+  @override
+  Future<String?> read(String key) => _storage.read(key: key);
+
+  @override
+  Future<void> write(String key, String? value) =>
+      _storage.write(key: key, value: value);
+
+  @override
+  Future<void> delete(String key) => _storage.delete(key: key);
+}
+
 class OrderLogEntry {
   const OrderLogEntry({
     required this.signalId,
@@ -235,10 +261,10 @@ class OrderLogEntry {
 }
 
 class OrderLogService {
-  OrderLogService({FlutterSecureStorage? storage})
-      : _storage = storage ?? const FlutterSecureStorage();
+  OrderLogService({SecureKvStore? store})
+      : _store = store ?? const _FlutterSecureStorageKv(FlutterSecureStorage());
 
-  final FlutterSecureStorage _storage;
+  final SecureKvStore _store;
 
   static const _kPrefix = 'order_log.user.';
   static const _kMaxEntries = 200;
@@ -246,7 +272,7 @@ class OrderLogService {
   /// Read the log for ``userId``.  Returns empty map when no log
   /// exists or the blob is corrupt.
   Future<Map<String, OrderLogEntry>> load(int userId) async {
-    final raw = await _storage.read(key: '$_kPrefix$userId');
+    final raw = await _store.read('$_kPrefix$userId');
     if (raw == null || raw.isEmpty) return {};
     try {
       final decoded = jsonDecode(raw);
@@ -291,16 +317,13 @@ class OrderLogService {
     final out = <String, dynamic>{
       for (final e in log.entries) e.key: e.value.toJson(),
     };
-    await _storage.write(
-      key: '$_kPrefix$userId',
-      value: jsonEncode(out),
-    );
+    await _store.write('$_kPrefix$userId', jsonEncode(out));
   }
 
   /// Wipe — called from the Disconnect path on the API keys page so
   /// a user who's reconnected from scratch doesn't see stale "already
   /// taken" badges on signals that pre-date the reconnect.
   Future<void> clear(int userId) async {
-    await _storage.delete(key: '$_kPrefix$userId');
+    await _store.delete('$_kPrefix$userId');
   }
 }
