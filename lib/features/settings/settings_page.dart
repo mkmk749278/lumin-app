@@ -12,6 +12,7 @@ import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
 import 'pages/about_page.dart';
 import 'pages/api_keys_settings_page.dart';
+import 'pages/server_side_execution_page.dart';
 import 'pages/auto_trade_settings_page.dart';
 import 'pages/invalidation_settings_page.dart';
 import 'pages/pretp_settings_page.dart';
@@ -56,6 +57,13 @@ class SettingsPage extends StatelessWidget {
                 label: 'Binance',
                 subtitle: 'Connect your Futures API keys',
                 onTap: () => _push(context, const ApiKeysSettingsPage()),
+              ),
+              _Row(
+                icon: Icons.cloud_done_outlined,
+                label: 'Server-side auto-trade',
+                subtitle: '24/7 execution from Lumin\'s engine (B18)',
+                onTap: () =>
+                    _push(context, const ServerSideExecutionPage()),
               ),
             ],
           ),

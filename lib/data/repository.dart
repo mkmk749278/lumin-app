@@ -5,11 +5,14 @@
 /// engine) is chosen at app startup based on user preference.  Adding a
 /// new data source (websocket, on-device cache, …) means writing a new
 /// implementation; no page has to change.
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 import '../shared/tokens.dart';
 import 'api_client.dart';
 import 'mock_data.dart';
+import 'server_side_execution_models.dart';
 import 'swr_cache.dart';
 
 class AutoModeStatus {
@@ -861,6 +864,23 @@ abstract class LuminRepository {
   /// raw rows) but the live ``/api/trades?mode=paper`` view starts
   /// empty.  Owner-confirmed via dialog before this fires.
   Future<PaperResetResponse> resetPaperBalance();
+
+  /// Connect a Binance API key for server-side execution (engine B18 +
+  /// PR-2 ``/api/binance/connect``).  Posts the key to the engine,
+  /// which validates against Binance (withdraw=off, futures=on, IP
+  /// whitelist on, futures wallet accessible), encrypts via Cloud KMS,
+  /// and stores in Firestore.
+  ///
+  /// Returns [BinanceConnectSuccess] on validation success.  Throws
+  /// [BinanceConnectError] on validation failure with the typed
+  /// error code + the engine VPS IP (when applicable) so the caller
+  /// can render targeted fix-up UI (deep-link to Binance API
+  /// Management, show "add this IP to whitelist" with copy-button,
+  /// etc.).
+  Future<BinanceConnectSuccess> connectBinanceServerSide({
+    required String apiKey,
+    required String apiSecret,
+  });
   /// Flatten the paper book — close every open paper position at its
   /// entry price (engine PR #403).  Pairs with ``resetPaperBalance`` to
   /// implement the two-step user flow: close-all → reset.  The reset
@@ -1744,6 +1764,23 @@ class MockRepository implements LuminRepository {
   }
 
   @override
+  Future<BinanceConnectSuccess> connectBinanceServerSide({
+    required String apiKey,
+    required String apiSecret,
+  }) async {
+    // MockRepository fakes a successful connect — useful for UI dev
+    // without a live engine.  Returns the same shape as a real engine
+    // response.  Validation flags all-true so the success-state UI
+    // is exercisable in mock mode.
+    return BinanceConnectSuccess(
+      keyPublicIdFirst8: apiKey.length >= 8 ? apiKey.substring(0, 8) : apiKey,
+      withdrawDisabledOk: true,
+      futuresEnabledOk: true,
+      ipWhitelistOk: true,
+    );
+  }
+
+  @override
   Future<PaperCloseAllResponse> closeAllPaperPositions() async {
     // The mock fixture never has live open positions, so this is a
     // no-op that returns zero counts.  The UI flow is exercised against
@@ -2115,6 +2152,47 @@ class HttpRepository implements LuminRepository {
     _swr.invalidate(_kTradeEngineKey);
     _swr.invalidate(_kPulseBundleKey);
     return PaperResetResponse.fromJson(j);
+  }
+
+  @override
+  Future<BinanceConnectSuccess> connectBinanceServerSide({
+    required String apiKey,
+    required String apiSecret,
+  }) async {
+    // Use postRaw so we can inspect the X-Connect-Error-Code +
+    // X-Engine-VPS-IP headers on 4xx (the engine's PR-2 contract
+    // for targeted fix-up UI).  Avoid logging the request body —
+    // it carries the user's plaintext API secret which must not
+    // hit any log sink.
+    final resp = await client.postRaw(
+      '/api/binance/connect',
+      body: {
+        'api_key': apiKey,
+        'api_secret': apiSecret,
+      },
+    );
+    if (resp.statusCode >= 200 && resp.statusCode < 300) {
+      final body = resp.body.isEmpty
+          ? <String, dynamic>{}
+          : jsonDecode(resp.body) as Map<String, dynamic>;
+      return BinanceConnectSuccess.fromJson(body);
+    }
+    // Failure path — parse the engine's typed error + headers.
+    String detail = 'Binance connect failed (HTTP ${resp.statusCode})';
+    try {
+      final j = jsonDecode(resp.body);
+      if (j is Map && j['detail'] != null) {
+        detail = '${j['detail']}';
+      }
+    } catch (_) {/* keep default detail */}
+    final code = resp.headers['x-connect-error-code'] ?? 'UNKNOWN';
+    final engineIp = resp.headers['x-engine-vps-ip'];
+    throw BinanceConnectError(
+      code: code,
+      detail: detail,
+      httpStatus: resp.statusCode,
+      engineVpsIp: engineIp,
+    );
   }
 
   @override
