@@ -881,6 +881,17 @@ abstract class LuminRepository {
     required String apiKey,
     required String apiSecret,
   });
+
+  /// Fetch the user's auto-trade enablement state (engine PR-14
+  /// follow-up — ``GET /api/auto-trade/user-status``).  Drives the
+  /// Trade-tab "your auto-trade is disabled" banner.  Cached 5s
+  /// server-side via KillSwitchClient so polling on tab refresh is
+  /// cheap.  Engine returns a safe default + 200 even under
+  /// Firestore outages, so this method only raises on
+  /// network/5xx — status-level state is always reflected in the
+  /// returned dataclass.
+  Future<AutoTradeUserStatus> getAutoTradeUserStatus();
+
   /// Flatten the paper book — close every open paper position at its
   /// entry price (engine PR #403).  Pairs with ``resetPaperBalance`` to
   /// implement the two-step user flow: close-all → reset.  The reset
@@ -1781,6 +1792,17 @@ class MockRepository implements LuminRepository {
   }
 
   @override
+  Future<AutoTradeUserStatus> getAutoTradeUserStatus() async {
+    // Mock: globally enabled, user not disabled.  Exercises the
+    // happy-path UI (no banner).  Tests that need the banner to
+    // render pass through HttpRepository with a mock api_client.
+    return const AutoTradeUserStatus(
+      autoTradeGloballyEnabled: true,
+      autoTradeUserDisabled: false,
+    );
+  }
+
+  @override
   Future<PaperCloseAllResponse> closeAllPaperPositions() async {
     // The mock fixture never has live open positions, so this is a
     // no-op that returns zero counts.  The UI flow is exercised against
@@ -2193,6 +2215,13 @@ class HttpRepository implements LuminRepository {
       httpStatus: resp.statusCode,
       engineVpsIp: engineIp,
     );
+  }
+
+  @override
+  Future<AutoTradeUserStatus> getAutoTradeUserStatus() async {
+    final j = (await client.get('/api/auto-trade/user-status'))
+        as Map<String, dynamic>;
+    return AutoTradeUserStatus.fromJson(j);
   }
 
   @override

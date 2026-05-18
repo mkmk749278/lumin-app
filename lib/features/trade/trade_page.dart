@@ -35,6 +35,7 @@ import '../../data/binance_client.dart';
 import '../../data/binance_keys_service.dart';
 import '../../data/mock_data.dart';
 import '../../data/repository.dart';
+import '../../data/server_side_execution_models.dart';
 import '../../shared/format.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
@@ -125,6 +126,11 @@ class _TradePageState extends State<TradePage> {
   // actually triggered a refresh.
   Completer<void>? _refreshDone;
 
+  // Auto-trade disabled banner state (PR-14 follow-up 3/3).
+  // Refreshed when the page mounts + on every pull-to-refresh.
+  // ``null`` while loading; populated once the engine returns.
+  AutoTradeUserStatus? _autoTradeStatus;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -132,6 +138,23 @@ class _TradePageState extends State<TradePage> {
     if (repo != _lastRepo) {
       _lastRepo = repo;
       _resubscribe();
+      _refreshAutoTradeStatus();
+    }
+  }
+
+  Future<void> _refreshAutoTradeStatus() async {
+    try {
+      final repo = AppConfigScope.of(context).repo;
+      final status = await repo.getAutoTradeUserStatus();
+      if (!mounted) return;
+      setState(() => _autoTradeStatus = status);
+    } catch (_) {
+      // Status fetch failure is non-fatal — the banner just doesn't
+      // render.  Engine returns a safe default + 200 even under
+      // Firestore outages, so the only way to hit this catch is a
+      // network/5xx failure.
+      if (!mounted) return;
+      setState(() => _autoTradeStatus = null);
     }
   }
 
@@ -235,6 +258,10 @@ class _TradePageState extends State<TradePage> {
   }
 
   Future<void> _refresh() async {
+    // Pull-to-refresh also re-fetches the auto-trade status so a
+    // freshly-tripped per-user breaker shows the banner on the
+    // next user-visible refresh, not next Trade-tab navigation.
+    unawaited(_refreshAutoTradeStatus());
     // Pull-to-refresh: invalidate the engine SWR entry so the next
     // emit refetches; ``_resubscribe`` rebuilds the bundle controller
     // and starts a fresh Binance slice future.
@@ -468,6 +495,13 @@ class _TradePageState extends State<TradePage> {
       ),
       children: [
         if (!scope.repo.isLive) const PreviewBadge(),
+        // Auto-trade-disabled banner (PR-14 follow-up 3/3).  Renders
+        // ONLY when the engine says the user can't currently auto-
+        // trade — either the global flag is off or this user's
+        // per-user circuit breaker tripped.  When the user is fully
+        // enabled, the banner is hidden (no extra layout cost).
+        if (_autoTradeStatus != null && !_autoTradeStatus!.isFullyEnabled)
+          _AutoTradeDisabledBanner(status: _autoTradeStatus!),
         _BinaryModeToggle(
           label: 'Live auto-trade',
           subtitle: liveActive
@@ -1945,6 +1979,91 @@ class _EmbeddedPaperTrades extends StatelessWidget {
     return SizedBox(
       height: viewportHeight * 0.60,
       child: const PaperTradesPage(),
+    );
+  }
+}
+
+
+/// Banner shown at the top of the Trade tab when the user can't
+/// currently auto-trade — engine PR-14 follow-up 3/3.
+///
+/// Two distinct messages:
+///   * Globally disabled (operator hasn't flipped
+///     ``auto_trade_globally_enabled``) — "Auto-trade is paused
+///     engine-wide".
+///   * User-specifically disabled (per-user circuit breaker tripped
+///     or operator manual action) — "Your auto-trade is disabled.
+///     Contact support to re-enable."  The disabledReason field
+///     when populated is appended for context.
+class _AutoTradeDisabledBanner extends StatelessWidget {
+  const _AutoTradeDisabledBanner({required this.status});
+
+  final AutoTradeUserStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final isUserSpecific = status.autoTradeUserDisabled;
+    final title = isUserSpecific
+        ? 'Your auto-trade is disabled'
+        : 'Auto-trade paused engine-wide';
+    final body = isUserSpecific
+        ? 'Your account has been auto-disabled by a safety check.  '
+            'Contact support via the Lumin Telegram channel to '
+            're-enable.${status.disabledReason.isNotEmpty ? "\n\nReason: ${status.disabledReason}" : ""}'
+        : 'The operator has not enabled auto-trade engine-wide yet.  '
+            'New positions will not be placed until the global '
+            'enable flag is flipped.';
+    return Container(
+      margin: const EdgeInsets.symmetric(
+        horizontal: LuminSpacing.lg,
+        vertical: LuminSpacing.sm,
+      ),
+      padding: const EdgeInsets.all(LuminSpacing.md),
+      decoration: BoxDecoration(
+        color: LuminColors.bgCard,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: isUserSpecific ? LuminColors.loss : LuminColors.warn,
+          width: 1,
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            isUserSpecific ? Icons.block : Icons.pause_circle_outline,
+            color: isUserSpecific ? LuminColors.loss : LuminColors.warn,
+            size: 20,
+          ),
+          const SizedBox(width: LuminSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: isUserSpecific
+                        ? LuminColors.loss
+                        : LuminColors.warn,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: LuminSpacing.xs),
+                Text(
+                  body,
+                  style: const TextStyle(
+                    color: LuminColors.textPrimary,
+                    fontSize: 12,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

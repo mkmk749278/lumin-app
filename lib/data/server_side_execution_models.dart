@@ -44,6 +44,41 @@ class BinanceConnectSuccess {
 /// ``engineVpsIp`` is the engine's outbound IP (per PR-2's
 /// ``X-Engine-VPS-IP`` header) — populated on IP-related failures so
 /// the app can display the exact IP to whitelist.
+/// Mirror of the engine's ``GET /api/auto-trade/user-status``
+/// response.  Drives the Trade-tab banner: when
+/// ``autoTradeGloballyEnabled`` is false OR
+/// ``autoTradeUserDisabled`` is true, the banner renders the
+/// corresponding doctrinal message.
+class AutoTradeUserStatus {
+  const AutoTradeUserStatus({
+    required this.autoTradeGloballyEnabled,
+    required this.autoTradeUserDisabled,
+    this.disabledReason = '',
+    this.disabledAt,
+  });
+
+  final bool autoTradeGloballyEnabled;
+  final bool autoTradeUserDisabled;
+  final String disabledReason;
+  final DateTime? disabledAt;
+
+  /// True iff this user can currently auto-trade (both flags clear).
+  /// The banner is hidden when this is true.
+  bool get isFullyEnabled =>
+      autoTradeGloballyEnabled && !autoTradeUserDisabled;
+
+  factory AutoTradeUserStatus.fromJson(Map<String, dynamic> j) =>
+      AutoTradeUserStatus(
+        autoTradeGloballyEnabled:
+            j['auto_trade_globally_enabled'] as bool? ?? false,
+        autoTradeUserDisabled:
+            j['auto_trade_user_disabled'] as bool? ?? false,
+        disabledReason: j['disabled_reason'] as String? ?? '',
+        disabledAt: DateTime.tryParse(j['disabled_at'] as String? ?? ''),
+      );
+}
+
+
 class BinanceConnectError implements Exception {
   BinanceConnectError({
     required this.code,
