@@ -2106,6 +2106,14 @@ class HttpRepository implements LuminRepository {
   Future<PaperResetResponse> resetPaperBalance() async {
     final j = (await client.post('/api/auto-mode/paper/reset'))
         as Map<String, dynamic>;
+    // Paper ledger just got wiped engine-side — the trade-engine snapshot
+    // (carrying ``autoMode.dailyPnlUsd``, ``dailyLossPct``) and the pulse
+    // bundle (carrying ``today_pnl_usd``) both reference the same paper
+    // ledger.  Drop both from SWR so the next subscribe forces a fresh
+    // RTT; otherwise the Trade card keeps showing the pre-reset PnL for
+    // up to 60s and the user reads "I reset but it's still red."
+    _swr.invalidate(_kTradeEngineKey);
+    _swr.invalidate(_kPulseBundleKey);
     return PaperResetResponse.fromJson(j);
   }
 
@@ -2113,6 +2121,12 @@ class HttpRepository implements LuminRepository {
   Future<PaperCloseAllResponse> closeAllPaperPositions() async {
     final j = (await client.post('/api/auto-mode/paper/close-all'))
         as Map<String, dynamic>;
+    // Close-all realises every open paper position at mark — that flows
+    // through ``daily_pnl_usd`` immediately.  Invalidate the same keys
+    // as ``resetPaperBalance`` so the Trade card reflects the new
+    // realised PnL on the next subscribe rather than serving stale.
+    _swr.invalidate(_kTradeEngineKey);
+    _swr.invalidate(_kPulseBundleKey);
     return PaperCloseAllResponse.fromJson(j);
   }
 
