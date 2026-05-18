@@ -58,11 +58,28 @@ class ExecutionResult {
   final OrderLogEntry? alreadyTaken;
 }
 
+/// Factory for the Binance client used by ``OrderExecutor``.  Default
+/// constructs a real :class:`BinanceClient`; tests inject a fake that
+/// implements :class:`BinanceClientApi` to exercise the broker-call
+/// paths without touching the network.
+typedef BinanceClientFactory = BinanceClientApi Function(BinanceKeys keys);
+
+BinanceClientApi _defaultBinanceClientFactory(BinanceKeys keys) =>
+    BinanceClient(
+      apiKey: keys.apiKey,
+      apiSecret: keys.apiSecret,
+      testnet: keys.testnet,
+    );
+
 class OrderExecutor {
-  OrderExecutor({OrderLogService? logService})
-      : _logService = logService ?? OrderLogService();
+  OrderExecutor({
+    OrderLogService? logService,
+    BinanceClientFactory? clientFactory,
+  })  : _logService = logService ?? OrderLogService(),
+        _clientFactory = clientFactory ?? _defaultBinanceClientFactory;
 
   final OrderLogService _logService;
+  final BinanceClientFactory _clientFactory;
 
   /// Compose + place the order triplet for a signal.  ``signal`` is
   /// the engine's view (entry / SL / TP1 / direction / symbol);
@@ -111,11 +128,7 @@ class OrderExecutor {
     final side = signal.direction == 'LONG' ? 'BUY' : 'SELL';
     final closeSide = side == 'BUY' ? 'SELL' : 'BUY';
 
-    final client = BinanceClient(
-      apiKey: keys.apiKey,
-      apiSecret: keys.apiSecret,
-      testnet: keys.testnet,
-    );
+    final client = _clientFactory(keys);
 
     try {
       // Symbol filters — required for qty + price rounding to avoid
@@ -315,11 +328,7 @@ class OrderExecutor {
       );
     }
 
-    final client = BinanceClient(
-      apiKey: keys.apiKey,
-      apiSecret: keys.apiSecret,
-      testnet: keys.testnet,
-    );
+    final client = _clientFactory(keys);
     try {
       final filters = await client.getSymbolFilters(logEntry.symbol);
       final partialQtyRaw = logEntry.quantity * fraction;
