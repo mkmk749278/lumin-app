@@ -81,6 +81,23 @@ class LuminApiClient {
     });
   }
 
+  /// POST that returns the FULL response (status + body + headers) on
+  /// both success and 4xx instead of throwing.  Used by the Binance
+  /// connect flow (PR-2 server-side execution) which needs to read
+  /// the ``X-Connect-Error-Code`` + ``X-Engine-VPS-IP`` headers on
+  /// validation failure to render targeted fix-up UI.
+  ///
+  /// Still throws on 5xx (caller treats as retryable) and on network
+  /// errors.  The auth-retry-on-401 + retry-on-5xx behaviour matches
+  /// ``post``; the only difference is the 4xx-doesn't-throw contract.
+  Future<http.Response> postRaw(String path, {Object? body}) async {
+    final encoded = body == null ? null : jsonEncode(body);
+    return _requestRaw((forceRefresh) async {
+      final h = await _headers(forceRefresh: forceRefresh);
+      return _http.post(_uri(path), headers: h, body: encoded);
+    });
+  }
+
   Future<dynamic> put(String path, {Object? body}) async {
     final encoded = body == null ? null : jsonEncode(body);
     return _request((forceRefresh) async {
@@ -118,6 +135,44 @@ class LuminApiClient {
         }
         if (resp.body.isEmpty) return null;
         return jsonDecode(resp.body);
+      } on TimeoutException catch (e) {
+        lastError = e;
+      } on SocketException catch (e) {
+        lastError = e;
+      } on http.ClientException catch (e) {
+        lastError = e;
+      }
+      attempt += 1;
+      if (attempt > maxRetries) break;
+      await Future<void>.delayed(_backoff(attempt));
+    }
+    throw ApiError(0, 'connection failed: $lastError');
+  }
+
+  /// Variant of [_request] that returns the raw [http.Response] on
+  /// success AND on 4xx (caller decides how to interpret the body +
+  /// headers).  5xx + network errors still retry + eventually throw
+  /// ApiError.
+  Future<http.Response> _requestRaw(
+    Future<http.Response> Function(bool forceRefresh) send,
+  ) async {
+    var attempt = 0;
+    Object? lastError;
+    while (true) {
+      try {
+        var authRetried = false;
+        var resp = await send(authRetried).timeout(timeout);
+        if (resp.statusCode == 401 && !authRetried) {
+          authRetried = true;
+          resp = await send(authRetried).timeout(timeout);
+        }
+        if (resp.statusCode >= 500 && attempt < maxRetries) {
+          attempt += 1;
+          await Future<void>.delayed(_backoff(attempt));
+          continue;
+        }
+        // 2xx and 4xx return the full response — caller inspects.
+        return resp;
       } on TimeoutException catch (e) {
         lastError = e;
       } on SocketException catch (e) {
