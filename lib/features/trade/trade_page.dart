@@ -80,6 +80,17 @@ class _TradeBundle {
   final String? binanceError;
 }
 
+/// Sentinel for the Binance-side fetch slice — exists so the
+/// concurrent fetch in ``_load`` can return either populated data, a
+/// quiet "no keys" no-op, or an error string without forking the
+/// caller's bundle-assembly code path.
+class _BinanceSlice {
+  const _BinanceSlice({this.account, this.positions, this.error});
+  final BinanceAccount? account;
+  final List<BinancePosition>? positions;
+  final String? error;
+}
+
 /// Which top-tab the Trade page is currently showing.  Each owns its
 /// own on/off toggle for the corresponding mode; see ``_buildLiveBody``
 /// and ``_buildPaperBody`` for the per-tab content.
@@ -109,7 +120,16 @@ class _TradePageState extends State<TradePage> {
   }
 
   Future<_TradeBundle> _load(LuminRepository repo) async {
-    final results = await Future.wait([
+    // PERF (2026-05-18): fire engine + Binance fetches concurrently.
+    // Before this change, ``_augmentWithBinance`` ran *after* the engine
+    // Future.wait completed — total wait was engine + binance even though
+    // the two are independent.  Now both pipelines start at t=0 and we
+    // join at the bundle assembly.  Saves the smaller of the two
+    // round-trips off every Trade-tab load + every pull-to-refresh.
+    final uid = AppConfigScope.of(context).userId;
+    final binanceFuture = _fetchBinanceSlice(uid);
+
+    final engineResults = await Future.wait([
       repo.fetchAutoMode(),
       repo.fetchPositions(),
       repo.fetchActivity(limit: 30),
@@ -120,23 +140,29 @@ class _TradePageState extends State<TradePage> {
         (_) => const AutoTradeSettings(usingDefaults: true),
       ),
     ]);
-    final bundle = _TradeBundle(
-      autoMode: results[0] as AutoModeStatus,
-      positions: (results[1] as List).cast<MockPosition>(),
-      activity: (results[2] as List).cast<MockActivityEvent>(),
-      userSettings: results[3] as AutoTradeSettings,
+    final binance = await binanceFuture;
+
+    return _TradeBundle(
+      autoMode: engineResults[0] as AutoModeStatus,
+      positions: (engineResults[1] as List).cast<MockPosition>(),
+      activity: (engineResults[2] as List).cast<MockActivityEvent>(),
+      userSettings: engineResults[3] as AutoTradeSettings,
+      binanceAccount: binance.account,
+      binancePositions: binance.positions,
+      binanceError: binance.error,
     );
-    // Phase 3c — query user's real Binance positions in parallel
-    // when keys are connected.  Falls back to the engine paper view
-    // silently on missing keys / mock mode / fetch failure.
-    return _augmentWithBinance(bundle);
   }
 
-  Future<_TradeBundle> _augmentWithBinance(_TradeBundle base) async {
-    final uid = AppConfigScope.of(context).userId;
-    if (uid == null) return base;
+  /// Independently fetch the user's Binance account + positions in
+  /// parallel with the engine slice.  Returns a sentinel record so the
+  /// caller can fold the result in without further branching.  Quietly
+  /// no-ops (returns empty sentinel) when the user is anonymous, hasn't
+  /// connected keys, or the keys are invalid — matches the prior
+  /// fallback semantics of ``_augmentWithBinance``.
+  Future<_BinanceSlice> _fetchBinanceSlice(int? uid) async {
+    if (uid == null) return const _BinanceSlice();
     final keys = await BinanceKeysService().load(uid);
-    if (keys == null || !keys.isValid) return base;
+    if (keys == null || !keys.isValid) return const _BinanceSlice();
     final client = BinanceClient(
       apiKey: keys.apiKey,
       apiSecret: keys.apiSecret,
@@ -147,30 +173,16 @@ class _TradePageState extends State<TradePage> {
         client.getAccount(),
         client.getOpenPositions(),
       ]);
-      return _TradeBundle(
-        autoMode: base.autoMode,
-        userSettings: base.userSettings,
-        positions: base.positions,
-        activity: base.activity,
-        binanceAccount: results[0] as BinanceAccount,
-        binancePositions: results[1] as List<BinancePosition>,
+      return _BinanceSlice(
+        account: results[0] as BinanceAccount,
+        positions: results[1] as List<BinancePosition>,
       );
     } on BinanceError catch (e) {
-      return _TradeBundle(
-        autoMode: base.autoMode,
-        userSettings: base.userSettings,
-        positions: base.positions,
-        activity: base.activity,
-        binanceError: 'Binance: ${e.message} (code ${e.code ?? "?"})',
+      return _BinanceSlice(
+        error: 'Binance: ${e.message} (code ${e.code ?? "?"})',
       );
     } catch (e) {
-      return _TradeBundle(
-        autoMode: base.autoMode,
-        userSettings: base.userSettings,
-        positions: base.positions,
-        activity: base.activity,
-        binanceError: 'Binance fetch: $e',
-      );
+      return _BinanceSlice(error: 'Binance fetch: $e');
     } finally {
       client.dispose();
     }
