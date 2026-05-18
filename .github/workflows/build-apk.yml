@@ -178,6 +178,14 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
+      - name: Run unit tests
+        # First-wave money-path coverage: HMAC signing in BinanceClient,
+        # idempotency + capacity-prune in OrderLogService, settings
+        # validation + idempotency short-circuit in OrderExecutor.
+        # Adding tests gates this build job so a regression in the
+        # money-moving layer blocks the APK before subscribers install.
+        run: flutter test --reporter=expanded
+
       - name: Decode keystore (release only)
         if: env.ANDROID_KEYSTORE_B64 != ''
         id: keystore
