@@ -39,7 +39,9 @@ class _FakeKvStore implements SecureKvStore {
   }
 
   @override
-  Future<void> delete(String key) async => data.remove(key);
+  Future<void> delete(String key) async {
+    data.remove(key);
+  }
 }
 
 OrderLogEntry _entry({
