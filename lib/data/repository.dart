@@ -799,6 +799,16 @@ class MockRepository implements LuminRepository {
         setupClass: setupClass,
       ));
 
+  /// Mock impl: no-op.  ``implements LuminRepository`` requires this
+  /// even though the abstract has a default body — Dart doesn't
+  /// inherit method bodies across ``implements``.
+  @override
+  void invalidateSignalsCache({
+    String status = 'all',
+    int limit = 50,
+    String? setupClass,
+  }) {}
+
   @override
   Future<List<MockPosition>> fetchPositions() async => mockPositions;
 
