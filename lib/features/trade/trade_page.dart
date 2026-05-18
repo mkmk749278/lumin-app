@@ -117,6 +117,13 @@ class _TradePageState extends State<TradePage> {
   StreamController<_TradeBundle>? _bundleController;
   LuminRepository? _lastRepo;
   bool _switchingMode = false;
+  // Set by ``_refresh`` so it can await the next fresh engine emit.
+  // Completed by the engine listener in ``_resubscribe`` on the first
+  // post-invalidate fetch landing.  Without this, the RefreshIndicator
+  // released its spinner instantly (``_refresh`` returned before the
+  // network round-trip) and users couldn't tell whether the pull
+  // actually triggered a refresh.
+  Completer<void>? _refreshDone;
 
   @override
   void didChangeDependencies() {
@@ -165,9 +172,17 @@ class _TradePageState extends State<TradePage> {
       (snap) {
         engine = snap;
         emit();
+        // Release the pull-to-refresh spinner on the first emit after
+        // ``_refresh`` invalidated the cache.  Post-invalidate the SWR
+        // entry has been dropped, so this emit is the fresh-fetch result,
+        // not a stale read — the spinner releasing now is honest UX.
+        final done = _refreshDone;
+        if (done != null && !done.isCompleted) done.complete();
       },
       onError: (Object e, StackTrace st) {
         if (!controller.isClosed) controller.addError(e, st);
+        final done = _refreshDone;
+        if (done != null && !done.isCompleted) done.complete();
       },
     );
 
@@ -222,12 +237,32 @@ class _TradePageState extends State<TradePage> {
   Future<void> _refresh() async {
     // Pull-to-refresh: invalidate the engine SWR entry so the next
     // emit refetches; ``_resubscribe`` rebuilds the bundle controller
-    // and starts a fresh Binance slice future.  We don't await
-    // anything — StreamBuilder drives the UI update; spinner releases
-    // immediately (consistent with Phase 2a / 2b refresh UX).
+    // and starts a fresh Binance slice future.
+    //
+    // We hold the RefreshIndicator spinner until the first fresh emit
+    // arrives (signalled by the engine listener completing
+    // ``_refreshDone``) so the user sees a visible "refreshing" state
+    // for the duration of the round-trip — previously the spinner
+    // snapped shut instantly and users couldn't tell whether the pull
+    // actually triggered a refresh.  Timeout caps the spinner at 5 s
+    // so a backend stall doesn't strand the UI in spin-forever.
     final repo = AppConfigScope.of(context).repo;
+    final completer = Completer<void>();
+    _refreshDone = completer;
     repo.invalidateTradeEngineSnapshotCache();
     _resubscribe();
+    try {
+      await completer.future.timeout(const Duration(seconds: 5));
+    } on TimeoutException {
+      // Stream didn't emit within 5 s — release the spinner anyway.
+      // The page either kept its previous data or shows the error
+      // path via the StreamBuilder; this method has done its job.
+    } finally {
+      // Drop the reference so a subsequent emit doesn't try to
+      // complete an already-completed completer.  Future emits are
+      // routine SWR refreshes, not pull-to-refresh.
+      if (identical(_refreshDone, completer)) _refreshDone = null;
+    }
   }
 
   /// Real-money confirmation modal before flipping per-user mode →
