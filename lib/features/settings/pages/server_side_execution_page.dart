@@ -31,7 +31,6 @@ import '../../../data/repository.dart';
 import '../../../data/server_side_execution_models.dart';
 import '../../../shared/tokens.dart';
 import 'tos_acceptance_page.dart';
-import 'twofa_enrollment_page.dart';
 
 class ServerSideExecutionPage extends StatefulWidget {
   const ServerSideExecutionPage({super.key});
@@ -47,39 +46,22 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
   bool _submitting = false;
   BinanceConnectSuccess? _success;
   BinanceConnectError? _error;
-  // 2FA gate (PR-12).  Refreshed on initState + after navigating
-  // back from the enrollment page.  ``null`` while we're checking;
-  // ``true`` once enrolled; ``false`` if the user needs to enroll
-  // before the connect form is shown.
-  bool? _mfaEnrolled;
-  // ToS gate (PR-13).  Same shape as MFA gate.  Both must be true
-  // before the connect form is rendered.  Order of gates matters
-  // for UX — ToS shown first (cheaper to satisfy, sets context),
-  // then 2FA.
+  // ToS gate (PR-13).  ``null`` while we're checking; ``true`` once
+  // accepted; ``false`` if the user needs to accept before the
+  // connect form is shown.
+  //
+  // The TOTP 2FA gate from yesterday's PR-12 was DROPPED in this
+  // PR — Firebase's MFA enrollment is fundamentally incompatible
+  // with phone-OTP as the first factor (per B13).  See OWNER_BRIEF
+  // B18 ship notes for the trade-off + the Firebase-side
+  // ``requires-recent-login`` substitute that covers the same
+  // surface (sensitive ops require fresh SMS OTP within 5 min).
   bool? _tosAccepted;
 
   @override
   void initState() {
     super.initState();
-    _refreshGateStatus();
-  }
-
-  Future<void> _refreshGateStatus() async {
-    final results = await Future.wait([
-      isTosCurrentlyAccepted(),
-      isMfaEnrolled(),
-    ]);
-    if (!mounted) return;
-    setState(() {
-      _tosAccepted = results[0];
-      _mfaEnrolled = results[1];
-    });
-  }
-
-  Future<void> _refreshMfaStatus() async {
-    final enrolled = await isMfaEnrolled();
-    if (!mounted) return;
-    setState(() => _mfaEnrolled = enrolled);
+    _refreshTosStatus();
   }
 
   Future<void> _refreshTosStatus() async {
@@ -93,17 +75,6 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
       MaterialPageRoute(builder: (_) => const TosAcceptancePage()),
     );
     await _refreshTosStatus();
-  }
-
-  Future<void> _goToEnrollment() async {
-    await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => const TwoFaEnrollmentPage()),
-    );
-    // Refresh on return regardless of return value — covers the
-    // case where the user enrolls successfully then taps Continue
-    // (returns true) AND the case where they enroll then back-button
-    // out (returns null but enrollment did persist).
-    await _refreshMfaStatus();
   }
 
   @override
@@ -184,18 +155,17 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
         children: [
           _doctrineCard(),
           const SizedBox(height: LuminSpacing.lg),
-          // ToS gate (PR-13) + 2FA gate (PR-12) — both must be
-          // satisfied before the connect form renders.  ToS gate
-          // shown first (cheaper to satisfy, sets the legal
-          // context); 2FA second.  Both gates check on initState +
-          // re-check after the user returns from their respective
-          // pages.
-          if (_tosAccepted == null || _mfaEnrolled == null)
+          // ToS gate (PR-13) — must be satisfied before the connect
+          // form renders.  The 2FA gate from PR-12 was DROPPED in
+          // this PR because Firebase MFA enrollment is fundamentally
+          // incompatible with phone-OTP as the first factor — see
+          // OWNER_BRIEF B18 for the v1 trade-off + the
+          // ``requires-recent-login`` substitute that covers the
+          // same surface (sensitive ops require fresh SMS OTP).
+          if (_tosAccepted == null)
             const Center(child: CircularProgressIndicator())
           else if (_tosAccepted == false)
             _tosGateCard()
-          else if (_mfaEnrolled == false)
-            _twoFaGateCard()
           else
             _connectForm(),
           if (_error != null) ...[
@@ -256,57 +226,6 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
                 onPressed: _goToTos,
                 icon: const Icon(Icons.description_outlined),
                 label: const Text('Read terms'),
-              ),
-            ),
-          ],
-        ),
-      );
-
-  Widget _twoFaGateCard() => Container(
-        padding: const EdgeInsets.all(LuminSpacing.md),
-        decoration: BoxDecoration(
-          color: LuminColors.bgCard,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: LuminColors.warn, width: 1),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Row(
-              children: [
-                Icon(Icons.lock_outline,
-                    color: LuminColors.warn, size: 20),
-                SizedBox(width: LuminSpacing.sm),
-                Text(
-                  '2FA required',
-                  style: TextStyle(
-                    color: LuminColors.warn,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 14,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: LuminSpacing.sm),
-            const Text(
-              'Enable two-factor authentication on your Lumin account '
-              'before connecting Binance for server-side trading.  '
-              'You\'ll use 2FA only for sensitive operations like '
-              'connecting / disconnecting your key or raising your '
-              'position cap.',
-              style: TextStyle(
-                color: LuminColors.textPrimary,
-                fontSize: 12,
-                height: 1.5,
-              ),
-            ),
-            const SizedBox(height: LuminSpacing.md),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: _goToEnrollment,
-                icon: const Icon(Icons.shield_outlined),
-                label: const Text('Set up 2FA'),
               ),
             ),
           ],
