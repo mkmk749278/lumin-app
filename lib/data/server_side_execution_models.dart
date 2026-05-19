@@ -79,6 +79,41 @@ class AutoTradeUserStatus {
 }
 
 
+/// Mirror of the engine's ``GET /api/binance/connect/status`` response.
+///
+/// Drives the Server-side execution settings page's revisit UI: on
+/// page mount we fetch this to decide between rendering the connect
+/// form (``connected == false``) or the connected-state card
+/// (``connected == true``) with the truncated key id + connect
+/// timestamp + validation flags.
+class BinanceConnectStatus {
+  const BinanceConnectStatus({
+    required this.connected,
+    this.keyPublicIdFirst8,
+    this.connectedAt,
+    this.withdrawDisabledOk,
+    this.ipWhitelistOk,
+  });
+
+  final bool connected;
+  final String? keyPublicIdFirst8;
+  final DateTime? connectedAt;
+  final bool? withdrawDisabledOk;
+  final bool? ipWhitelistOk;
+
+  factory BinanceConnectStatus.fromJson(Map<String, dynamic> j) =>
+      BinanceConnectStatus(
+        connected: j['connected'] as bool? ?? false,
+        keyPublicIdFirst8: j['key_public_id_first8'] as String?,
+        connectedAt: DateTime.tryParse(j['connected_at'] as String? ?? ''),
+        withdrawDisabledOk: j['withdraw_disabled_ok'] as bool?,
+        ipWhitelistOk: j['ip_whitelist_ok'] as bool?,
+      );
+
+  static const notConnected = BinanceConnectStatus(connected: false);
+}
+
+
 class BinanceConnectError implements Exception {
   BinanceConnectError({
     required this.code,

@@ -55,8 +55,9 @@ class SettingsPage extends StatelessWidget {
               // 2026-05-19.  The OLD path stored keys locally and ran
               // ``AutoTradeWatcher`` in-app; server-side execution
               // (Settings → Server-side auto-trade) replaces it entirely.
-              // ``api_keys_settings_page.dart`` is kept on disk for one
-              // release of soak time; a follow-up deletes it.
+              // The corresponding ``api_keys_settings_page.dart`` +
+              // ``auto_trade_watcher.dart`` + ``auto_trade_indicator.dart``
+              // files were deleted in the same PR.
               _Row(
                 icon: Icons.cloud_done_outlined,
                 label: 'Server-side auto-trade',
@@ -188,9 +189,6 @@ class SettingsPage extends StatelessWidget {
     if (confirm != true) return;
     if (!context.mounted) return;
     final scope = AppConfigScope.of(context);
-    // Stop the auto-trade watcher first so it doesn't tick against
-    // a stale userId after the JWT is wiped.
-    scope.autoTradeWatcher.stop();
     await scope.resetConnection();
     if (!context.mounted) return;
     Navigator.of(context).pushAndRemoveUntil(

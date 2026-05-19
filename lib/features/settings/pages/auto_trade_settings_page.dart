@@ -102,8 +102,6 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
     );
     try {
       final saved = await repo.updateUserAutoTradeSettings(partial);
-      // Kick the watcher so the new mode takes effect immediately.
-      await scope.autoTradeWatcher.refreshSettings();
       if (!mounted) return;
       setState(() => _usingDefaults = saved.usingDefaults ?? false);
       ScaffoldMessenger.of(context).showSnackBar(

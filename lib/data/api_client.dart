@@ -106,6 +106,13 @@ class LuminApiClient {
     });
   }
 
+  Future<dynamic> delete(String path) async {
+    return _request((forceRefresh) async {
+      final h = await _headers(forceRefresh: forceRefresh);
+      return _http.delete(_uri(path), headers: h);
+    });
+  }
+
   Future<dynamic> _request(
     Future<http.Response> Function(bool forceRefresh) send,
   ) async {

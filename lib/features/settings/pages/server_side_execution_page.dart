@@ -44,6 +44,7 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
   final _apiKeyCtrl = TextEditingController();
   final _apiSecretCtrl = TextEditingController();
   bool _submitting = false;
+  bool _disconnecting = false;
   BinanceConnectSuccess? _success;
   BinanceConnectError? _error;
   // ToS gate (PR-13).  ``null`` while we're checking; ``true`` once
@@ -58,10 +59,19 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
   // surface (sensitive ops require fresh SMS OTP within 5 min).
   bool? _tosAccepted;
 
+  // Existing-connection state (2026-05-19).  ``null`` while the on-mount
+  // ``GET /api/binance/connect/status`` fetch is in flight; non-null
+  // afterwards.  When ``connected == true`` the page renders the
+  // connected-state card (truncated key id + connect timestamp +
+  // Disconnect / Replace actions) instead of the connect form.
+  BinanceConnectStatus? _existing;
+  bool _replacing = false;
+
   @override
   void initState() {
     super.initState();
     _refreshTosStatus();
+    _refreshConnectStatus();
   }
 
   Future<void> _refreshTosStatus() async {
@@ -70,11 +80,95 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
     setState(() => _tosAccepted = accepted);
   }
 
+  Future<void> _refreshConnectStatus() async {
+    // Soft failure on this fetch — if the engine is unreachable or the
+    // endpoint 5xx's, fall through to the connect form rather than
+    // blocking the page.  The connect flow itself surfaces real errors.
+    try {
+      final status =
+          await AppConfigScope.of(context).repo.fetchBinanceConnectStatus();
+      if (!mounted) return;
+      setState(() => _existing = status);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _existing = BinanceConnectStatus.notConnected);
+    }
+  }
+
   Future<void> _goToTos() async {
     await Navigator.of(context).push<bool>(
       MaterialPageRoute(builder: (_) => const TosAcceptancePage()),
     );
     await _refreshTosStatus();
+  }
+
+  Future<void> _disconnect() async {
+    if (_disconnecting) return;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: LuminColors.bgCard,
+        title: const Text(
+          'Disconnect Binance?',
+          style: TextStyle(color: LuminColors.textPrimary),
+        ),
+        content: const Text(
+          'This deletes the encrypted key from Lumin\'s engine.  Any '
+          'open positions on Binance are NOT closed — close them on '
+          'Binance directly before disconnecting if you want to flatten.',
+          style: TextStyle(color: LuminColors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: LuminColors.textSecondary),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              'Disconnect',
+              style: TextStyle(
+                color: LuminColors.loss,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    if (!mounted) return;
+    setState(() => _disconnecting = true);
+    try {
+      await AppConfigScope.of(context).repo.disconnectBinanceServerSide();
+      if (!mounted) return;
+      setState(() {
+        _existing = BinanceConnectStatus.notConnected;
+        _success = null;
+        _error = null;
+        _replacing = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Binance disconnected'),
+          backgroundColor: LuminColors.success,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Disconnect failed: $e'),
+          backgroundColor: LuminColors.loss,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _disconnecting = false);
+    }
   }
 
   @override
@@ -113,7 +207,14 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
       // linger in the text field after successful connect.
       _apiKeyCtrl.clear();
       _apiSecretCtrl.clear();
-      setState(() => _success = result);
+      setState(() {
+        _success = result;
+        _replacing = false;
+      });
+      // Re-fetch status so a subsequent revisit (or hot-reload of this
+      // page in test) sees the connected-state card without a manual
+      // pull-to-refresh.
+      await _refreshConnectStatus();
     } on BinanceConnectError catch (e) {
       if (!mounted) return;
       setState(() => _error = e);
@@ -162,10 +263,19 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
           // OWNER_BRIEF B18 for the v1 trade-off + the
           // ``requires-recent-login`` substitute that covers the
           // same surface (sensitive ops require fresh SMS OTP).
-          if (_tosAccepted == null)
+          //
+          // Existing-connection gate (2026-05-19) — when a Firestore
+          // key blob already exists for this Firebase uid we render
+          // the connected-state card.  The user can tap Replace to
+          // surface the connect form again (existing blob is over-
+          // written cleanly by ``put_key_blob``) or Disconnect to
+          // hard-delete it.
+          if (_tosAccepted == null || _existing == null)
             const Center(child: CircularProgressIndicator())
           else if (_tosAccepted == false)
             _tosGateCard()
+          else if (_existing!.connected && !_replacing && _success == null)
+            _connectedCard(_existing!)
           else
             _connectForm(),
           if (_error != null) ...[
@@ -263,6 +373,134 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
                 color: LuminColors.textPrimary,
                 fontSize: 12,
                 height: 1.5,
+              ),
+            ),
+          ],
+        ),
+      );
+
+  Widget _connectedCard(BinanceConnectStatus status) {
+    final connectedAt = status.connectedAt;
+    final keyId = status.keyPublicIdFirst8 ?? '????????';
+    final since = connectedAt == null
+        ? 'unknown date'
+        : '${connectedAt.year.toString().padLeft(4, '0')}-'
+            '${connectedAt.month.toString().padLeft(2, '0')}-'
+            '${connectedAt.day.toString().padLeft(2, '0')}';
+    return Container(
+      padding: const EdgeInsets.all(LuminSpacing.md),
+      decoration: BoxDecoration(
+        color: LuminColors.bgCard,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: LuminColors.success, width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.cloud_done, color: LuminColors.success, size: 18),
+              const SizedBox(width: LuminSpacing.sm),
+              const Expanded(
+                child: Text(
+                  'Binance connected',
+                  style: TextStyle(
+                    color: LuminColors.success,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: LuminSpacing.sm),
+          Text(
+            'Key: $keyId…\nConnected on $since',
+            style: const TextStyle(
+              color: LuminColors.textPrimary,
+              fontSize: 12,
+              height: 1.5,
+              fontFamily: 'monospace',
+            ),
+          ),
+          const SizedBox(height: LuminSpacing.sm),
+          Wrap(
+            spacing: LuminSpacing.sm,
+            runSpacing: LuminSpacing.xs,
+            children: [
+              _validationChip(
+                ok: status.withdrawDisabledOk ?? false,
+                label: 'Withdraw OFF',
+              ),
+              _validationChip(
+                ok: status.ipWhitelistOk ?? false,
+                label: 'IP whitelist',
+              ),
+            ],
+          ),
+          const SizedBox(height: LuminSpacing.md),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _disconnecting
+                      ? null
+                      : () => setState(() => _replacing = true),
+                  icon: const Icon(Icons.refresh, size: 16),
+                  label: const Text('Replace key'),
+                ),
+              ),
+              const SizedBox(width: LuminSpacing.sm),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _disconnecting ? null : _disconnect,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: LuminColors.loss,
+                    side: const BorderSide(color: LuminColors.loss),
+                  ),
+                  icon: _disconnecting
+                      ? const SizedBox(
+                          height: 14,
+                          width: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.link_off, size: 16),
+                  label: const Text('Disconnect'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _validationChip({required bool ok, required String label}) =>
+      Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: LuminSpacing.sm,
+          vertical: LuminSpacing.xs,
+        ),
+        decoration: BoxDecoration(
+          color:
+              (ok ? LuminColors.success : LuminColors.warn).withOpacity(0.12),
+          borderRadius: BorderRadius.circular(LuminRadii.pill),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              ok ? Icons.check_circle_outline : Icons.warning_amber,
+              color: ok ? LuminColors.success : LuminColors.warn,
+              size: 12,
+            ),
+            const SizedBox(width: LuminSpacing.xs),
+            Text(
+              label,
+              style: TextStyle(
+                color: ok ? LuminColors.success : LuminColors.warn,
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
               ),
             ),
           ],
