@@ -307,8 +307,7 @@ class _TradePageState extends State<TradePage> {
 
   Future<void> _changeMode(String newMode) async {
     if (_switchingMode) return;
-    final scope = AppConfigScope.of(context);
-    final repo = scope.repo;
+    final repo = AppConfigScope.of(context).repo;
     // Real-money confirmation before LIVE — same gate as the
     // Auto-trade settings page (3b-2).  Off / Paper bypass.
     if (newMode == 'live') {
@@ -323,9 +322,9 @@ class _TradePageState extends State<TradePage> {
       await repo.updateUserAutoTradeSettings(
         AutoTradeSettings(mode: newMode),
       );
-      // Kick the watcher so the new mode takes effect immediately.
-      // Same pattern as the Auto-trade settings page.
-      await scope.autoTradeWatcher.refreshSettings();
+      // 2026-05-19: AutoTradeWatcher removal — server-side execution
+      // picks up the per-user mode change on the next signal via the
+      // Position FSM gating (engine PRs #430-#451).
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

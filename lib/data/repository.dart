@@ -882,6 +882,21 @@ abstract class LuminRepository {
     required String apiSecret,
   });
 
+  /// Fetch the user's current Binance-connect state — does a
+  /// Firestore key blob exist for this Firebase uid?
+  /// (``GET /api/binance/connect/status``).  Drives the Server-side
+  /// execution settings page's revisit UI so users don't always see
+  /// the connect form after they've already connected.  Returns
+  /// ``BinanceConnectStatus.notConnected`` on a fresh user.
+  Future<BinanceConnectStatus> fetchBinanceConnectStatus();
+
+  /// Hard-disconnect: delete the encrypted Binance key blob in
+  /// Firestore (``DELETE /api/binance/connect``).  Idempotent — no
+  /// error when already disconnected.  Existing positions on Binance
+  /// are NOT closed; users must close them on Binance directly (the
+  /// engine loses its signed-call path once the blob is gone).
+  Future<void> disconnectBinanceServerSide();
+
   /// Fetch the user's auto-trade enablement state (engine PR-14
   /// follow-up — ``GET /api/auto-trade/user-status``).  Drives the
   /// Trade-tab "your auto-trade is disabled" banner.  Cached 5s
@@ -1803,6 +1818,18 @@ class MockRepository implements LuminRepository {
   }
 
   @override
+  Future<BinanceConnectStatus> fetchBinanceConnectStatus() async {
+    // Mock: not connected — same surface a fresh user would see in
+    // live mode.  Exercises the connect-form rendering branch.
+    return BinanceConnectStatus.notConnected;
+  }
+
+  @override
+  Future<void> disconnectBinanceServerSide() async {
+    // Mock: no-op; idempotent disconnect.
+  }
+
+  @override
   Future<PaperCloseAllResponse> closeAllPaperPositions() async {
     // The mock fixture never has live open positions, so this is a
     // no-op that returns zero counts.  The UI flow is exercised against
@@ -2222,6 +2249,18 @@ class HttpRepository implements LuminRepository {
     final j = (await client.get('/api/auto-trade/user-status'))
         as Map<String, dynamic>;
     return AutoTradeUserStatus.fromJson(j);
+  }
+
+  @override
+  Future<BinanceConnectStatus> fetchBinanceConnectStatus() async {
+    final j = (await client.get('/api/binance/connect/status'))
+        as Map<String, dynamic>;
+    return BinanceConnectStatus.fromJson(j);
+  }
+
+  @override
+  Future<void> disconnectBinanceServerSide() async {
+    await client.delete('/api/binance/connect');
   }
 
   @override

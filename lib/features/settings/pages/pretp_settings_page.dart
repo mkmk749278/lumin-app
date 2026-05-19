@@ -183,13 +183,10 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
       final saved = await repo.updateUserPretpSettings(partial);
       if (!mounted) return;
       setState(() => _usingDefaults = saved.usingDefaults ?? false);
-      // OWNER_BRIEF B17 (2026-05-17) — the watcher decides whether to
-      // poll based on protectManualEntries.  Refresh so the change
-      // takes effect immediately (start watcher in protect-only mode
-      // when flipping ON; stop when flipping OFF) without waiting for
-      // the next 15s tick or an app reopen.
-      // ignore: use_build_context_synchronously
-      AppConfigScope.of(context).autoTradeWatcher.refreshSettings();
+      // 2026-05-19: AutoTradeWatcher removal — pre-TP doctrine now
+      // executes server-side via the Position FSM (engine PR-7) on
+      // every fill regardless of app state.  No on-device poll loop
+      // to kick on Save.
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Pre-TP settings saved'),

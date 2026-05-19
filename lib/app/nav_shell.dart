@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
-import '../data/app_config.dart';
 import '../features/agents/agents_page.dart';
-import '../features/auto_trade/auto_trade_indicator.dart';
 import '../features/pulse/pulse_page.dart';
 import '../features/settings/settings_page.dart';
 import '../features/signals/signals_page.dart';
@@ -15,7 +13,7 @@ class NavShell extends StatefulWidget {
   State<NavShell> createState() => _NavShellState();
 }
 
-class _NavShellState extends State<NavShell> with WidgetsBindingObserver {
+class _NavShellState extends State<NavShell> {
   int _index = 0;
 
   static const _pages = <Widget>[
@@ -34,48 +32,12 @@ class _NavShellState extends State<NavShell> with WidgetsBindingObserver {
     NavigationDestination(icon: Icon(Icons.menu), selectedIcon: Icon(Icons.menu_open), label: 'Menu'),
   ];
 
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    // Start the AutoTradeWatcher iff the user's cached mode is
-    // live/paper.  Off-mode is a no-op.  Runs after first frame so
-    // AppConfigScope is available via context.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      AppConfigScope.of(context).autoTradeWatcher.ensureRunning();
-    });
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    final scope = AppConfigScope.of(context);
-    switch (state) {
-      case AppLifecycleState.paused:
-      case AppLifecycleState.detached:
-      case AppLifecycleState.hidden:
-        // Pause the poll loop when the app isn't foregrounded.  Phase
-        // 3.5 will add an Android foreground service for true
-        // autonomy; until then auto-trade is app-open-only and we're
-        // honest about it via the AUTO PAUSED banner state.
-        scope.autoTradeWatcher.stop();
-        break;
-      case AppLifecycleState.resumed:
-        scope.autoTradeWatcher.ensureRunning();
-        break;
-      case AppLifecycleState.inactive:
-        // Transient state (split-screen / app switcher).  Leave the
-        // watcher running — coming back from inactive should not
-        // require a fresh tick.
-        break;
-    }
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    super.dispose();
-  }
+  // 2026-05-19: lifecycle plumbing for AutoTradeWatcher removed.  Server-
+  // side execution is the only auto-trade path now (engine PRs #430-#451);
+  // there is no on-device poll loop to pause / resume on app-state
+  // transitions.  The sticky AUTO banner is also gone (engine status is
+  // surfaced on the Trade tab via AutoTradeUserStatus + on the Server-side
+  // execution settings page).
 
   @override
   Widget build(BuildContext context) {
@@ -85,9 +47,6 @@ class _NavShellState extends State<NavShell> with WidgetsBindingObserver {
           // Update banner sits above all tabs — sticky-on-top, ignored
           // when no newer GitHub Release is available.
           const UpdateBanner(),
-          // AUTO indicator — only shows when auto-trade is active or
-          // has a surfaced error.  Tap to disable (mode → off).
-          const AutoTradeIndicator(),
           Expanded(child: IndexedStack(index: _index, children: _pages)),
         ],
       ),

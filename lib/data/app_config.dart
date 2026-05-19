@@ -12,7 +12,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api_client.dart';
 import 'auth_service.dart';
-import 'auto_trade_watcher.dart';
 import 'repository.dart';
 
 enum DataSource { mock, live }
@@ -81,27 +80,10 @@ class _AppConfigScopeState extends State<AppConfigScope> {
   late AppConfig _config = widget.initial;
   late LuminRepository _repo = _buildRepo(_config);
   AuthService? _auth;
-  late final AutoTradeWatcher _autoTradeWatcher = AutoTradeWatcher(
-    getUserId: () => userId,
-    getRepo: () => _repo,
-  );
 
   AppConfig get config => _config;
   LuminRepository get repo => _repo;
   AuthService? get auth => _auth;
-
-  /// Singleton :class:`AutoTradeWatcher` for the app lifetime.  Used
-  /// by NavShell to start/stop on app lifecycle changes, and by the
-  /// Auto-trade settings page to refresh after Save.  UI layers
-  /// subscribe to ``autoTradeStatus`` (Stream) for the sticky AUTO
-  /// banner.
-  AutoTradeWatcher get autoTradeWatcher => _autoTradeWatcher;
-
-  @override
-  void dispose() {
-    _autoTradeWatcher.dispose();
-    super.dispose();
-  }
 
   /// Current user tier from the cached JWT, or ``null`` when:
   ///   * mock mode (no live auth)
