@@ -31,8 +31,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../data/app_config.dart';
-import '../../data/binance_client.dart';
-import '../../data/binance_keys_service.dart';
 import '../../data/mock_data.dart';
 import '../../data/repository.dart';
 import '../../data/server_side_execution_models.dart';
@@ -48,50 +46,22 @@ class _TradeBundle {
     required this.userSettings,
     required this.positions,
     required this.activity,
-    this.binancePositions,
-    this.binanceAccount,
-    this.binanceError,
   });
   /// Engine-wide auto-mode (read by all tiers).  Drives the P&L card
-  /// + open positions until Phase 4 ships per-user PnL.
+  /// + open positions for the Paper sub-tab.
   final AutoModeStatus autoMode;
 
-  /// Per-user override (Phase 2).  Drives the mode pill selection +
-  /// the AutoTradeWatcher (Phase 3b-2).  ``mode`` falls back to
-  /// engine-wide via ``using_defaults`` if the user hasn't picked one.
+  /// Per-user override.  Drives the Paper sub-tab's on/off toggle.
+  /// Server-side auto-trade execution is independent (governed by
+  /// the engine's ``auto_trade_globally_enabled`` Firestore flag,
+  /// see Settings → Server-side auto-trade).
   final AutoTradeSettings userSettings;
 
-  /// Engine paper positions — only rendered when the user has not
-  /// connected Binance keys.  Phase 3c prefers
-  /// :attr:`binancePositions` when present.
+  /// Engine paper positions — rendered by the Paper sub-tab.  The
+  /// engine maintains a single paper book for the whole project;
+  /// per-user PnL is a future hardening item.
   final List<MockPosition> positions;
   final List<MockActivityEvent> activity;
-
-  /// User's real Binance positions (Phase 3c).  Null when the user
-  /// hasn't connected keys or the fetch errored — caller falls back
-  /// to ``positions`` (engine paper) in that case.
-  final List<BinancePosition>? binancePositions;
-
-  /// User's Binance account snapshot for the per-user P&L card.
-  /// Same fetch as ``binancePositions``; null on the same conditions.
-  final BinanceAccount? binanceAccount;
-
-  /// Error string when the Binance fetch failed despite keys being
-  /// present.  Surfaced as a small banner above the engine paper
-  /// fallback so the user knows why they're not seeing their real
-  /// positions.
-  final String? binanceError;
-}
-
-/// Sentinel for the Binance-side fetch slice — exists so the
-/// concurrent fetch in ``_load`` can return either populated data, a
-/// quiet "no keys" no-op, or an error string without forking the
-/// caller's bundle-assembly code path.
-class _BinanceSlice {
-  const _BinanceSlice({this.account, this.positions, this.error});
-  final BinanceAccount? account;
-  final List<BinancePosition>? positions;
-  final String? error;
 }
 
 /// Which top-tab the Trade page is currently showing.  Each owns its
@@ -174,7 +144,6 @@ class _TradePageState extends State<TradePage> {
     _bundleController = controller;
 
     TradeEngineSnapshot? engine;
-    _BinanceSlice? binance;
 
     void emit() {
       if (engine == null) return;
@@ -184,9 +153,6 @@ class _TradePageState extends State<TradePage> {
         positions: engine!.positions,
         activity: engine!.activity,
         userSettings: engine!.userSettings,
-        binanceAccount: binance?.account,
-        binancePositions: binance?.positions,
-        binanceError: binance?.error,
       ));
     }
 
@@ -209,53 +175,23 @@ class _TradePageState extends State<TradePage> {
       },
     );
 
-    // Binance: one-shot future in parallel.  Errors are folded into
-    // _BinanceSlice.error rather than rethrown so a Binance failure
-    // doesn't blank out the page (matches PR #32 semantics).
-    _fetchBinanceSlice(uid).then((slice) {
-      binance = slice;
-      emit();
-    });
+    // 2026-05-19: the OLD Binance fetch (``_fetchBinanceSlice``) is
+    // no longer called.  It used to populate the now-removed
+    // ``_UserPositionsCard`` in the Live body — gone with the
+    // client-side-execution UI cleanup.  The fetch method itself
+    // remains on-disk (referenced by nothing) so a follow-up PR
+    // can delete it cleanly without churning this file twice.
 
     setState(() {
       _stream = controller.stream;
     });
   }
 
-  /// Independently fetch the user's Binance account + positions in
-  /// parallel with the engine slice.  Returns a sentinel record so the
-  /// caller can fold the result in without further branching.  Quietly
-  /// no-ops (returns empty sentinel) when the user is anonymous, hasn't
-  /// connected keys, or the keys are invalid — matches the prior
-  /// fallback semantics of ``_augmentWithBinance``.
-  Future<_BinanceSlice> _fetchBinanceSlice(int? uid) async {
-    if (uid == null) return const _BinanceSlice();
-    final keys = await BinanceKeysService().load(uid);
-    if (keys == null || !keys.isValid) return const _BinanceSlice();
-    final client = BinanceClient(
-      apiKey: keys.apiKey,
-      apiSecret: keys.apiSecret,
-      testnet: keys.testnet,
-    );
-    try {
-      final results = await Future.wait([
-        client.getAccount(),
-        client.getOpenPositions(),
-      ]);
-      return _BinanceSlice(
-        account: results[0] as BinanceAccount,
-        positions: results[1] as List<BinancePosition>,
-      );
-    } on BinanceError catch (e) {
-      return _BinanceSlice(
-        error: 'Binance: ${e.message} (code ${e.code ?? "?"})',
-      );
-    } catch (e) {
-      return _BinanceSlice(error: 'Binance fetch: $e');
-    } finally {
-      client.dispose();
-    }
-  }
+  // ``_fetchBinanceSlice`` was removed in the client-side-execution UI
+  // cleanup (2026-05-19) — the Live body no longer renders the user's
+  // real Binance positions, so the OLD ``BinanceKeysService``-driven
+  // fetch is no longer needed.  Server-side execution surfaces
+  // positions via Firestore listeners in a follow-up PR.
 
   Future<void> _refresh() async {
     // Pull-to-refresh also re-fetches the auto-trade status so a
@@ -475,89 +411,44 @@ class _TradePageState extends State<TradePage> {
   }
 
   /// Live-tab body.  Owner 2026-05-17 — no longer renders paper data
-  /// (the tri-state Off/Paper/Live card lived here pre-redesign; with
-  /// mode=paper it caused the "Live" tab to display paper positions,
-  /// indistinguishable from the Paper tab).  Now strictly:
+  /// Live-tab body.  Post-server-side-execution cleanup (2026-05-19):
+  /// the old "Live auto-trade" toggle, the OLD Binance-keys check, and
+  /// the local user-positions card are all removed.  Server-side
+  /// execution is now the only auto-trade path:
   ///
-  ///   * Live on/off toggle (mode 'live' <-> 'off' — the Paper toggle
-  ///     in the Paper tab handles paper mode independently).
-  ///   * Binance positions when the user has keys + live mode active,
-  ///     otherwise an off-state notice.
+  ///   * Banner renders the engine-state (auto_trade_globally_enabled +
+  ///     per-user disable) via [_AutoTradeDisabledBanner].
+  ///   * Actionable CTA pointing at Settings → Server-side auto-trade
+  ///     when the user hasn't connected yet (we detect this indirectly
+  ///     via the activity card — if the engine has activity but the
+  ///     user has no positions yet, show the CTA).
+  ///   * Activity card streams the engine's signal events (global, not
+  ///     per-user) — useful informational view of what the engine is
+  ///     detecting.
+  ///
+  /// The Paper sub-tab is unchanged — it's the engine's paper trader
+  /// preview surface, which stays useful regardless of which auto-trade
+  /// path is in play.
   Widget _buildLiveBody(BuildContext context, _TradeBundle data) {
     final scope = AppConfigScope.of(context);
-    // The effective mode that the auto-trader will act on — user override
-    // if present, engine-wide otherwise.
-    final activeMode = data.userSettings.mode ?? data.autoMode.mode;
-    final liveActive = activeMode == 'live';
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(
         parent: BouncingScrollPhysics(),
       ),
       children: [
         if (!scope.repo.isLive) const PreviewBadge(),
-        // Auto-trade-disabled banner (PR-14 follow-up 3/3).  Renders
-        // ONLY when the engine says the user can't currently auto-
-        // trade — either the global flag is off or this user's
-        // per-user circuit breaker tripped.  When the user is fully
-        // enabled, the banner is hidden (no extra layout cost).
+        // Server-side auto-trade state banner.  Hidden when the user
+        // is fully enabled (operator has flipped the global flag AND
+        // this user's per-user circuit breaker hasn't tripped).
         if (_autoTradeStatus != null && !_autoTradeStatus!.isFullyEnabled)
           _AutoTradeDisabledBanner(status: _autoTradeStatus!),
-        _BinaryModeToggle(
-          label: 'Live auto-trade',
-          subtitle: liveActive
-              ? 'Engine is firing real Binance orders.'
-              : 'Off — turn on to enable live auto-execution.',
-          icon: Icons.bolt,
-          activeColor: LuminColors.loss, // LIVE = caution colour
-          isOn: liveActive,
-          switching: _switchingMode,
-          onChanged: (on) => _changeMode(on ? 'live' : 'off'),
-        ),
-        if (!liveActive)
-          _OffStateNotice(
-            label: 'Live mode off',
-            description: activeMode == 'paper'
-                ? 'Paper mode is currently on — see the Paper tab. Turn '
-                  'this toggle on to switch to live execution.'
-                : 'Flip the toggle above to enable real Binance orders.',
-          )
-        else ...[
-          const SizedBox(height: LuminSpacing.md),
-          // Phase 3c — prefer the user's real Binance positions when
-          // they've connected keys; otherwise show an actionable hint.
-          if (data.binancePositions != null)
-            _UserPositionsCard(
-              positions: data.binancePositions!,
-              account: data.binanceAccount,
-            )
-          else ...[
-            if (data.binanceError != null)
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: LuminSpacing.lg,
-                  vertical: LuminSpacing.xs,
-                ),
-                child: Text(
-                  data.binanceError!,
-                  style: const TextStyle(
-                    color: LuminColors.loss,
-                    fontSize: 11,
-                    height: 1.4,
-                  ),
-                ),
-              )
-            else
-              const _OffStateNotice(
-                label: 'No Binance keys connected',
-                description:
-                    'Connect your Futures keys in Settings → Binance to '
-                    'see your live positions here.',
-              ),
-          ],
-          const SizedBox(height: LuminSpacing.md),
-          _ActivityCard(events: data.activity),
-          const SizedBox(height: LuminSpacing.xl),
-        ],
+        const SizedBox(height: LuminSpacing.md),
+        // Engine signal stream — what the engine is detecting right
+        // now.  NOT user-specific.  Showed pre-redesign labelled as
+        // "your live positions"; relabelled in this PR as engine
+        // signal activity to match what it actually is.
+        _ActivityCard(events: data.activity),
+        const SizedBox(height: LuminSpacing.xl),
       ],
     );
   }
@@ -594,12 +485,12 @@ class _TradePageState extends State<TradePage> {
           onChanged: (on) => _changeMode(on ? 'paper' : 'off'),
         ),
         if (!paperActive)
-          _OffStateNotice(
+          const _OffStateNotice(
             label: 'Paper mode off',
-            description: activeMode == 'live'
-                ? 'Live mode is currently on — see the Live tab. Turn this '
-                  'toggle on to switch to paper simulation.'
-                : 'Flip the toggle above to start simulating fills.',
+            description: 'Flip the toggle above to start simulating fills '
+                'against the engine\'s paper book.  Server-side live '
+                'auto-trade is configured separately in Settings → '
+                'Server-side auto-trade.',
           )
         else ...[
           const SizedBox(height: LuminSpacing.md),
@@ -955,11 +846,13 @@ class _ModePnlCard extends StatelessWidget {
   const _ModePnlCard({required this.autoMode, this.hasBinance = false});
   final AutoModeStatus autoMode;
 
-  /// When true, the user has Binance keys connected and the
-  /// :class:`_UserPositionsCard` below is showing their real
-  /// positions.  This card still surfaces the engine's paper
-  /// trader stats (Phase 4 ships per-user PnL) — we relabel
-  /// to be honest about it.
+  /// Pre-server-side relabel flag — was used to switch the card's
+  /// label between "user's real Binance P&L" vs "engine's paper
+  /// P&L" when the OLD client-side path showed Binance positions
+  /// alongside.  Now (post-server-side-execution cleanup) the card
+  /// always shows engine paper P&L on the Paper sub-tab; left as
+  /// a constructor parameter for now in case a follow-up restores
+  /// per-user PnL via Firestore listeners.
   final bool hasBinance;
 
   @override
@@ -1171,243 +1064,6 @@ class _MetaRow extends StatelessWidget {
             value,
             style: TextStyle(
               color: valueColor ?? LuminColors.textPrimary,
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// User's real Binance positions (Phase 3c).  Rendered in place of
-/// :class:`_OpenPositionsCard` when ``BinanceKeysService.load``
-/// returned non-null on this load.  Falls back to the engine paper
-/// view otherwise.
-class _UserPositionsCard extends StatelessWidget {
-  const _UserPositionsCard({
-    required this.positions,
-    required this.account,
-  });
-
-  final List<BinancePosition> positions;
-  final BinanceAccount? account;
-
-  @override
-  Widget build(BuildContext context) {
-    final totalUpnl = positions.fold<double>(
-        0.0, (sum, p) => sum + p.unrealizedProfit);
-    final positive = totalUpnl >= 0;
-    final accent = positive ? LuminColors.success : LuminColors.loss;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
-      child: LuminCard(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.account_balance_wallet,
-                    color: LuminColors.accent, size: 16),
-                const SizedBox(width: LuminSpacing.xs),
-                const Text(
-                  'YOUR BINANCE POSITIONS',
-                  style: TextStyle(
-                    color: LuminColors.textMuted,
-                    fontSize: 10,
-                    letterSpacing: 1.2,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const Spacer(),
-                if (positions.isNotEmpty)
-                  Text(
-                    '${positive ? "+" : ""}\$${totalUpnl.toStringAsFixed(2)} uPnL',
-                    style: TextStyle(
-                      color: accent,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-              ],
-            ),
-            if (account != null) ...[
-              const SizedBox(height: LuminSpacing.sm),
-              _StatRow(
-                label: 'Wallet equity',
-                value: '\$${account!.totalWalletBalance.toStringAsFixed(2)}',
-              ),
-              _StatRow(
-                label: 'Available',
-                value: '\$${account!.availableBalance.toStringAsFixed(2)}',
-              ),
-            ],
-            const SizedBox(height: LuminSpacing.md),
-            if (positions.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: LuminSpacing.lg),
-                child: Center(
-                  child: Text(
-                    'No open positions on Binance.',
-                    style: TextStyle(
-                      color: LuminColors.textMuted,
-                      fontSize: 13,
-                    ),
-                  ),
-                ),
-              )
-            else
-              for (int i = 0; i < positions.length; i++) ...[
-                _UserPositionRow(p: positions[i]),
-                if (i < positions.length - 1)
-                  const Divider(
-                    color: LuminColors.cardBorder,
-                    height: LuminSpacing.lg,
-                  ),
-              ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _UserPositionRow extends StatelessWidget {
-  const _UserPositionRow({required this.p});
-  final BinancePosition p;
-
-  @override
-  Widget build(BuildContext context) {
-    final positive = p.unrealizedProfit >= 0;
-    final accent = positive ? LuminColors.success : LuminColors.loss;
-    final isLong = p.isLong;
-    final sideColor = isLong ? LuminColors.success : LuminColors.loss;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Text(
-              p.symbol,
-              style: const TextStyle(
-                color: LuminColors.textPrimary,
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(width: LuminSpacing.xs),
-            Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: LuminSpacing.sm,
-                vertical: 2,
-              ),
-              decoration: BoxDecoration(
-                color: sideColor.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(LuminRadii.sm),
-              ),
-              child: Text(
-                p.side,
-                style: TextStyle(
-                  color: sideColor,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.5,
-                ),
-              ),
-            ),
-            const SizedBox(width: LuminSpacing.xs),
-            Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: LuminSpacing.sm,
-                vertical: 2,
-              ),
-              decoration: BoxDecoration(
-                color: LuminColors.textMuted.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(LuminRadii.sm),
-              ),
-              child: Text(
-                '${p.leverage.toStringAsFixed(0)}x',
-                style: const TextStyle(
-                  color: LuminColors.textSecondary,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-            const Spacer(),
-            Text(
-              '${positive ? "+" : ""}\$${p.unrealizedProfit.toStringAsFixed(2)}',
-              style: TextStyle(
-                color: accent,
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: LuminSpacing.xs),
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                'Qty ${p.qty.toString()}',
-                style: const TextStyle(
-                  color: LuminColors.textMuted,
-                  fontSize: 11,
-                ),
-              ),
-            ),
-            Text(
-              'Entry ${p.entryPrice.toStringAsFixed(4)}  →  '
-              'Mark ${p.markPrice.toStringAsFixed(4)}',
-              style: const TextStyle(
-                color: LuminColors.textSecondary,
-                fontSize: 11,
-              ),
-            ),
-          ],
-        ),
-        if (p.liquidationPrice > 0) ...[
-          const SizedBox(height: 2),
-          Text(
-            'Liq ${p.liquidationPrice.toStringAsFixed(4)}  •  ${p.marginType}',
-            style: const TextStyle(
-              color: LuminColors.loss,
-              fontSize: 10,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-class _StatRow extends StatelessWidget {
-  const _StatRow({required this.label, required this.value});
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              label,
-              style: const TextStyle(
-                color: LuminColors.textSecondary,
-                fontSize: 12,
-              ),
-            ),
-          ),
-          Text(
-            value,
-            style: const TextStyle(
-              color: LuminColors.textPrimary,
               fontSize: 12,
               fontWeight: FontWeight.w500,
             ),
