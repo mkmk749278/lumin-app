@@ -128,6 +128,7 @@ class AutoTradeRuntimeStatus {
     required this.binanceKeyConnected,
     required this.userMode,
     required this.allowedSymbols,
+    required this.effectiveAllowedSymbols,
     required this.armed,
   });
 
@@ -135,14 +136,27 @@ class AutoTradeRuntimeStatus {
   final bool autoTradeUserDisabled;
   final bool binanceKeyConnected;
   final String? userMode; // 'live' | 'paper' | 'off' | null
+
+  /// Engine-wide allowlist (the security cap).  Symbol picker shows
+  /// this as the universe the user can choose from.
   final List<String> allowedSymbols;
+
+  /// Intersection of engine-wide cap and user's symbol_preference.
+  /// When the user has set no preference, equals ``allowedSymbols``.
+  /// Drives the Live-tab footnote so it shows what will actually
+  /// trade for this user (not just the engine cap).
+  final List<String> effectiveAllowedSymbols;
+
   final bool armed;
 
   factory AutoTradeRuntimeStatus.fromJson(Map<String, dynamic> j) {
-    final symsRaw = j['allowed_symbols'];
-    final syms = symsRaw is List
-        ? symsRaw.map((s) => s.toString()).toList(growable: false)
+    List<String> parseList(Object? raw) => raw is List
+        ? raw.map((s) => s.toString()).toList(growable: false)
         : const <String>[];
+    final allowed = parseList(j['allowed_symbols']);
+    final effective = j.containsKey('effective_allowed_symbols')
+        ? parseList(j['effective_allowed_symbols'])
+        : allowed;
     final mode = j['user_mode'];
     return AutoTradeRuntimeStatus(
       autoTradeGloballyEnabled:
@@ -150,7 +164,8 @@ class AutoTradeRuntimeStatus {
       autoTradeUserDisabled: j['auto_trade_user_disabled'] as bool? ?? false,
       binanceKeyConnected: j['binance_key_connected'] as bool? ?? false,
       userMode: mode is String && mode.isNotEmpty ? mode : null,
-      allowedSymbols: syms,
+      allowedSymbols: allowed,
+      effectiveAllowedSymbols: effective,
       armed: j['armed'] as bool? ?? false,
     );
   }

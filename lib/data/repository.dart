@@ -336,6 +336,8 @@ class AutoTradeSettings {
     this.positionSizePct,
     this.leverageCap,
     this.maxConcurrentPositions,
+    this.symbolPreference,
+    this.symbolPreferenceSet = false,
     this.usingDefaults,
   });
 
@@ -345,17 +347,42 @@ class AutoTradeSettings {
   final double? leverageCap;
   final int? maxConcurrentPositions;
 
+  /// Per-user symbol-preference picker (PR E 2026-05-19).
+  ///
+  /// Tri-state:
+  /// * ``symbolPreferenceSet == false`` → field NOT included in PUT
+  ///   payload (server keeps existing value).  Default for the
+  ///   ordinary settings-page save that didn't touch the picker.
+  /// * ``symbolPreferenceSet == true && symbolPreference == null`` →
+  ///   sends ``symbol_preference: null`` → engine CLEARS the row →
+  ///   user falls back to engine-wide allowlist (default-all UX).
+  /// * ``symbolPreferenceSet == true && symbolPreference != null`` →
+  ///   sends the list (may be empty == "explicit block all").
+  final List<String>? symbolPreference;
+  final bool symbolPreferenceSet;
+
   /// Only present on ``/api/settings/user/auto-trade`` responses.
   final bool? usingDefaults;
 
-  factory AutoTradeSettings.fromJson(Map<String, dynamic> j) => AutoTradeSettings(
-        mode: j['mode'] as String?,
-        positionSizePct: (j['position_size_pct'] as num?)?.toDouble(),
-        leverageCap: (j['leverage_cap'] as num?)?.toDouble(),
-        maxConcurrentPositions:
-            (j['max_concurrent_positions'] as num?)?.toInt(),
-        usingDefaults: j['using_defaults'] as bool?,
-      );
+  factory AutoTradeSettings.fromJson(Map<String, dynamic> j) {
+    final symsRaw = j['symbol_preference'];
+    final symsParsed = symsRaw is List
+        ? symsRaw.map((s) => s.toString()).toList(growable: false)
+        : null;
+    return AutoTradeSettings(
+      mode: j['mode'] as String?,
+      positionSizePct: (j['position_size_pct'] as num?)?.toDouble(),
+      leverageCap: (j['leverage_cap'] as num?)?.toDouble(),
+      maxConcurrentPositions:
+          (j['max_concurrent_positions'] as num?)?.toInt(),
+      symbolPreference: symsParsed,
+      // GET response reflects current server state — flag this as
+      // "we know what the server has" so subsequent PUTs that copy
+      // this model don't strip the field by accident.
+      symbolPreferenceSet: symsRaw is List || symsRaw == null && j.containsKey('symbol_preference'),
+      usingDefaults: j['using_defaults'] as bool?,
+    );
+  }
 
   Map<String, dynamic> toJsonPartial() {
     final out = <String, dynamic>{};
@@ -364,6 +391,9 @@ class AutoTradeSettings {
     if (leverageCap != null) out['leverage_cap'] = leverageCap;
     if (maxConcurrentPositions != null) {
       out['max_concurrent_positions'] = maxConcurrentPositions;
+    }
+    if (symbolPreferenceSet) {
+      out['symbol_preference'] = symbolPreference;
     }
     return out;
   }
@@ -1856,6 +1886,9 @@ class MockRepository implements LuminRepository {
       binanceKeyConnected: true,
       userMode: 'live',
       allowedSymbols: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'BNBUSDT'],
+      effectiveAllowedSymbols: [
+        'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'BNBUSDT',
+      ],
       armed: true,
     );
   }
