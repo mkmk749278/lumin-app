@@ -2,11 +2,21 @@ import 'package:flutter/material.dart';
 import '../tokens.dart';
 
 class LuminCard extends StatelessWidget {
-  const LuminCard({super.key, required this.child, this.padding = const EdgeInsets.all(LuminSpacing.lg), this.onTap});
+  const LuminCard({
+    super.key,
+    required this.child,
+    this.padding = const EdgeInsets.all(LuminSpacing.lg),
+    this.onTap,
+    this.border,
+  });
 
   final Widget child;
   final EdgeInsetsGeometry padding;
   final VoidCallback? onTap;
+
+  /// Optional custom border (e.g. accent-coloured for status cards).
+  /// Defaults to the standard ``cardBorder`` when omitted.
+  final BoxBorder? border;
 
   @override
   Widget build(BuildContext context) {
@@ -15,7 +25,7 @@ class LuminCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: LuminColors.bgCard,
         borderRadius: BorderRadius.circular(LuminRadii.lg),
-        border: Border.all(color: LuminColors.cardBorder),
+        border: border ?? Border.all(color: LuminColors.cardBorder),
       ),
       child: child,
     );

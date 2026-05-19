@@ -907,6 +907,23 @@ abstract class LuminRepository {
   /// returned dataclass.
   Future<AutoTradeUserStatus> getAutoTradeUserStatus();
 
+  /// Composite runtime status for the Live-tab "Auto-trade armed"
+  /// card (``GET /api/auto-trade/runtime-status``).  Returns each of
+  /// the four FSM gates separately so the UI can render per-gate
+  /// green/red checks + the symbol allowlist as a footnote.
+  /// Default-safe: when the engine hasn't wired the server-side
+  /// execution stack, every gate returns False (the card renders
+  /// "not configured" guidance rather than 5xx).
+  Future<AutoTradeRuntimeStatus> getAutoTradeRuntimeStatus();
+
+  /// Fetch the user's open server-side positions
+  /// (``GET /api/auto-trade/positions``).  The engine reads
+  /// Firestore at ``users/{firebase_uid}/positions/`` and returns
+  /// only non-terminal states — the Live tab is meant to show what's
+  /// open right now.  Historical PnL flows through the trade-records
+  /// surface (TBD).
+  Future<List<ServerSidePosition>> getAutoTradePositions();
+
   /// Flatten the paper book — close every open paper position at its
   /// entry price (engine PR #403).  Pairs with ``resetPaperBalance`` to
   /// implement the two-step user flow: close-all → reset.  The reset
@@ -1830,6 +1847,27 @@ class MockRepository implements LuminRepository {
   }
 
   @override
+  Future<AutoTradeRuntimeStatus> getAutoTradeRuntimeStatus() async {
+    // Mock: all gates configured + green, exercising the armed-card
+    // happy-path branch in offline dev.
+    return const AutoTradeRuntimeStatus(
+      autoTradeGloballyEnabled: true,
+      autoTradeUserDisabled: false,
+      binanceKeyConnected: true,
+      userMode: 'live',
+      allowedSymbols: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'BNBUSDT'],
+      armed: true,
+    );
+  }
+
+  @override
+  Future<List<ServerSidePosition>> getAutoTradePositions() async {
+    // Mock: no open positions.  UI renders the empty-state copy
+    // ("Auto-trade armed — waiting for the next whitelisted signal").
+    return const <ServerSidePosition>[];
+  }
+
+  @override
   Future<PaperCloseAllResponse> closeAllPaperPositions() async {
     // The mock fixture never has live open positions, so this is a
     // no-op that returns zero counts.  The UI flow is exercised against
@@ -2261,6 +2299,25 @@ class HttpRepository implements LuminRepository {
   @override
   Future<void> disconnectBinanceServerSide() async {
     await client.delete('/api/binance/connect');
+  }
+
+  @override
+  Future<AutoTradeRuntimeStatus> getAutoTradeRuntimeStatus() async {
+    final j = (await client.get('/api/auto-trade/runtime-status'))
+        as Map<String, dynamic>;
+    return AutoTradeRuntimeStatus.fromJson(j);
+  }
+
+  @override
+  Future<List<ServerSidePosition>> getAutoTradePositions() async {
+    final j = (await client.get('/api/auto-trade/positions'))
+        as Map<String, dynamic>;
+    final rawList = j['positions'];
+    if (rawList is! List) return const <ServerSidePosition>[];
+    return rawList
+        .whereType<Map<String, dynamic>>()
+        .map(ServerSidePosition.fromJson)
+        .toList(growable: false);
   }
 
   @override
