@@ -1870,7 +1870,17 @@ class _AutoTradeArmedCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(LuminRadii.sm),
                 ),
                 child: Text(
-                  'Symbol allowlist: ${runtime.allowedSymbols.join(', ')}',
+                  // Effective list = engine cap ∩ user's symbol_preference.
+                  // When the user has narrowed via Settings → Symbol
+                  // preference, this shows only the pairs they kept.
+                  // When effective < engine cap we also surface a hint
+                  // line so the user understands their own narrowing
+                  // is causing the difference.
+                  runtime.effectiveAllowedSymbols.isEmpty
+                      ? 'You opted out of all symbols.  No orders '
+                          'will be placed for your account.'
+                      : 'Your active symbols: '
+                          '${runtime.effectiveAllowedSymbols.join(', ')}',
                   style: const TextStyle(
                     color: LuminColors.textSecondary,
                     fontSize: 11,
@@ -1879,10 +1889,15 @@ class _AutoTradeArmedCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: LuminSpacing.xs),
-              const Text(
-                'Signals outside this list are filtered before reaching '
-                'Binance — by design (blast-radius cap).',
-                style: TextStyle(
+              Text(
+                runtime.effectiveAllowedSymbols.length ==
+                        runtime.allowedSymbols.length
+                    ? 'Signals outside this list are filtered before '
+                        'reaching Binance — by design (blast-radius cap).'
+                    : 'You\'ve narrowed from the engine allowlist of '
+                        '${runtime.allowedSymbols.length}.  Edit in '
+                        'Settings → Symbol preference.',
+                style: const TextStyle(
                   color: LuminColors.textMuted,
                   fontSize: 10,
                   height: 1.4,

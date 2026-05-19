@@ -17,6 +17,7 @@ import 'pages/invalidation_settings_page.dart';
 import 'pages/pretp_settings_page.dart';
 import 'pages/profile_settings_page.dart';
 import 'pages/subscription_page.dart';
+import 'pages/symbol_preference_page.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
@@ -50,6 +51,13 @@ class SettingsPage extends StatelessWidget {
                 subtitle: 'Loose / Standard / Tight — capital preservation',
                 onTap: () =>
                     _push(context, const InvalidationSettingsPage()),
+              ),
+              _Row(
+                icon: Icons.filter_list_alt,
+                label: 'Symbol preference',
+                subtitle: 'Which pairs auto-trade for you',
+                onTap: () =>
+                    _push(context, const SymbolPreferencePage()),
               ),
               // ``Binance`` (OLD client-side connect) menu entry REMOVED
               // 2026-05-19.  The OLD path stored keys locally and ran
