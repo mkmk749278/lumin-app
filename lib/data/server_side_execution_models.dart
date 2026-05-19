@@ -114,6 +114,104 @@ class BinanceConnectStatus {
 }
 
 
+/// Mirror of the engine's ``GET /api/auto-trade/runtime-status`` response.
+///
+/// Drives the Live-tab "Auto-trade armed" card: each ``boolean`` gate
+/// gets a green/red check, the symbol allowlist gets surfaced as a
+/// footnote so users understand why some signals don't trigger
+/// orders, and ``armed`` collapses the four configurable gates so the
+/// card can flip its overall colour.
+class AutoTradeRuntimeStatus {
+  const AutoTradeRuntimeStatus({
+    required this.autoTradeGloballyEnabled,
+    required this.autoTradeUserDisabled,
+    required this.binanceKeyConnected,
+    required this.userMode,
+    required this.allowedSymbols,
+    required this.armed,
+  });
+
+  final bool autoTradeGloballyEnabled;
+  final bool autoTradeUserDisabled;
+  final bool binanceKeyConnected;
+  final String? userMode; // 'live' | 'paper' | 'off' | null
+  final List<String> allowedSymbols;
+  final bool armed;
+
+  factory AutoTradeRuntimeStatus.fromJson(Map<String, dynamic> j) {
+    final symsRaw = j['allowed_symbols'];
+    final syms = symsRaw is List
+        ? symsRaw.map((s) => s.toString()).toList(growable: false)
+        : const <String>[];
+    final mode = j['user_mode'];
+    return AutoTradeRuntimeStatus(
+      autoTradeGloballyEnabled:
+          j['auto_trade_globally_enabled'] as bool? ?? false,
+      autoTradeUserDisabled: j['auto_trade_user_disabled'] as bool? ?? false,
+      binanceKeyConnected: j['binance_key_connected'] as bool? ?? false,
+      userMode: mode is String && mode.isNotEmpty ? mode : null,
+      allowedSymbols: syms,
+      armed: j['armed'] as bool? ?? false,
+    );
+  }
+}
+
+
+/// Mirror of one open-position document from
+/// ``GET /api/auto-trade/positions`` (engine reads Firestore under
+/// ``users/{firebase_uid}/positions/``).  Only the fields the Live-
+/// tab card actually renders — full FSM state lives engine-side.
+class ServerSidePosition {
+  const ServerSidePosition({
+    required this.signalId,
+    required this.symbol,
+    required this.side,
+    required this.state,
+    required this.entryPriceTarget,
+    required this.entryPriceFilled,
+    required this.slPrice,
+    required this.tp1Price,
+    required this.totalQty,
+    required this.filledQty,
+    required this.realizedPnlTotal,
+    required this.pretpFired,
+    this.createdAt,
+  });
+
+  final String signalId;
+  final String symbol;
+  final String side; // 'LONG' | 'SHORT'
+  final String state; // PENDING | OPEN | PRETP_FIRED | TP1_HIT | etc.
+  final double entryPriceTarget;
+  final double entryPriceFilled;
+  final double slPrice;
+  final double tp1Price;
+  final double totalQty;
+  final double filledQty;
+  final double realizedPnlTotal;
+  final bool pretpFired;
+  final DateTime? createdAt;
+
+  factory ServerSidePosition.fromJson(Map<String, dynamic> j) =>
+      ServerSidePosition(
+        signalId: j['signal_id'] as String? ?? '',
+        symbol: j['symbol'] as String? ?? '',
+        side: j['side'] as String? ?? '',
+        state: j['state'] as String? ?? '',
+        entryPriceTarget: (j['entry_price_target'] as num?)?.toDouble() ?? 0.0,
+        entryPriceFilled: (j['entry_price_filled'] as num?)?.toDouble() ?? 0.0,
+        slPrice: (j['sl_price'] as num?)?.toDouble() ?? 0.0,
+        tp1Price: (j['tp1_price'] as num?)?.toDouble() ?? 0.0,
+        totalQty: (j['total_qty'] as num?)?.toDouble() ?? 0.0,
+        filledQty: (j['filled_qty'] as num?)?.toDouble() ?? 0.0,
+        realizedPnlTotal:
+            (j['realized_pnl_total'] as num?)?.toDouble() ?? 0.0,
+        pretpFired: j['pretp_fired'] as bool? ?? false,
+        createdAt: DateTime.tryParse(j['created_at'] as String? ?? ''),
+      );
+}
+
+
 class BinanceConnectError implements Exception {
   BinanceConnectError({
     required this.code,

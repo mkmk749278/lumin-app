@@ -101,6 +101,13 @@ class _TradePageState extends State<TradePage> {
   // ``null`` while loading; populated once the engine returns.
   AutoTradeUserStatus? _autoTradeStatus;
 
+  // Runtime composite status + server-side open positions (PR-C
+  // 2026-05-19).  Drive the Live-tab "Auto-trade armed" card and
+  // "your open positions" card respectively.  ``null`` until the
+  // first fetch lands.
+  AutoTradeRuntimeStatus? _runtimeStatus;
+  List<ServerSidePosition>? _serverPositions;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -109,6 +116,8 @@ class _TradePageState extends State<TradePage> {
       _lastRepo = repo;
       _resubscribe();
       _refreshAutoTradeStatus();
+      _refreshRuntimeStatus();
+      _refreshServerPositions();
     }
   }
 
@@ -125,6 +134,34 @@ class _TradePageState extends State<TradePage> {
       // network/5xx failure.
       if (!mounted) return;
       setState(() => _autoTradeStatus = null);
+    }
+  }
+
+  Future<void> _refreshRuntimeStatus() async {
+    try {
+      final repo = AppConfigScope.of(context).repo;
+      final status = await repo.getAutoTradeRuntimeStatus();
+      if (!mounted) return;
+      setState(() => _runtimeStatus = status);
+    } catch (_) {
+      if (!mounted) return;
+      // Leave whatever we last had — a transient 5xx shouldn't blank
+      // the gate card.  Initial-load failure leaves ``null`` so the
+      // Live body falls through to the legacy "disabled banner only"
+      // path.
+    }
+  }
+
+  Future<void> _refreshServerPositions() async {
+    try {
+      final repo = AppConfigScope.of(context).repo;
+      final positions = await repo.getAutoTradePositions();
+      if (!mounted) return;
+      setState(() => _serverPositions = positions);
+    } catch (_) {
+      if (!mounted) return;
+      // Same posture as runtime status: keep prior value on transient
+      // failure; ``null`` on initial-load failure hides the card.
     }
   }
 
@@ -198,6 +235,8 @@ class _TradePageState extends State<TradePage> {
     // freshly-tripped per-user breaker shows the banner on the
     // next user-visible refresh, not next Trade-tab navigation.
     unawaited(_refreshAutoTradeStatus());
+    unawaited(_refreshRuntimeStatus());
+    unawaited(_refreshServerPositions());
     // Pull-to-refresh: invalidate the engine SWR entry so the next
     // emit refetches; ``_resubscribe`` rebuilds the bundle controller
     // and starts a fresh Binance slice future.
@@ -430,6 +469,8 @@ class _TradePageState extends State<TradePage> {
   /// path is in play.
   Widget _buildLiveBody(BuildContext context, _TradeBundle data) {
     final scope = AppConfigScope.of(context);
+    final runtime = _runtimeStatus;
+    final serverPositions = _serverPositions;
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(
         parent: BouncingScrollPhysics(),
@@ -442,10 +483,26 @@ class _TradePageState extends State<TradePage> {
         if (_autoTradeStatus != null && !_autoTradeStatus!.isFullyEnabled)
           _AutoTradeDisabledBanner(status: _autoTradeStatus!),
         const SizedBox(height: LuminSpacing.md),
+        // Auto-trade armed card (PR-C 2026-05-19) — per-gate green/red
+        // checks + the symbol allowlist as a footnote.  Hidden until
+        // the first runtime-status fetch lands so the card doesn't
+        // flicker red→green during the initial RTT.
+        if (runtime != null) ...[
+          _AutoTradeArmedCard(runtime: runtime),
+          const SizedBox(height: LuminSpacing.md),
+        ],
+        // Your server-side open positions (engine reads Firestore).
+        // Empty list → empty-state card.  ``null`` (load failed) →
+        // hidden, runtime-status card carries the diagnostic.
+        if (serverPositions != null) ...[
+          _ServerPositionsCard(positions: serverPositions),
+          const SizedBox(height: LuminSpacing.md),
+        ],
         // Engine signal stream — what the engine is detecting right
-        // now.  NOT user-specific.  Showed pre-redesign labelled as
-        // "your live positions"; relabelled in this PR as engine
-        // signal activity to match what it actually is.
+        // now.  NOT user-specific.  Useful informational view: a
+        // signal in this feed only triggers a user order when the
+        // symbol is on the allowlist (shown in the armed card above)
+        // AND every other gate is green.
         _ActivityCard(events: data.activity),
         const SizedBox(height: LuminSpacing.xl),
       ],
@@ -1720,5 +1777,344 @@ class _AutoTradeDisabledBanner extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+
+/// Live-tab gate-state card: shows the four configurable auto-trade
+/// gates the FSM checks before placing any order, plus the symbol
+/// allowlist as a footnote.  Card colour reflects ``armed`` —
+/// green when all four gates pass + user_mode == 'live', warn-yellow
+/// otherwise.
+class _AutoTradeArmedCard extends StatelessWidget {
+  const _AutoTradeArmedCard({required this.runtime});
+
+  final AutoTradeRuntimeStatus runtime;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent =
+        runtime.armed ? LuminColors.success : LuminColors.warn;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
+      child: LuminCard(
+        padding: const EdgeInsets.all(LuminSpacing.md),
+        border: Border.all(color: accent.withOpacity(0.40)),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  runtime.armed
+                      ? Icons.shield_outlined
+                      : Icons.shield_moon_outlined,
+                  size: 18,
+                  color: accent,
+                ),
+                const SizedBox(width: LuminSpacing.sm),
+                Text(
+                  runtime.armed
+                      ? 'Auto-trade ARMED'
+                      : 'Auto-trade not armed',
+                  style: TextStyle(
+                    color: accent,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.4,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: LuminSpacing.sm),
+            _gateRow(
+              label: 'Engine-wide enabled',
+              ok: runtime.autoTradeGloballyEnabled,
+              hint: runtime.autoTradeGloballyEnabled
+                  ? null
+                  : 'Operator hasn\'t flipped the global flag yet.',
+            ),
+            _gateRow(
+              label: 'Your account not paused',
+              ok: !runtime.autoTradeUserDisabled,
+              hint: runtime.autoTradeUserDisabled
+                  ? 'Per-user circuit breaker tripped.'
+                  : null,
+            ),
+            _gateRow(
+              label: 'Binance key connected',
+              ok: runtime.binanceKeyConnected,
+              hint: runtime.binanceKeyConnected
+                  ? null
+                  : 'Settings → Server-side auto-trade.',
+            ),
+            _gateRow(
+              label: 'Mode = live',
+              ok: runtime.userMode == 'live',
+              hint: runtime.userMode == 'live'
+                  ? null
+                  : runtime.userMode == null
+                      ? 'Settings → Auto-trade → flip to Live.'
+                      : 'Currently ${runtime.userMode!.toUpperCase()} — '
+                          'switch to Live to place real orders.',
+            ),
+            if (runtime.allowedSymbols.isNotEmpty) ...[
+              const SizedBox(height: LuminSpacing.sm),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: LuminSpacing.sm,
+                  vertical: LuminSpacing.xs,
+                ),
+                decoration: BoxDecoration(
+                  color: LuminColors.bgDeep,
+                  borderRadius: BorderRadius.circular(LuminRadii.sm),
+                ),
+                child: Text(
+                  'Symbol allowlist: ${runtime.allowedSymbols.join(', ')}',
+                  style: const TextStyle(
+                    color: LuminColors.textSecondary,
+                    fontSize: 11,
+                    height: 1.4,
+                  ),
+                ),
+              ),
+              const SizedBox(height: LuminSpacing.xs),
+              const Text(
+                'Signals outside this list are filtered before reaching '
+                'Binance — by design (blast-radius cap).',
+                style: TextStyle(
+                  color: LuminColors.textMuted,
+                  fontSize: 10,
+                  height: 1.4,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _gateRow({
+    required String label,
+    required bool ok,
+    String? hint,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            ok ? Icons.check_circle_outline : Icons.cancel_outlined,
+            size: 14,
+            color: ok ? LuminColors.success : LuminColors.warn,
+          ),
+          const SizedBox(width: LuminSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: LuminColors.textPrimary,
+                    fontSize: 12,
+                  ),
+                ),
+                if (hint != null)
+                  Text(
+                    hint,
+                    style: const TextStyle(
+                      color: LuminColors.textMuted,
+                      fontSize: 10,
+                      height: 1.3,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+/// Live-tab open-positions card backed by ``/api/auto-trade/positions``.
+/// Empty list → empty-state copy explaining that auto-trade will
+/// surface positions here when a whitelisted signal fires.
+class _ServerPositionsCard extends StatelessWidget {
+  const _ServerPositionsCard({required this.positions});
+
+  final List<ServerSidePosition> positions;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
+      child: LuminCard(
+        padding: const EdgeInsets.all(LuminSpacing.md),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(
+                  Icons.account_balance_wallet_outlined,
+                  size: 16,
+                  color: LuminColors.textSecondary,
+                ),
+                const SizedBox(width: LuminSpacing.sm),
+                const Text(
+                  'YOUR OPEN POSITIONS',
+                  style: TextStyle(
+                    color: LuminColors.textMuted,
+                    fontSize: 10,
+                    letterSpacing: 1.2,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  '${positions.length}',
+                  style: const TextStyle(
+                    color: LuminColors.textSecondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: LuminSpacing.sm),
+            if (positions.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: LuminSpacing.sm),
+                child: Text(
+                  'No open positions yet.  When a whitelisted signal '
+                  'fires and every gate above is green, Lumin places the '
+                  'order on Binance and it shows up here.',
+                  style: TextStyle(
+                    color: LuminColors.textSecondary,
+                    fontSize: 11,
+                    height: 1.45,
+                  ),
+                ),
+              )
+            else
+              for (final p in positions) _ServerPositionRow(position: p),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
+class _ServerPositionRow extends StatelessWidget {
+  const _ServerPositionRow({required this.position});
+
+  final ServerSidePosition position;
+
+  @override
+  Widget build(BuildContext context) {
+    final isLong = position.side == 'LONG';
+    final dirColor = isLong ? LuminColors.success : LuminColors.loss;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 6,
+              vertical: 2,
+            ),
+            decoration: BoxDecoration(
+              color: dirColor.withOpacity(0.16),
+              borderRadius: BorderRadius.circular(LuminRadii.sm),
+            ),
+            child: Text(
+              position.side,
+              style: TextStyle(
+                color: dirColor,
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ),
+          const SizedBox(width: LuminSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      position.symbol,
+                      style: const TextStyle(
+                        color: LuminColors.textPrimary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(width: LuminSpacing.sm),
+                    Text(
+                      position.state,
+                      style: const TextStyle(
+                        color: LuminColors.textMuted,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (position.pretpFired) ...[
+                      const SizedBox(width: 4),
+                      const Text(
+                        '· Pre-TP banked',
+                        style: TextStyle(
+                          color: LuminColors.accent,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 1),
+                Text(
+                  'Entry ${_fmtPrice(position.entryPriceFilled > 0 ? position.entryPriceFilled : position.entryPriceTarget)}'
+                  ' • SL ${_fmtPrice(position.slPrice)}'
+                  ' • TP1 ${_fmtPrice(position.tp1Price)}',
+                  style: const TextStyle(
+                    color: LuminColors.textSecondary,
+                    fontSize: 11,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (position.realizedPnlTotal.abs() > 0.01)
+            Text(
+              '${position.realizedPnlTotal >= 0 ? '+' : ''}'
+              '\$${position.realizedPnlTotal.toStringAsFixed(2)}',
+              style: TextStyle(
+                color: position.realizedPnlTotal >= 0
+                    ? LuminColors.success
+                    : LuminColors.loss,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  String _fmtPrice(double v) {
+    if (v >= 1000) return v.toStringAsFixed(2);
+    if (v >= 1) return v.toStringAsFixed(4);
+    return v.toStringAsFixed(6);
   }
 }
