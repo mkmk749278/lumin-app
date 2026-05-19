@@ -2002,7 +2002,7 @@ class _ServerPositionsCard extends StatelessWidget {
                 ),
               )
             else
-              for (final p in positions) _PositionRow(position: p),
+              for (final p in positions) _ServerPositionRow(position: p),
           ],
         ),
       ),
@@ -2011,8 +2011,8 @@ class _ServerPositionsCard extends StatelessWidget {
 }
 
 
-class _PositionRow extends StatelessWidget {
-  const _PositionRow({required this.position});
+class _ServerPositionRow extends StatelessWidget {
+  const _ServerPositionRow({required this.position});
 
   final ServerSidePosition position;
 
