@@ -11,7 +11,6 @@ import '../auth/pages/phone_signin_page.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
 import 'pages/about_page.dart';
-import 'pages/api_keys_settings_page.dart';
 import 'pages/server_side_execution_page.dart';
 import 'pages/auto_trade_settings_page.dart';
 import 'pages/invalidation_settings_page.dart';
@@ -52,12 +51,12 @@ class SettingsPage extends StatelessWidget {
                 onTap: () =>
                     _push(context, const InvalidationSettingsPage()),
               ),
-              _Row(
-                icon: Icons.account_balance_outlined,
-                label: 'Binance',
-                subtitle: 'Connect your Futures API keys',
-                onTap: () => _push(context, const ApiKeysSettingsPage()),
-              ),
+              // ``Binance`` (OLD client-side connect) menu entry REMOVED
+              // 2026-05-19.  The OLD path stored keys locally and ran
+              // ``AutoTradeWatcher`` in-app; server-side execution
+              // (Settings → Server-side auto-trade) replaces it entirely.
+              // ``api_keys_settings_page.dart`` is kept on disk for one
+              // release of soak time; a follow-up deletes it.
               _Row(
                 icon: Icons.cloud_done_outlined,
                 label: 'Server-side auto-trade',

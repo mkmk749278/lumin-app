@@ -122,19 +122,29 @@ class AutoTradeWatcher {
   final _statusController = StreamController<AutoTradeStatus>.broadcast();
   Stream<AutoTradeStatus> get statusStream => _statusController.stream;
 
-  /// Start the loop if cached mode is live/paper, OR if mode is off
-  /// but the user has ``protect_manual_entries = true`` AND live
-  /// Binance keys connected (passive-protect mode).  Idempotent —
-  /// safe to call from NavShell.initState every time.
+  /// **DEPRECATED 2026-05-19** — server-side execution (engine PRs
+  /// #430-#451) is now the only auto-trade path per OWNER_BRIEF B18.
+  /// This watcher polled engine signals every 15s and placed trades
+  /// via the LOCAL ``OrderExecutor`` using on-device-stored Binance
+  /// keys.  That path is superseded:
+  ///   * Keys now live encrypted in Firestore (PR-1).
+  ///   * Orders sign via the engine's signing service (PR-4).
+  ///   * Per-user Position FSM tracks fills (PR-6).
+  ///   * Pre-TP / BE shift fire server-side (PR-7).
+  ///
+  /// Hard-disabled: ``ensureRunning`` returns immediately without
+  /// starting the timer.  Existing on-device Binance keys remain
+  /// encrypted in flutter_secure_storage but are unused (they'd
+  /// have to be migrated to the new server-side flow for the user
+  /// to auto-trade again).
+  ///
+  /// File kept on disk for one release of soak time + because the
+  /// ``Take Signal`` manual-action sheet still uses the underlying
+  /// ``OrderExecutor`` directly.  A follow-up PR deletes the watcher
+  /// class entirely once the manual-action path migrates too.
   Future<void> ensureRunning() async {
-    if (_timer != null) return;
-    final settings = await _safeFetchSettings();
-    final mode = settings?.mode;
-    final passive = await _shouldRunPassive(mode);
-    _setStatus(_status.copyWith(mode: mode, passiveProtect: passive));
-    if (mode == 'live' || mode == 'paper' || passive) {
-      _start();
-    }
+    // No-op.  Server-side execution is the only auto-trade path.
+    return;
   }
 
   /// Called by the Auto-trade settings page or Pre-TP settings page
