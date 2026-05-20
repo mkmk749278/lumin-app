@@ -426,9 +426,9 @@ class SubscriptionPage extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
       child: Text(
-        'Subscriptions are managed outside Google Play in compliance with the '
-        'reader-app exception.  Crypto trading carries substantial risk; '
-        'past signals do not guarantee future performance.',
+        'Crypto trading carries substantial risk of loss. Past signals do '
+        'not guarantee future performance. Subscription billing is handled '
+        'outside this app.',
         style: TextStyle(
           color: LuminColors.textMuted.withOpacity(0.85),
           fontSize: 10,
