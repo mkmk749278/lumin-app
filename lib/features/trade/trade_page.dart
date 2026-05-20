@@ -256,6 +256,12 @@ class _TradePageState extends State<TradePage> {
     unawaited(_refreshAutoTradeStatus());
     unawaited(_refreshRuntimeStatus());
     unawaited(_refreshServerPositions());
+    // Recent dispatch events — without this, the Trade-tab Recent
+    // Activity card stays stuck on the first-load snapshot until
+    // the user navigates away and back to the Trade tab.  Owner
+    // reported 2026-05-20: "still old binance activity showing
+    // not updating".
+    unawaited(_refreshRecentDispatchEvents());
     // Pull-to-refresh: invalidate the engine SWR entry so the next
     // emit refetches; ``_resubscribe`` rebuilds the bundle controller
     // and starts a fresh Binance slice future.
