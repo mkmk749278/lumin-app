@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../data/app_config.dart';
 import '../../data/legal_urls.dart';
+import '../../data/repository.dart';
 import '../auth/pages/phone_signin_page.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
@@ -105,6 +106,20 @@ class SettingsPage extends StatelessWidget {
                 subtitle: 'Wipes the cached token; phone signin again next launch',
                 destructive: true,
                 onTap: () => _signOut(context),
+              ),
+              // Delete account (Play Store launch A4-partial,
+              // 2026-05-20) — required by Google's User Data policy
+              // (answer/13327111).  Calls DELETE /api/account which
+              // revokes the Binance key blob, deletes the SQLite
+              // user row (cascades override tables), and invalidates
+              // the dispatch cache.  See ``_deleteAccount`` below
+              // for the confirmation + post-success flow.
+              _Row(
+                icon: Icons.delete_forever_outlined,
+                label: 'Delete account',
+                subtitle: 'Permanently remove your account + revoke API keys',
+                destructive: true,
+                onTap: () => _deleteAccount(context),
               ),
             ],
           ),
@@ -250,6 +265,186 @@ class SettingsPage extends StatelessWidget {
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const PhoneSignInPage()),
       (_) => false,
+    );
+  }
+
+  Future<void> _deleteAccount(BuildContext context) async {
+    // Two-step confirmation: this is irreversible.  The user must
+    // type "DELETE" to confirm — a more intentional gate than a
+    // tap-Yes dialog.  Matches the Cornix / Bitsgap pattern.
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => _DeleteAccountDialog(),
+    );
+    if (confirm != true) return;
+    if (!context.mounted) return;
+
+    // Show a blocking spinner while the round-trip runs.  Server
+    // can take 1-3 seconds (Firestore blob delete + SQLite + cache).
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const _DeletingSpinner(),
+    );
+
+    final scope = AppConfigScope.of(context);
+    try {
+      await scope.repo.deleteAccount();
+      if (!context.mounted) return;
+      Navigator.of(context).pop();  // dismiss the spinner
+      // Now wipe local auth state — secure-storage tokens, SharedPrefs,
+      // cached user info — and route back to the welcome screen.
+      // ``resetConnection`` is the same path the sign-out flow uses.
+      await scope.resetConnection();
+      if (!context.mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const PhoneSignInPage()),
+        (_) => false,
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Account deleted. You can sign up again any time.'),
+          duration: Duration(seconds: 4),
+        ),
+      );
+    } on DeleteAccountException catch (e) {
+      if (!context.mounted) return;
+      Navigator.of(context).pop();  // dismiss the spinner
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.message),
+          duration: const Duration(seconds: 6),
+        ),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      Navigator.of(context).pop();  // dismiss the spinner
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not delete account: $e'),
+          duration: const Duration(seconds: 6),
+        ),
+      );
+    }
+  }
+}
+
+/// Two-step confirmation dialog — user must type "DELETE" to enable
+/// the Delete button.  This is a more intentional gate than the
+/// usual two-button OK-Cancel because the action is irreversible
+/// (revokes the Binance key + drops the SQLite row + all per-user
+/// preferences cascade with it).
+class _DeleteAccountDialog extends StatefulWidget {
+  @override
+  State<_DeleteAccountDialog> createState() => _DeleteAccountDialogState();
+}
+
+class _DeleteAccountDialogState extends State<_DeleteAccountDialog> {
+  final _controller = TextEditingController();
+  bool _canDelete = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(() {
+      final ok = _controller.text.trim().toUpperCase() == 'DELETE';
+      if (ok != _canDelete) setState(() => _canDelete = ok);
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: LuminColors.bgCard,
+      title: const Text(
+        'Delete account?',
+        style: TextStyle(color: LuminColors.textPrimary),
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'This will permanently:\n'
+            '\n'
+            '  • Revoke your Binance API key on our server\n'
+            '  • Delete your account and all per-user settings\n'
+            '  • Sign you out of this device\n'
+            '\n'
+            'Your funds on Binance are NOT affected — only the trade-only '
+            'API key authorisation we held is revoked. You can sign up '
+            'again later with the same phone number.\n'
+            '\n'
+            'Type DELETE below to confirm.',
+            style: TextStyle(color: LuminColors.textSecondary, height: 1.4),
+          ),
+          const SizedBox(height: LuminSpacing.md),
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            decoration: const InputDecoration(
+              hintText: 'Type DELETE',
+              border: OutlineInputBorder(),
+            ),
+            style: const TextStyle(color: LuminColors.textPrimary),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text(
+            'Cancel',
+            style: TextStyle(color: LuminColors.textSecondary),
+          ),
+        ),
+        TextButton(
+          onPressed:
+              _canDelete ? () => Navigator.pop(context, true) : null,
+          child: Text(
+            'Delete account',
+            style: TextStyle(
+              color: _canDelete ? LuminColors.loss : LuminColors.textMuted,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DeletingSpinner extends StatelessWidget {
+  const _DeletingSpinner();
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: LuminColors.bgCard,
+      content: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: const [
+          SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: LuminColors.accent,
+            ),
+          ),
+          SizedBox(width: LuminSpacing.md),
+          Text(
+            'Deleting account...',
+            style: TextStyle(color: LuminColors.textPrimary),
+          ),
+        ],
+      ),
     );
   }
 }
