@@ -710,6 +710,32 @@ class RegionInfo {
 }
 
 
+/// Thrown by [LuminRepository.deleteAccount] on known backend
+/// failure tags (Play Store launch E1 / A4-partial, 2026-05-20).
+///
+/// The backend returns 503 with a specific ``detail`` string for
+/// each step that can fail in the deletion orchestration; we surface
+/// those tags to the UI so the user gets an actionable message
+/// rather than a generic "try again".
+class DeleteAccountException implements Exception {
+  const DeleteAccountException(this.tag, this.message);
+
+  /// Backend-supplied failure tag (e.g.
+  /// ``key_blob_delete_failed``, ``user_row_delete_failed``,
+  /// ``server_misconfiguration_user_store``).  Stable across the
+  /// engine + lumin-app pair via the contract defined in
+  /// ``src/api/account_routes.py``.
+  final String tag;
+
+  /// Human-readable description of the failure for use in a
+  /// SnackBar or dialog body.
+  final String message;
+
+  @override
+  String toString() => 'DeleteAccountException($tag): $message';
+}
+
+
 class PaperCloseAllResponse {
   const PaperCloseAllResponse({
     required this.closedCount,
@@ -1035,6 +1061,18 @@ abstract class LuminRepository {
   /// ``country_code = "unknown"`` + ``is_blocked = false`` when the
   /// server can't derive a region from CDN headers.
   Future<RegionInfo> fetchRegion();
+
+  /// Delete the authenticated user's account
+  /// (``DELETE /api/account``).  Required by Google Play's User
+  /// Data policy — apps that let users create an account must let
+  /// users delete it from within the app.  The backend orchestrates:
+  /// Firestore Binance-key blob revocation → SQLite user row
+  /// delete (cascades per-user override tables) → user-roster
+  /// cache invalidation.  Throws [DeleteAccountException] on
+  /// known failure modes (key_blob_delete_failed,
+  /// user_row_delete_failed, server_misconfiguration_user_store).
+  /// Returns normally on 204.
+  Future<void> deleteAccount();
 
   /// Flatten the paper book — close every open paper position at its
   /// entry price (engine PR #403).  Pairs with ``resetPaperBalance`` to
@@ -2040,6 +2078,13 @@ class MockRepository implements LuminRepository {
       blockedRegions: ['BD', 'CN', 'US'],
     );
   }
+
+  @override
+  Future<void> deleteAccount() async {
+    // Mock: no-op.  The HTTP impl drives the real deletion; the
+    // mock just lets widget tests + offline dev hit the same code
+    // path without a network round-trip.
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2607,6 +2652,38 @@ class HttpRepository implements LuminRepository {
         isBlocked: false,
         blockedRegions: [],
       );
+    }
+  }
+
+  @override
+  Future<void> deleteAccount() async {
+    // Backend orchestrates blob-revoke → user-row-delete → cache-
+    // invalidate.  On 204 we're done.  On 503 the ``detail`` body
+    // carries one of the failure tags from
+    // src/api/account_routes.py — translate to a typed exception
+    // so the UI can show step-specific copy.
+    try {
+      await client.delete('/api/account');
+    } on ApiError catch (e) {
+      // The api_client's _decodeError stringifies the JSON body's
+      // ``detail`` field; we match against the known tags.
+      final tag = e.message.trim();
+      final friendly = switch (tag) {
+        'key_blob_delete_failed' =>
+            'Could not revoke your Binance API key on our server. '
+                'Please retry; if it keeps failing, contact support.',
+        'user_row_delete_failed' =>
+            'Your Binance key was revoked but the account row could '
+                'not be removed. Please retry; the next attempt will '
+                'pick up where this one stopped.',
+        'server_misconfiguration_user_store' =>
+            'Server misconfiguration. Please contact support — '
+                'this is not something you can resolve from the app.',
+        'user_lookup_failed' =>
+            'Could not look up your account. Please retry shortly.',
+        _ => 'Account deletion failed: ${e.message}',
+      };
+      throw DeleteAccountException(tag.isEmpty ? 'unknown' : tag, friendly);
     }
   }
 
