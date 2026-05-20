@@ -13,7 +13,9 @@ import 'package:flutter/material.dart';
 import 'app/nav_shell.dart';
 import 'data/app_config.dart';
 import 'data/auth_service.dart';
+import 'data/consent_storage.dart';
 import 'features/auth/pages/phone_signin_page.dart';
+import 'features/onboarding/pages/welcome_consent_page.dart';
 import 'firebase_options.dart';
 import 'theme.dart';
 
@@ -43,8 +45,63 @@ class LuminApp extends StatelessWidget {
         title: 'Lumin',
         debugShowCheckedModeBanner: false,
         theme: buildLuminTheme(),
-        home: const _AuthGate(),
+        home: const _ConsentGate(),
       ),
+    );
+  }
+}
+
+/// First-launch consent gate (Play Store first-run-disclosure
+/// requirement — see ``docs/PLAYSTORE_PLAN.md`` in the engine repo).
+///
+/// Resolves ``ConsentStorage.isUpToDate()`` once on app start; if the
+/// user has already accepted the current consent version we route
+/// straight to [_AuthGate] with no flicker.  Otherwise we render the
+/// [WelcomeConsentPage] and only after the user taps Continue do we
+/// promote them to [_AuthGate].
+///
+/// Lives in front of [_AuthGate] (not behind it) because the
+/// disclosure is required BEFORE any data collection — including the
+/// Firebase Auth session — per Google's prominent-disclosure guidance
+/// (https://support.google.com/googleplay/android-developer/answer/11150561).
+class _ConsentGate extends StatefulWidget {
+  const _ConsentGate();
+
+  @override
+  State<_ConsentGate> createState() => _ConsentGateState();
+}
+
+class _ConsentGateState extends State<_ConsentGate> {
+  Future<bool>? _check;
+
+  @override
+  void initState() {
+    super.initState();
+    _check = ConsentStorage.isUpToDate();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<bool>(
+      future: _check,
+      builder: (context, snap) {
+        if (snap.connectionState != ConnectionState.done) {
+          // Same blank-splash convention as [_AuthGate] to avoid a
+          // visible flicker between consent check and auth check.
+          return const Scaffold(
+            backgroundColor: Color(0xFF0A0E1A),
+            body: SizedBox.shrink(),
+          );
+        }
+        if (snap.data == true) {
+          return const _AuthGate();
+        }
+        return WelcomeConsentPage(
+          onAccepted: () => setState(() {
+            _check = Future.value(true);
+          }),
+        );
+      },
     );
   }
 }
