@@ -656,6 +656,60 @@ class PaperResetResponse {
 /// exist.  The two-step user flow is: close-all → reset.  Each
 /// returned position is closed at its entry price (zero-move fill,
 /// fees only) so the reset that follows can land cleanly.
+/// Client region info — backend ``GET /api/region`` (Play Store
+/// launch, 2026-05-20).
+///
+/// Soft-fail semantics: when the server can't derive a region from
+/// CDN headers, ``countryCode`` is the literal string ``"unknown"``
+/// (not null) and ``isBlocked`` is false.  Doctrine: we'd rather
+/// show the auto-trade UI to a user we can't identify than block a
+/// user in a permitted region.  Server-side dispatch is the real
+/// security boundary.
+class RegionInfo {
+  const RegionInfo({
+    required this.countryCode,
+    required this.source,
+    required this.isBlocked,
+    required this.blockedRegions,
+  });
+
+  /// ISO 3166-1 alpha-2 ("IN", "GB", "US", ...) or the literal
+  /// string ``"unknown"`` when no region could be derived.
+  final String countryCode;
+
+  /// Where the region came from: ``"cf-header"`` (Cloudflare) /
+  /// ``"x-header"`` (other CDN) / ``"unknown"`` (no header).  Used
+  /// by debug surfaces, not by the user-facing UI.
+  final String source;
+
+  /// True iff the country is in the server's BLOCKED_REGIONS set.
+  /// The client mirrors this rather than computing locally so the
+  /// env-overridable server list stays the single source of truth.
+  final bool isBlocked;
+
+  /// The current server-side block list, sorted.  The client uses
+  /// this to render "not available in US / CN / BD" copy without
+  /// hard-coding the list.
+  final List<String> blockedRegions;
+
+  /// True when [countryCode] is the literal ``"unknown"`` — i.e.
+  /// the server couldn't derive a region from headers.  Callers
+  /// that want to differentiate "known + not blocked" from "soft-
+  /// fail open" check this flag.
+  bool get isUnknown => countryCode == 'unknown';
+
+  factory RegionInfo.fromJson(Map<String, dynamic> j) {
+    final blocked = (j['blocked_regions'] as List?) ?? const [];
+    return RegionInfo(
+      countryCode: (j['country_code'] as String?) ?? 'unknown',
+      source: (j['source'] as String?) ?? 'unknown',
+      isBlocked: (j['is_blocked'] as bool?) ?? false,
+      blockedRegions: blocked.map((e) => e.toString()).toList(growable: false),
+    );
+  }
+}
+
+
 class PaperCloseAllResponse {
   const PaperCloseAllResponse({
     required this.closedCount,
@@ -973,6 +1027,14 @@ abstract class LuminRepository {
   /// commonly: empty Futures wallet → ``-2019`` rejection).  Server-
   /// side cap is 100; pass [limit] = 20 for the standard card view.
   Future<List<DispatchEvent>> getRecentDispatchEvents({int limit});
+
+  /// Fetch the client's region info (``GET /api/region``).  Used by
+  /// the auto-trade region gate (Play Store launch A6, 2026-05-20)
+  /// to hide auto-trade UI in restricted jurisdictions.  Public
+  /// endpoint — callable before sign-in.  Soft-fails to
+  /// ``country_code = "unknown"`` + ``is_blocked = false`` when the
+  /// server can't derive a region from CDN headers.
+  Future<RegionInfo> fetchRegion();
 
   /// Flatten the paper book — close every open paper position at its
   /// entry price (engine PR #403).  Pairs with ``resetPaperBalance`` to
@@ -1965,6 +2027,19 @@ class MockRepository implements LuminRepository {
       realisedPnlTotal: 0.0,
     );
   }
+
+  @override
+  Future<RegionInfo> fetchRegion() async {
+    // Mock: India, not blocked.  Matches the most common dev / QA
+    // case (Indian-owner test devices).  Switch this constant when
+    // exercising the blocked-region UI flow in widget tests.
+    return const RegionInfo(
+      countryCode: 'IN',
+      source: 'cf-header',
+      isBlocked: false,
+      blockedRegions: ['BD', 'CN', 'US'],
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2514,6 +2589,25 @@ class HttpRepository implements LuminRepository {
     if (d > 0) return '${d}d ${h}h';
     final m = (seconds % 3600) ~/ 60;
     return h > 0 ? '${h}h ${m}m' : '${m}m';
+  }
+
+  @override
+  Future<RegionInfo> fetchRegion() async {
+    // Public endpoint — no auth header needed.  Soft-fail open:
+    // any non-200 / network error collapses to the unblocked
+    // unknown response so a transient backend outage doesn't
+    // brick the auto-trade UI for legitimate users.
+    try {
+      final j = (await client.get('/api/region')) as Map<String, dynamic>;
+      return RegionInfo.fromJson(j);
+    } catch (_) {
+      return const RegionInfo(
+        countryCode: 'unknown',
+        source: 'unknown',
+        isBlocked: false,
+        blockedRegions: [],
+      );
+    }
   }
 
 }

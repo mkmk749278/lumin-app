@@ -30,6 +30,7 @@ import '../../../data/app_config.dart';
 import '../../../data/repository.dart';
 import '../../../data/server_side_execution_models.dart';
 import '../../../shared/tokens.dart';
+import '../../launch/region_gate.dart';
 import 'tos_acceptance_page.dart';
 
 class ServerSideExecutionPage extends StatefulWidget {
@@ -251,7 +252,13 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
         title: const Text('Server-side auto-trade'),
         backgroundColor: LuminColors.bgDeep,
       ),
-      body: ListView(
+      // Region gate (Play Store launch A6, 2026-05-20).  Replaces
+      // the entire connect surface with a "not available in your
+      // region" card when CF-IPCountry reports the user is in a
+      // blocked jurisdiction.  Soft-fail open — render child if
+      // the region fetch is in-flight, errors, or returns unknown.
+      body: RegionGate(
+        child: ListView(
         padding: const EdgeInsets.all(LuminSpacing.lg),
         children: [
           _doctrineCard(),
@@ -287,6 +294,7 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
             _successCard(_success!),
           ],
         ],
+      ),
       ),
     );
   }

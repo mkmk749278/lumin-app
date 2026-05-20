@@ -18,6 +18,7 @@ import '../../../data/repository.dart';
 import '../../../shared/tokens.dart';
 import '../../../shared/widgets/lumin_card.dart';
 import '../../../shared/widgets/preview_badge.dart';
+import '../../launch/region_gate.dart';
 
 class AutoTradeSettingsPage extends StatefulWidget {
   const AutoTradeSettingsPage({super.key});
@@ -161,7 +162,11 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
             ),
         ],
       ),
-      body: _bodyFor(isLive),
+      // Region gate (Play Store launch A6, 2026-05-20).  Replaces
+      // the settings form with a "not available in your region" card
+      // when CF-IPCountry reports the user is in a blocked
+      // jurisdiction.  Soft-fails open on unknown / error.
+      body: RegionGate(child: _bodyFor(isLive)),
     );
   }
 
