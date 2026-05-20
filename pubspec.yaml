@@ -26,6 +26,9 @@ dependencies:
   # never holds user Binance keys; the app fires the user's order with
   # keys held in flutter_secure_storage.
   crypto: ^3.0.3
+  # Play Store launch (A5, 2026-05-20) — Settings → Legal links open
+  # the privacy / terms / risk URLs in the device browser.
+  url_launcher: ^6.3.0
 
 dev_dependencies:
   flutter_test:
