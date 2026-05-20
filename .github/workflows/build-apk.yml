@@ -342,6 +342,32 @@ jobs:
           path: build/app/outputs/flutter-apk/lumin-*.apk
           retention-days: 30
 
+      # Play Store launch (2026-05-20) — Play Console requires an
+      # AAB (Android App Bundle), not an APK, for all new submissions
+      # since August 2021.  Same signing config + same keystore as
+      # the APK; just a different ``flutter build`` target.  We keep
+      # the APK build above for in-app-updater + sideload paths,
+      # and ship the AAB only as a downloadable artifact (Play
+      # uploads happen manually via the Play Console UI for v1).
+      - name: Build release AAB
+        run: |
+          flutter build appbundle --release \
+            --build-name=${{ github.ref_name }} \
+            --build-number=${{ github.run_number }}
+
+      - name: Rename AAB with run number
+        run: |
+          cd build/app/outputs/bundle/release
+          mv app-release.aab lumin-${{ github.run_number }}.aab
+          ls -la
+
+      - name: Upload AAB artifact (for Play Console upload)
+        uses: actions/upload-artifact@v4
+        with:
+          name: lumin-aab-${{ github.run_number }}
+          path: build/app/outputs/bundle/release/lumin-*.aab
+          retention-days: 30
+
       - name: Attach APK to existing GitHub Release (manual release event)
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
