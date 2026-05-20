@@ -32,6 +32,9 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
   double _positionSizePct = 2.0;
   double _leverageCap = 10.0;     // 1x..30x — B12 hard cap
   int _maxConcurrent = 3;
+  // Per-user live-trading notional in USD.  Engine clamps to [$5, $2000];
+  // default $500 matches the engine's _DEFAULT_NOTIONAL_USD when unset.
+  double _notionalUsd = 500.0;
 
   bool _loaded = false;
   bool _saving = false;
@@ -61,6 +64,7 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
         _positionSizePct = s.positionSizePct ?? _positionSizePct;
         _leverageCap = s.leverageCap ?? _leverageCap;
         _maxConcurrent = s.maxConcurrentPositions ?? _maxConcurrent;
+        _notionalUsd = s.notionalUsd ?? _notionalUsd;
         _usingDefaults = s.usingDefaults ?? true;
         _loaded = true;
         _loadError = null;
@@ -99,6 +103,7 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
       positionSizePct: _positionSizePct,
       leverageCap: _leverageCap,
       maxConcurrentPositions: _maxConcurrent,
+      notionalUsd: _notionalUsd,
     );
     try {
       final saved = await repo.updateUserAutoTradeSettings(partial);
@@ -510,6 +515,31 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
                 activeColor: LuminColors.accent,
                 inactiveColor: LuminColors.cardBorder,
                 onChanged: (v) => setState(() => _maxConcurrent = v.round()),
+              ),
+            ),
+            // Per-user notional override (2026-05-20).  Lets small-
+            // wallet users (e.g. $20 Futures wallet at 20× leverage =
+            // $400 max position) lower the engine's default $500
+            // notional so Binance stops returning -2019 "Margin is
+            // insufficient".  Engine clamps to [$5, $2000].
+            _slider(
+              label: 'Position notional (live mode)',
+              value: '\$${_notionalUsd.toStringAsFixed(0)}',
+              slider: Slider(
+                value: _notionalUsd,
+                min: 5,
+                max: 2000,
+                // 1-USD steps would be 1995 divisions — too fine for a
+                // mobile slider.  Round to nearest $5 for the bottom
+                // end and nearest $25 for the upper end via 80 steps.
+                divisions: 80,
+                activeColor: LuminColors.accent,
+                inactiveColor: LuminColors.cardBorder,
+                onChanged: (v) => setState(() {
+                  // Round to nearest $5 so the displayed value matches
+                  // the slider's stepping behaviour.
+                  _notionalUsd = (v / 5).round() * 5.0;
+                }),
               ),
             ),
           ],
