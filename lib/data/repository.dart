@@ -338,6 +338,7 @@ class AutoTradeSettings {
     this.maxConcurrentPositions,
     this.symbolPreference,
     this.symbolPreferenceSet = false,
+    this.notionalUsd,
     this.usingDefaults,
   });
 
@@ -361,6 +362,14 @@ class AutoTradeSettings {
   final List<String>? symbolPreference;
   final bool symbolPreferenceSet;
 
+  /// Per-user notional override (2026-05-20).  USD value the engine
+  /// uses when sizing each live Binance order for THIS user.  ``null``
+  /// → engine default ($500).  Clamped server-side to [$5, $2000].
+  /// Smaller-wallet users (e.g. $20 Futures wallet) lower this so the
+  /// engine doesn't fire $500-notional orders that Binance rejects
+  /// with -2019 "Margin is insufficient".
+  final double? notionalUsd;
+
   /// Only present on ``/api/settings/user/auto-trade`` responses.
   final bool? usingDefaults;
 
@@ -380,6 +389,7 @@ class AutoTradeSettings {
       // "we know what the server has" so subsequent PUTs that copy
       // this model don't strip the field by accident.
       symbolPreferenceSet: symsRaw is List || symsRaw == null && j.containsKey('symbol_preference'),
+      notionalUsd: (j['notional_usd'] as num?)?.toDouble(),
       usingDefaults: j['using_defaults'] as bool?,
     );
   }
@@ -395,6 +405,7 @@ class AutoTradeSettings {
     if (symbolPreferenceSet) {
       out['symbol_preference'] = symbolPreference;
     }
+    if (notionalUsd != null) out['notional_usd'] = notionalUsd;
     return out;
   }
 }
