@@ -5,8 +5,10 @@
 /// about, sign out).  Operator surfaces (engine defaults, agents,
 /// risk gates, dev tools) live in the separate ops app — not here.
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../data/app_config.dart';
+import '../../data/legal_urls.dart';
 import '../auth/pages/phone_signin_page.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
@@ -106,10 +108,56 @@ class SettingsPage extends StatelessWidget {
               ),
             ],
           ),
+          const SizedBox(height: LuminSpacing.md),
+          // Legal section (Play Store launch A5, 2026-05-20) — three
+          // direct links to the hosted lumin-legal documents.  Each
+          // opens the device browser via ``url_launcher``; on launch
+          // failure we surface a SnackBar rather than silently no-op'ing.
+          _section(
+            title: 'LEGAL',
+            rows: [
+              _Row(
+                icon: Icons.privacy_tip_outlined,
+                label: 'Privacy Policy',
+                subtitle: 'What data we collect, why, your rights',
+                onTap: () => _openExternalUrl(context, LegalUrls.privacyUrl),
+              ),
+              _Row(
+                icon: Icons.gavel_outlined,
+                label: 'Terms of Service',
+                subtitle: 'Eligibility, responsibilities, limitations',
+                onTap: () => _openExternalUrl(context, LegalUrls.termsUrl),
+              ),
+              _Row(
+                icon: Icons.report_problem_outlined,
+                label: 'Risk Disclosure',
+                subtitle: 'Crypto futures trading carries risk of loss',
+                onTap: () => _openExternalUrl(context, LegalUrls.riskUrl),
+              ),
+            ],
+          ),
           const SizedBox(height: LuminSpacing.xl),
         ],
       ),
     );
+  }
+
+  Future<void> _openExternalUrl(BuildContext context, String url) async {
+    final uri = Uri.parse(url);
+    // ``mode: externalApplication`` opens the system browser instead
+    // of a WebView inside the app — required for Privacy / ToS / Risk
+    // links per Play Store's prominent-disclosure expectations
+    // (legal pages should be reviewable outside the app's own UI
+    // chrome).
+    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!launched && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not open $url'),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
   }
 
   Widget _section({required String title, required List<_Row> rows}) {
