@@ -954,6 +954,15 @@ abstract class LuminRepository {
   /// surface (TBD).
   Future<List<ServerSidePosition>> getAutoTradePositions();
 
+  /// Fetch the user's recent dispatch events
+  /// (``GET /api/auto-trade/recent-events``).  One row per order-
+  /// placement attempt the engine made on this account — placed +
+  /// rejected — newest first.  Drives the Trade-tab "Recent activity"
+  /// card so the user can see *why* a signal didn't open (most
+  /// commonly: empty Futures wallet → ``-2019`` rejection).  Server-
+  /// side cap is 100; pass [limit] = 20 for the standard card view.
+  Future<List<DispatchEvent>> getRecentDispatchEvents({int limit});
+
   /// Flatten the paper book — close every open paper position at its
   /// entry price (engine PR #403).  Pairs with ``resetPaperBalance`` to
   /// implement the two-step user flow: close-all → reset.  The reset
@@ -1901,6 +1910,41 @@ class MockRepository implements LuminRepository {
   }
 
   @override
+  Future<List<DispatchEvent>> getRecentDispatchEvents({int limit = 20}) async {
+    // Mock: one placed + one rejected (margin-insufficient) so the
+    // Trade-tab Recent Activity card has visual content while
+    // running against the fake repository in widget tests and
+    // local dev without a connected Binance key.
+    final now = DateTime.now().toUtc();
+    return [
+      DispatchEvent(
+        eventId: 'mock-placed-1',
+        signalId: 'sig-1',
+        symbol: 'BTCUSDT',
+        direction: 'LONG',
+        outcome: 'placed',
+        timestamp: now.subtract(const Duration(minutes: 3)),
+        entryPrice: 29000.0,
+        totalQty: 0.017,
+      ),
+      DispatchEvent(
+        eventId: 'mock-rejected-1',
+        signalId: 'sig-2',
+        symbol: 'PROMUSDT',
+        direction: 'SHORT',
+        outcome: 'rejected',
+        timestamp: now.subtract(const Duration(minutes: 11)),
+        entryPrice: 0.1278,
+        totalQty: 0.0,
+        rejectClass: 'OrderRejectedByBinance',
+        rejectDetail: 'Binance returned 400 (code=-2019 msg=\'Margin is insufficient.\')',
+        rejectBinanceCode: -2019,
+        rejectBinanceMsg: 'Margin is insufficient.',
+      ),
+    ];
+  }
+
+  @override
   Future<PaperCloseAllResponse> closeAllPaperPositions() async {
     // The mock fixture never has live open positions, so this is a
     // no-op that returns zero counts.  The UI flow is exercised against
@@ -2350,6 +2394,22 @@ class HttpRepository implements LuminRepository {
     return rawList
         .whereType<Map<String, dynamic>>()
         .map(ServerSidePosition.fromJson)
+        .toList(growable: false);
+  }
+
+  @override
+  Future<List<DispatchEvent>> getRecentDispatchEvents({int limit = 20}) async {
+    // Server caps internally at 100; we hint at the desired window
+    // via the query param so the network round-trip stays small
+    // even on accounts with very chatty rejection histories.
+    final j = (await client.get(
+      '/api/auto-trade/recent-events?limit=$limit',
+    )) as Map<String, dynamic>;
+    final rawList = j['events'];
+    if (rawList is! List) return const <DispatchEvent>[];
+    return rawList
+        .whereType<Map<String, dynamic>>()
+        .map(DispatchEvent.fromJson)
         .toList(growable: false);
   }
 

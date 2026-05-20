@@ -107,6 +107,12 @@ class _TradePageState extends State<TradePage> {
   // first fetch lands.
   AutoTradeRuntimeStatus? _runtimeStatus;
   List<ServerSidePosition>? _serverPositions;
+  // Recent dispatch events (placed + rejected) from
+  // ``/api/auto-trade/recent-events`` — drives the Trade-tab Recent
+  // Activity card so the user can see *why* a signal didn't open on
+  // their Binance account (e.g. ``-2019 'Margin is insufficient.'``
+  // when the Futures wallet is empty).  ``null`` until first fetch.
+  List<DispatchEvent>? _recentDispatchEvents;
 
   @override
   void didChangeDependencies() {
@@ -118,6 +124,7 @@ class _TradePageState extends State<TradePage> {
       _refreshAutoTradeStatus();
       _refreshRuntimeStatus();
       _refreshServerPositions();
+      _refreshRecentDispatchEvents();
     }
   }
 
@@ -162,6 +169,18 @@ class _TradePageState extends State<TradePage> {
       if (!mounted) return;
       // Same posture as runtime status: keep prior value on transient
       // failure; ``null`` on initial-load failure hides the card.
+    }
+  }
+
+  Future<void> _refreshRecentDispatchEvents() async {
+    try {
+      final repo = AppConfigScope.of(context).repo;
+      final events = await repo.getRecentDispatchEvents(limit: 20);
+      if (!mounted) return;
+      setState(() => _recentDispatchEvents = events);
+    } catch (_) {
+      if (!mounted) return;
+      // Same posture — transient failure keeps the prior list.
     }
   }
 
@@ -471,6 +490,7 @@ class _TradePageState extends State<TradePage> {
     final scope = AppConfigScope.of(context);
     final runtime = _runtimeStatus;
     final serverPositions = _serverPositions;
+    final recentEvents = _recentDispatchEvents;
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(
         parent: BouncingScrollPhysics(),
@@ -496,6 +516,15 @@ class _TradePageState extends State<TradePage> {
         // hidden, runtime-status card carries the diagnostic.
         if (serverPositions != null) ...[
           _ServerPositionsCard(positions: serverPositions),
+          const SizedBox(height: LuminSpacing.md),
+        ],
+        // Recent activity for your account — placed + rejected orders
+        // the engine attempted on your Binance key, with plain-English
+        // translations for rejection codes (most commonly empty
+        // Futures wallet → "Insufficient margin").  Hidden until first
+        // fetch; ``null`` = load failed (transient).
+        if (recentEvents != null) ...[
+          _RecentDispatchEventsCard(events: recentEvents),
           const SizedBox(height: LuminSpacing.md),
         ],
         // Engine signal stream — what the engine is detecting right
@@ -2131,5 +2160,222 @@ class _ServerPositionRow extends StatelessWidget {
     if (v >= 1000) return v.toStringAsFixed(2);
     if (v >= 1) return v.toStringAsFixed(4);
     return v.toStringAsFixed(6);
+  }
+}
+
+
+/// Trade-tab "Recent activity for your account" card.  Renders the
+/// last N dispatch events (placed + rejected) from
+/// ``/api/auto-trade/recent-events`` with a severity-coloured chip
+/// per row + plain-English translation of the rejection reason from
+/// [DispatchEventTranslation].
+///
+/// Hierarchy in the Live body (top → bottom):
+///
+///   1. Auto-trade disabled banner (if user/global disabled)
+///   2. Auto-trade armed card (gate states)
+///   3. Your open positions
+///   4. **Recent activity for your account** ← this card
+///   5. Engine signal stream (global, not per-user)
+///
+/// This card sits between #3 and #5 because conceptually it's the
+/// audit log of "what did the engine try to do on MY account" —
+/// natural follow-on from "what's open on my account" and natural
+/// precursor to "what's the engine seeing globally".
+class _RecentDispatchEventsCard extends StatelessWidget {
+  const _RecentDispatchEventsCard({required this.events});
+
+  final List<DispatchEvent> events;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
+      child: LuminCard(
+        padding: const EdgeInsets.all(LuminSpacing.md),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(
+                  Icons.history_outlined,
+                  size: 16,
+                  color: LuminColors.textSecondary,
+                ),
+                const SizedBox(width: LuminSpacing.sm),
+                const Text(
+                  'RECENT ACTIVITY ON YOUR ACCOUNT',
+                  style: TextStyle(
+                    color: LuminColors.textMuted,
+                    fontSize: 10,
+                    letterSpacing: 1.2,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  '${events.length}',
+                  style: const TextStyle(
+                    color: LuminColors.textSecondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: LuminSpacing.sm),
+            if (events.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: LuminSpacing.sm),
+                child: Text(
+                  'No order activity on your account yet.  Each time the '
+                  'engine tries to place an order for you — successful or '
+                  'rejected — it will show up here with the reason.',
+                  style: TextStyle(
+                    color: LuminColors.textSecondary,
+                    fontSize: 11,
+                    height: 1.45,
+                  ),
+                ),
+              )
+            else
+              for (final e in events) _DispatchEventRow(event: e),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
+class _DispatchEventRow extends StatelessWidget {
+  const _DispatchEventRow({required this.event});
+
+  final DispatchEvent event;
+
+  @override
+  Widget build(BuildContext context) {
+    final tx = DispatchEventTranslation.forEvent(event);
+    final chipColor = _chipColor(tx.severity);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: chipColor.withOpacity(0.16),
+              borderRadius: BorderRadius.circular(LuminRadii.sm),
+            ),
+            child: Text(
+              _chipLabel(tx.severity),
+              style: TextStyle(
+                color: chipColor,
+                fontSize: 9,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ),
+          const SizedBox(width: LuminSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      event.symbol,
+                      style: const TextStyle(
+                        color: LuminColors.textPrimary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(width: LuminSpacing.sm),
+                    Text(
+                      event.direction,
+                      style: TextStyle(
+                        color: event.direction == 'LONG'
+                            ? LuminColors.success
+                            : LuminColors.loss,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      _formatRelativeTime(event.timestamp),
+                      style: const TextStyle(
+                        color: LuminColors.textMuted,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  tx.headline,
+                  style: TextStyle(
+                    color: chipColor,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (tx.action.isNotEmpty) ...[
+                  const SizedBox(height: 1),
+                  Text(
+                    tx.action,
+                    style: const TextStyle(
+                      color: LuminColors.textSecondary,
+                      fontSize: 11,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static Color _chipColor(DispatchEventSeverity sev) {
+    switch (sev) {
+      case DispatchEventSeverity.success:
+        return LuminColors.success;
+      case DispatchEventSeverity.userAction:
+        return LuminColors.warn;
+      case DispatchEventSeverity.system:
+        return LuminColors.loss;
+      case DispatchEventSeverity.transient:
+        return LuminColors.textSecondary;
+    }
+  }
+
+  static String _chipLabel(DispatchEventSeverity sev) {
+    switch (sev) {
+      case DispatchEventSeverity.success:
+        return 'PLACED';
+      case DispatchEventSeverity.userAction:
+        return 'ACTION';
+      case DispatchEventSeverity.system:
+        return 'SYSTEM';
+      case DispatchEventSeverity.transient:
+        return 'RETRY';
+    }
+  }
+
+  static String _formatRelativeTime(DateTime ts) {
+    final now = DateTime.now().toUtc();
+    final diff = now.difference(ts.toUtc());
+    if (diff.inSeconds < 60) return '${diff.inSeconds}s ago';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
   }
 }
