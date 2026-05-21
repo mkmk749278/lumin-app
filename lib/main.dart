@@ -135,12 +135,25 @@ enum _OnboardingState { welcome, consent, ready }
 /// `FirebaseAuth.authStateChanges()` so sign-in / sign-out reroute
 /// the shell reactively without manual `pushAndRemoveUntil` plumbing.
 ///
+/// **Token-mint guard** (2026-05-21 critical fix): a non-null
+/// ``currentUser`` is necessary but NOT sufficient for entering
+/// NavShell — every API call needs a working Firebase ID token, and
+/// the token mint can fail independently of the cached session
+/// existing (Play Integrity rejection, Android Auto Backup restoring a
+/// session onto a different keystore, Console-side user deletion,
+/// revoked refresh material).  Gate verifies the token mints with
+/// ``forceRefresh: true`` before routing to NavShell; on failure it
+/// calls signOut to clear the unusable session and the StreamBuilder
+/// re-emits null → PhoneSignInPage.  Without this guard, the user
+/// landed on a signed-in-looking shell where every tab 401'd with
+/// "missing bearer token" and there was no path back to sign-in.
+///
 /// **Pre-warm hook** (2026-05-21 perf push): the first time the
-/// auth-state stream resolves to a signed-in user we fire
-/// ``repo.prewarmCaches()`` — populates the SwrCache for the Live +
-/// Trade tabs in the background so the first tab-switch after sign-in
-/// renders synchronously from cache instead of waiting on a network
-/// round-trip.  Reset on sign-out so re-sign-in re-warms.
+/// auth-state stream resolves to a signed-in AND token-verified user
+/// we fire ``repo.prewarmCaches()`` — populates the SwrCache for the
+/// Live + Trade tabs in the background so the first tab-switch after
+/// sign-in renders synchronously from cache instead of waiting on a
+/// network round-trip.  Reset on sign-out so re-sign-in re-warms.
 class _AuthGate extends StatefulWidget {
   const _AuthGate();
 
@@ -150,6 +163,75 @@ class _AuthGate extends StatefulWidget {
 
 class _AuthGateState extends State<_AuthGate> {
   bool _prewarmed = false;
+
+  /// uid of the user whose Firebase ID-token mint we've already confirmed
+  /// works.  When ``snap.data?.uid != _verifiedUid`` we don't trust the
+  /// session yet — we kick off [_verifyToken] and render a blank splash
+  /// until it resolves.  Resets on sign-out.
+  String? _verifiedUid;
+
+  /// uid currently in flight through [_verifyToken] — guards against
+  /// the StreamBuilder rebuilding mid-verification and stacking
+  /// duplicate getIdToken round-trips.
+  String? _verifyingUid;
+
+  /// Confirms the cached Firebase user can actually mint a usable ID
+  /// token.  Defends against the cases where ``FirebaseAuth.currentUser``
+  /// is non-null but the token-mint fails — most commonly:
+  ///
+  ///   * Play Integrity rejects the device (cert SHA not registered,
+  ///     emulator without skipPlayIntegrityCheck, rooted device, etc.)
+  ///   * Android Auto Backup restored the SharedPreferences-cached
+  ///     session onto a device / install where the keystore-backed
+  ///     refresh material is no longer valid.
+  ///   * Firebase Console-side user deletion / disable.
+  ///   * Revoked / expired refresh token.
+  ///
+  /// Pre-2026-05-21 the gate trusted ``currentUser != null`` and routed
+  /// straight into NavShell.  Every API call then 401'd with "missing
+  /// bearer token" because [AuthService.currentIdToken] returned null —
+  /// no Authorization header attached.  The user was stuck on a
+  /// signed-in-looking shell that couldn't load any data, with no path
+  /// back to PhoneSignInPage.  Owner-observed on the Closed Testing
+  /// install 2026-05-21; this guard is the fix.
+  Future<void> _verifyToken(AuthService auth, User user) async {
+    if (_verifyingUid == user.uid) return;
+    _verifyingUid = user.uid;
+    String? token;
+    try {
+      token = await auth.currentIdToken(forceRefresh: true);
+    } catch (_) {
+      // Treat any throw (Play Integrity rejection, network error,
+      // revoked refresh material) the same as a null token — fall
+      // through to signOut + PhoneSignInPage so the user has an
+      // actionable path.
+      token = null;
+    }
+    if (!mounted) return;
+    if (token == null) {
+      // Clear the unusable session so the StreamBuilder re-emits
+      // null and routes the user to PhoneSignInPage.  signOut is
+      // idempotent and safe even if Firebase already considers
+      // the session gone.
+      try {
+        await auth.signOut();
+      } catch (_) {}
+      if (!mounted) return;
+      setState(() {
+        _verifyingUid = null;
+      });
+      return;
+    }
+    setState(() {
+      _verifiedUid = user.uid;
+      _verifyingUid = null;
+    });
+  }
+
+  Widget _blankSplash() => const Scaffold(
+        backgroundColor: Color(0xFF0A0E1A),
+        body: SizedBox.shrink(),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -165,31 +247,43 @@ class _AuthGateState extends State<_AuthGate> {
       initialData: scope.auth!.currentUser,
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            backgroundColor: Color(0xFF0A0E1A),
-            body: SizedBox.shrink(),
-          );
+          return _blankSplash();
         }
-        if (snap.data != null) {
-          // One-shot SWR cache pre-warm on the first signed-in
-          // observation.  Fire via post-frame callback so we don't
-          // call repo methods during a build; the SwrCache's
-          // in-flight dedup handles any rare race where the user
-          // taps a tab during the prewarm.
-          if (!_prewarmed) {
-            _prewarmed = true;
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              // Fire-and-forget — prewarmCaches itself returns
-              // immediately; the actual fetches run in microtasks.
-              scope.repo.prewarmCaches();
-            });
-          }
-          return const NavShell();
+        final user = snap.data;
+        if (user == null) {
+          // User signed out (or never signed in).  Reset all per-
+          // session flags so the next sign-in re-runs verification +
+          // re-warms the SWR cache (covers the sign-out / sign-in-
+          // as-different-user flow).
+          _prewarmed = false;
+          _verifiedUid = null;
+          return const PhoneSignInPage();
         }
-        // User signed out — reset so next sign-in re-warms the cache
-        // (covers the sign-out + sign-in-as-different-user flow).
-        _prewarmed = false;
-        return const PhoneSignInPage();
+        if (_verifiedUid != user.uid) {
+          // Cached / restored user that hasn't been confirmed yet.
+          // Kick off the verification on the next frame so we don't
+          // setState during a build.  Renders a blank splash until
+          // [_verifyToken] resolves — typically 100-500ms for the
+          // forced-refresh round-trip.
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _verifyToken(scope.auth!, user);
+          });
+          return _blankSplash();
+        }
+        // One-shot SWR cache pre-warm on the first verified-signed-in
+        // observation.  Fire via post-frame callback so we don't call
+        // repo methods during a build; the SwrCache's in-flight dedup
+        // handles any rare race where the user taps a tab during the
+        // prewarm.
+        if (!_prewarmed) {
+          _prewarmed = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            // Fire-and-forget — prewarmCaches itself returns
+            // immediately; the actual fetches run in microtasks.
+            scope.repo.prewarmCaches();
+          });
+        }
+        return const NavShell();
       },
     );
   }
