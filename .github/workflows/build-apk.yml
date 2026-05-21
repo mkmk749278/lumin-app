@@ -342,6 +342,79 @@ jobs:
           path: build/app/outputs/flutter-apk/lumin-*.apk
           retention-days: 30
 
+      # Play Store launch (2026-05-21) — strip sensitive permissions
+      # from the manifest BEFORE the AAB build so the Play-distributed
+      # version doesn't trigger declaration-required errors on Play
+      # Console.  The sideload APK above keeps the permissions
+      # (in-app updater + open_filex install activity); the AAB
+      # ships without them since Play handles updates natively and
+      # we never actually access user photos/videos/audio.
+      - name: Strip Play-sensitive permissions from manifest before AAB build
+        run: |
+          set -eu
+          python3 << 'PYEOF'
+          from pathlib import Path
+          p = Path('android/app/src/main/AndroidManifest.xml')
+          content = p.read_text()
+          print('--- Manifest BEFORE strip ---')
+          print(content)
+
+          # 1. Remove REQUEST_INSTALL_PACKAGES (in-app updater — not
+          #    needed for Play Store builds).
+          lines = content.split('\n')
+          lines = [
+              line for line in lines
+              if 'android.permission.REQUEST_INSTALL_PACKAGES' not in line
+          ]
+          content = '\n'.join(lines)
+
+          # 2. Ensure tools namespace is on the root manifest tag so
+          #    we can use tools:node="remove" directives.
+          if 'xmlns:tools=' not in content:
+              content = content.replace(
+                  '<manifest ',
+                  '<manifest xmlns:tools="http://schemas.android.com/tools" ',
+                  1,
+              )
+
+          # 3. Insert tools:node="remove" entries for media permissions
+          #    that Flutter dependencies (open_filex, permission_handler,
+          #    image_picker transitive deps) may auto-merge into the
+          #    final manifest.  Play Console rejects any photo/video/
+          #    audio permission without an explicit declaration form,
+          #    and we don't use any of these.
+          removes = [
+              '    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove" />',
+              '    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove" />',
+              '    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" tools:node="remove" />',
+              '    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" tools:node="remove" />',
+              '    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" tools:node="remove" />',
+              '    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" tools:node="remove" />',
+          ]
+          if 'READ_EXTERNAL_STORAGE" tools:node="remove"' not in content:
+              inject_block = '\n'.join(removes) + '\n    <application'
+              if '    <application' in content:
+                  content = content.replace(
+                      '    <application',
+                      inject_block,
+                      1,
+                  )
+              elif '<application' in content:
+                  content = content.replace(
+                      '<application',
+                      inject_block.lstrip(),
+                      1,
+                  )
+              else:
+                  raise SystemExit(
+                      'ERROR: <application> tag not found — cannot inject media-permission removers'
+                  )
+
+          p.write_text(content)
+          print('--- Manifest AFTER strip ---')
+          print(content)
+          PYEOF
+
       # Play Store launch (2026-05-20) — Play Console requires an
       # AAB (Android App Bundle), not an APK, for all new submissions
       # since August 2021.  Same signing config + same keystore as
