@@ -16,6 +16,7 @@ import 'data/auth_service.dart';
 import 'data/consent_storage.dart';
 import 'features/auth/pages/phone_signin_page.dart';
 import 'features/onboarding/pages/welcome_consent_page.dart';
+import 'features/onboarding/pages/welcome_page.dart';
 import 'firebase_options.dart';
 import 'theme.dart';
 
@@ -45,66 +46,89 @@ class LuminApp extends StatelessWidget {
         title: 'Lumin',
         debugShowCheckedModeBanner: false,
         theme: buildLuminTheme(),
-        home: const _ConsentGate(),
+        home: const _FirstRunGate(),
       ),
     );
   }
 }
 
-/// First-launch consent gate (Play Store first-run-disclosure
-/// requirement — see ``docs/PLAYSTORE_PLAN.md`` in the engine repo).
+/// First-run gate — orchestrates the three-stage onboarding flow:
 ///
-/// Resolves ``ConsentStorage.isUpToDate()`` once on app start; if the
-/// user has already accepted the current consent version we route
-/// straight to [_AuthGate] with no flicker.  Otherwise we render the
-/// [WelcomeConsentPage] and only after the user taps Continue do we
-/// promote them to [_AuthGate].
+/// 1. **WelcomePage** — brand intro + value-prop + "Get Started"
+///    (shows once per device, persists via ``welcomeSeen`` flag)
+/// 2. **WelcomeConsentPage** — 3-checkbox legal acknowledgement
+///    (18+ / risk / not-advice; re-shows on consent-version bump)
+/// 3. **AuthGate → PhoneSignInPage / NavShell** — Firebase phone-OTP
+///    sign-in / sign-up, then the main app
 ///
-/// Lives in front of [_AuthGate] (not behind it) because the
-/// disclosure is required BEFORE any data collection — including the
-/// Firebase Auth session — per Google's prominent-disclosure guidance
+/// We use a single gate widget instead of nested widgets because
+/// each stage needs to observe a SharedPreferences flag and the
+/// caller (LuminApp) doesn't want to know about either flag.
+///
+/// Lives in front of [_AuthGate] (not behind it) because the welcome
+/// + consent disclosures are required BEFORE any data collection —
+/// including the Firebase Auth session — per Google's prominent-
+/// disclosure guidance
 /// (https://support.google.com/googleplay/android-developer/answer/11150561).
-class _ConsentGate extends StatefulWidget {
-  const _ConsentGate();
+class _FirstRunGate extends StatefulWidget {
+  const _FirstRunGate();
 
   @override
-  State<_ConsentGate> createState() => _ConsentGateState();
+  State<_FirstRunGate> createState() => _FirstRunGateState();
 }
 
-class _ConsentGateState extends State<_ConsentGate> {
-  Future<bool>? _check;
+class _FirstRunGateState extends State<_FirstRunGate> {
+  Future<_OnboardingState>? _check;
 
   @override
   void initState() {
     super.initState();
-    _check = ConsentStorage.isUpToDate();
+    _check = _resolve();
+  }
+
+  Future<_OnboardingState> _resolve() async {
+    final welcomeSeen = await ConsentStorage.welcomeSeen();
+    final consentDone = await ConsentStorage.isUpToDate();
+    if (!welcomeSeen) return _OnboardingState.welcome;
+    if (!consentDone) return _OnboardingState.consent;
+    return _OnboardingState.ready;
+  }
+
+  void _advance() {
+    // Re-evaluate flags so we land on the next required stage.
+    setState(() {
+      _check = _resolve();
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<bool>(
+    return FutureBuilder<_OnboardingState>(
       future: _check,
       builder: (context, snap) {
         if (snap.connectionState != ConnectionState.done) {
           // Same blank-splash convention as [_AuthGate] to avoid a
-          // visible flicker between consent check and auth check.
+          // visible flicker between stages.
           return const Scaffold(
             backgroundColor: Color(0xFF0A0E1A),
             body: SizedBox.shrink(),
           );
         }
-        if (snap.data == true) {
-          return const _AuthGate();
+        switch (snap.data) {
+          case _OnboardingState.welcome:
+            return WelcomePage(onContinue: _advance);
+          case _OnboardingState.consent:
+            return WelcomeConsentPage(onAccepted: _advance);
+          case _OnboardingState.ready:
+          case null:
+            return const _AuthGate();
         }
-        return WelcomeConsentPage(
-          onAccepted: () => setState(() {
-            _check = Future.value(true);
-          }),
-        );
       },
     );
   }
 }
+
+enum _OnboardingState { welcome, consent, ready }
 
 /// First-frame gate that decides between [PhoneSignInPage] and
 /// [NavShell].  Mock mode bypasses auth.  Live mode subscribes to

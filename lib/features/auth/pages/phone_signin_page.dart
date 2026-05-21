@@ -208,7 +208,7 @@ class _PhoneSignInPageState extends State<PhoneSignInPage> {
               children: [
                 const SizedBox(height: LuminSpacing.xl),
                 const Text(
-                  'Sign in',
+                  'Sign in or sign up',
                   style: TextStyle(
                     color: LuminColors.textPrimary,
                     fontSize: 28,
@@ -217,7 +217,8 @@ class _PhoneSignInPageState extends State<PhoneSignInPage> {
                 ),
                 const SizedBox(height: LuminSpacing.sm),
                 const Text(
-                  'We\'ll send a 6-digit code to verify your phone.',
+                  'Enter your phone number — we\'ll text you a 6-digit '
+                  'code. Same flow whether you\'re new or returning.',
                   style: TextStyle(
                     color: LuminColors.textSecondary,
                     fontSize: 14,

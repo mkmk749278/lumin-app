@@ -61,4 +61,50 @@ void main() {
     });
     expect(await ConsentStorage.isUpToDate(), isTrue);
   });
+
+  // ---------------------------------------------------------------------
+  // welcomeSeen — first-launch brand-intro page (2026-05-21)
+  // ---------------------------------------------------------------------
+
+  test('fresh install: welcomeSeen == false', () async {
+    expect(await ConsentStorage.welcomeSeen(), isFalse);
+  });
+
+  test('recordWelcomeSeen persists the flag', () async {
+    await ConsentStorage.recordWelcomeSeen();
+    expect(await ConsentStorage.welcomeSeen(), isTrue);
+  });
+
+  test('welcomeSeen is independent of consent version bumps', () async {
+    // User completed v1 onboarding fully — welcome + consent both done.
+    await ConsentStorage.recordWelcomeSeen();
+    await ConsentStorage.recordAccepted();
+    expect(await ConsentStorage.welcomeSeen(), isTrue);
+    expect(await ConsentStorage.isUpToDate(), isTrue);
+
+    // Simulate consent version bump — consent stale but welcome seen.
+    SharedPreferences.setMockInitialValues({
+      'consent.version': ConsentStorage.currentConsentVersion - 1,
+      'onboarding.welcomeSeen': true,
+    });
+    expect(await ConsentStorage.isUpToDate(), isFalse);
+    expect(
+      await ConsentStorage.welcomeSeen(),
+      isTrue,
+      reason: 'A consent-version bump must NOT re-show the welcome '
+          'page — that would feel like a UX regression to existing users',
+    );
+  });
+
+  test('clear() resets BOTH welcome flag AND consent version', () async {
+    await ConsentStorage.recordWelcomeSeen();
+    await ConsentStorage.recordAccepted();
+    expect(await ConsentStorage.welcomeSeen(), isTrue);
+    expect(await ConsentStorage.isUpToDate(), isTrue);
+
+    await ConsentStorage.clear();
+
+    expect(await ConsentStorage.welcomeSeen(), isFalse);
+    expect(await ConsentStorage.isUpToDate(), isFalse);
+  });
 }
