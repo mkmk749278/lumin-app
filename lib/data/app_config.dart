@@ -77,13 +77,52 @@ class AppConfigScope extends StatefulWidget {
 }
 
 class _AppConfigScopeState extends State<AppConfigScope> {
-  late AppConfig _config = widget.initial;
-  late LuminRepository _repo = _buildRepo(_config);
-  AuthService? _auth;
+  // Both `_config` and the (_repo, _auth) pair are eager-initialized in
+  // [initState] — see the long comment there.  Field declarations stay
+  // `late` so we can reassign on [update] without nullable wrappers.
+  late AppConfig _config;
+  late LuminRepository _repo;
+  late AuthService? _auth;
 
   AppConfig get config => _config;
   LuminRepository get repo => _repo;
   AuthService? get auth => _auth;
+
+  @override
+  void initState() {
+    super.initState();
+    // **Why eager init, not `late LuminRepository _repo = _buildRepo(_config)`.**
+    //
+    // Pre-2026-05-21 the state shape was:
+    //
+    //     late AppConfig _config = widget.initial;
+    //     late LuminRepository _repo = _buildRepo(_config);
+    //     AuthService? _auth;          //  ← set as a SIDE EFFECT of _buildRepo
+    //
+    // That meant ``scope.auth`` returned ``null`` until the first reader
+    // of ``scope.repo`` triggered ``_repo`` lazy-init (which then ran
+    // ``_buildRepo`` and finally assigned ``_auth``).  Any widget that
+    // read ``scope.auth`` BEFORE the first ``scope.repo`` read got null
+    // — including [_AuthGate], whose ``if (scope.auth == null) return
+    // NavShell;`` mock-bypass branch interpreted that null as "live
+    // backend not configured, fall back to mock" and dropped the user
+    // straight into NavShell.  NavShell's tabs then triggered the lazy
+    // repo init, but by that point the user was already past the gate
+    // and every API request fired without an Authorization header
+    // (because no Firebase user had signed in) → engine returned 401
+    // "missing bearer token" on every tab.  Stuck in a signed-in-
+    // looking shell with no path back to PhoneSignInPage.
+    //
+    // The fix is to remove the side-effect coupling: ``_auth`` MUST be
+    // populated at the same moment as ``_repo``, never as a deferred
+    // side effect of someone else reading ``_repo``.  Doing both in
+    // initState guarantees that.  See ``_buildDeps`` for the actual
+    // construction.
+    _config = widget.initial;
+    final deps = _buildDeps(_config);
+    _repo = deps.repo;
+    _auth = deps.auth;
+  }
 
   /// Current user tier from the cached JWT, or ``null`` when:
   ///   * mock mode (no live auth)
@@ -116,7 +155,9 @@ class _AppConfigScopeState extends State<AppConfigScope> {
   Future<void> update(AppConfig next) async {
     setState(() {
       _config = next;
-      _repo = _buildRepo(next);
+      final deps = _buildDeps(next);
+      _repo = deps.repo;
+      _auth = deps.auth;
     });
     await next.save();
   }
@@ -127,16 +168,26 @@ class _AppConfigScopeState extends State<AppConfigScope> {
     await _auth?.signOut();
   }
 
-  LuminRepository _buildRepo(AppConfig c) {
+  /// Build the repository + matching auth service for a given config.
+  /// Returning both via a record keeps the two in lockstep — callers
+  /// never see a half-initialised state where ``_repo`` is wired but
+  /// ``_auth`` is still null (the pre-2026-05-21 bug class).
+  ///
+  /// Live + non-empty base URL → HttpRepository wired through a fresh
+  /// AuthService.  Otherwise → MockRepository with no auth (mock-mode
+  /// tests / offline preview need neither network nor identity).
+  ({LuminRepository repo, AuthService? auth}) _buildDeps(AppConfig c) {
     if (c.dataSource == DataSource.live && c.apiBaseUrl.isNotEmpty) {
-      _auth = AuthService(baseUrl: c.apiBaseUrl);
-      return HttpRepository(LuminApiClient(
-        baseUrl: c.apiBaseUrl,
-        auth: _auth!,
-      ));
+      final auth = AuthService(baseUrl: c.apiBaseUrl);
+      return (
+        repo: HttpRepository(LuminApiClient(
+          baseUrl: c.apiBaseUrl,
+          auth: auth,
+        )),
+        auth: auth,
+      );
     }
-    _auth = null;
-    return const MockRepository();
+    return (repo: const MockRepository(), auth: null);
   }
 
   @override
