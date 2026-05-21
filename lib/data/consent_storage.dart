@@ -31,6 +31,7 @@ class ConsentStorage {
 
   static const String _kVersionKey = 'consent.version';
   static const String _kAtKey = 'consent.acceptedAt';
+  static const String _kWelcomeSeenKey = 'onboarding.welcomeSeen';
 
   /// Returns the stored consent version, or 0 if no consent recorded.
   static Future<int> storedVersion() async {
@@ -46,6 +47,25 @@ class ConsentStorage {
     return v >= currentConsentVersion;
   }
 
+  /// True iff the user has seen the first-launch welcome screen.
+  /// Set once when the user taps "Get Started" on the welcome page.
+  /// Independent of consent — welcome is brand intro + value-prop;
+  /// consent is the legal acknowledgement that follows.  Tracking
+  /// them separately means a consent-version bump doesn't re-show
+  /// the welcome (which would feel like a regression).
+  static Future<bool> welcomeSeen() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_kWelcomeSeenKey) ?? false;
+  }
+
+  /// Mark the welcome page as seen.  One-shot — no version bump
+  /// rationale here because the welcome page never re-shows once
+  /// dismissed.
+  static Future<void> recordWelcomeSeen() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kWelcomeSeenKey, true);
+  }
+
   /// Mark consent at the current version.  Persists the ISO 8601
   /// timestamp alongside in case we ever need it for support /
   /// audit / "when did the user agree to v2" troubleshooting.
@@ -55,12 +75,14 @@ class ConsentStorage {
     await prefs.setString(_kAtKey, DateTime.now().toUtc().toIso8601String());
   }
 
-  /// Test / settings hook — drops the consent record so the next
-  /// app launch re-shows the gate.  Not currently exposed in UI but
-  /// useful for QA + a future "review consent" Settings entry.
+  /// Test / settings hook — drops the consent record AND the
+  /// welcome-seen flag so the next app launch shows the full
+  /// first-run flow again.  Not currently exposed in UI but useful
+  /// for QA + a future "review consent" Settings entry.
   static Future<void> clear() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_kVersionKey);
     await prefs.remove(_kAtKey);
+    await prefs.remove(_kWelcomeSeenKey);
   }
 }
