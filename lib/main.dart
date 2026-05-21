@@ -110,8 +110,22 @@ class _ConsentGateState extends State<_ConsentGate> {
 /// [NavShell].  Mock mode bypasses auth.  Live mode subscribes to
 /// `FirebaseAuth.authStateChanges()` so sign-in / sign-out reroute
 /// the shell reactively without manual `pushAndRemoveUntil` plumbing.
-class _AuthGate extends StatelessWidget {
+///
+/// **Pre-warm hook** (2026-05-21 perf push): the first time the
+/// auth-state stream resolves to a signed-in user we fire
+/// ``repo.prewarmCaches()`` — populates the SwrCache for the Live +
+/// Trade tabs in the background so the first tab-switch after sign-in
+/// renders synchronously from cache instead of waiting on a network
+/// round-trip.  Reset on sign-out so re-sign-in re-warms.
+class _AuthGate extends StatefulWidget {
   const _AuthGate();
+
+  @override
+  State<_AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<_AuthGate> {
+  bool _prewarmed = false;
 
   @override
   Widget build(BuildContext context) {
@@ -132,7 +146,25 @@ class _AuthGate extends StatelessWidget {
             body: SizedBox.shrink(),
           );
         }
-        if (snap.data != null) return const NavShell();
+        if (snap.data != null) {
+          // One-shot SWR cache pre-warm on the first signed-in
+          // observation.  Fire via post-frame callback so we don't
+          // call repo methods during a build; the SwrCache's
+          // in-flight dedup handles any rare race where the user
+          // taps a tab during the prewarm.
+          if (!_prewarmed) {
+            _prewarmed = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              // Fire-and-forget — prewarmCaches itself returns
+              // immediately; the actual fetches run in microtasks.
+              scope.repo.prewarmCaches();
+            });
+          }
+          return const NavShell();
+        }
+        // User signed out — reset so next sign-in re-warms the cache
+        // (covers the sign-out + sign-in-as-different-user flow).
+        _prewarmed = false;
         return const PhoneSignInPage();
       },
     );
