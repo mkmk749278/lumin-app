@@ -1062,6 +1062,34 @@ abstract class LuminRepository {
   /// server can't derive a region from CDN headers.
   Future<RegionInfo> fetchRegion();
 
+  /// Pre-warm in-memory caches so the first tab-switch after sign-in
+  /// renders synchronously instead of waiting on a network round-trip
+  /// (2026-05-21 — Play Store launch follow-up).
+  ///
+  /// **Doctrine — fire-and-forget.**  Returns immediately.  Each
+  /// underlying fetch runs concurrently in the background, populating
+  /// the ``SwrCache`` as a side effect.  Failures are swallowed
+  /// silently because:
+  ///
+  /// * If a fetch fails here, the same fetch will retry when the UI
+  ///   actually subscribes — so the user gets the SAME error path as
+  ///   before, just no benefit of pre-warming.
+  /// * The caller (NavShell / AuthGate) MUST NOT block UI on this —
+  ///   it's a UX nicety, not a correctness gate.
+  ///
+  /// **What gets warmed:**
+  ///
+  /// * ``PulseBundle`` — Live tab landing surface (8+ sub-fetches)
+  /// * ``TradeEngineSnapshot`` — Trade tab engine slice
+  /// * ``RegionInfo`` — Auto-trade region gate
+  ///
+  /// Default implementation is a no-op (mock + test paths).
+  /// HttpRepository overrides to actually fire the network calls.
+  Future<void> prewarmCaches() async {
+    // No-op default — mock + test repos don't need pre-warming since
+    // their fetches are synchronous-ish in-memory.
+  }
+
   /// Delete the authenticated user's account
   /// (``DELETE /api/account``).  Required by Google Play's User
   /// Data policy — apps that let users create an account must let
@@ -1165,6 +1193,13 @@ class MockRepository implements LuminRepository {
 
   @override
   void invalidateTradeEngineSnapshotCache() {}
+
+  /// Mock pre-warm — no-op.  Mock fetches are synchronous-ish in-
+  /// memory; there's nothing to pre-fetch.  Required because
+  /// ``MockRepository implements LuminRepository`` and ``implements``
+  /// does not inherit method bodies, even default ones.
+  @override
+  Future<void> prewarmCaches() async {}
 
   @override
   Future<List<MockPosition>> fetchPositions() async => mockPositions;
@@ -2179,6 +2214,62 @@ class HttpRepository implements LuminRepository {
   @override
   void invalidateTradeEngineSnapshotCache() {
     _swr.invalidate(_kTradeEngineKey);
+  }
+
+  /// Pre-warm SWR caches in the background.  Called by the auth gate
+  /// the moment a user becomes signed-in so the Live + Trade tabs
+  /// land already-warm by the time the user navigates to them
+  /// (typically ~1-3 seconds after sign-in completes).
+  ///
+  /// Returns immediately.  Each fetch runs concurrently in its own
+  /// microtask via the SwrCache's existing in-flight dedup — if the
+  /// user happens to open the Live tab during the prewarm, they
+  /// share the same fetch and don't issue a duplicate request.
+  ///
+  /// All errors swallowed: the same fetch will retry when the UI
+  /// actually subscribes if it fails here.  Pre-warm is a UX
+  /// optimisation, never a correctness gate.
+  @override
+  Future<void> prewarmCaches() async {
+    // PulseBundle — Live tab landing surface (8+ sub-fetches in
+    // assemblePulseBundle).  Fire-and-forget in a microtask.
+    Future.microtask(() async {
+      try {
+        await _swr
+            .watch<PulseBundle>(
+              _kPulseBundleKey,
+              fetch: () => assemblePulseBundle(this),
+            )
+            .last;
+      } catch (_) {
+        // Swallow — the UI's own subscribe will retry.
+      }
+    });
+
+    // TradeEngineSnapshot — Trade tab engine slice.
+    Future.microtask(() async {
+      try {
+        await _swr
+            .watch<TradeEngineSnapshot>(
+              _kTradeEngineKey,
+              fetch: () => assembleTradeEngineSnapshot(this),
+            )
+            .last;
+      } catch (_) {
+        // Swallow.
+      }
+    });
+
+    // RegionInfo — auto-trade gate.  fetchRegion already soft-fails
+    // internally (returns "unknown" + not-blocked on any error), so
+    // the try/catch here is purely defensive.
+    Future.microtask(() async {
+      try {
+        await fetchRegion();
+      } catch (_) {
+        // Swallow.
+      }
+    });
   }
 
   @override
