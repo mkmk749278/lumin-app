@@ -1336,6 +1336,60 @@ class MockRepository implements LuminRepository {
   @override
   void invalidateTradeEngineSnapshotCache() {}
 
+  // Mock overrides for the per-tab SWR watches added 2026-05-22.
+  // ``MockRepository implements LuminRepository`` and ``implements``
+  // doesn't inherit method bodies — so even the abstract's concrete
+  // default body has to be re-declared here.  Each wraps the
+  // existing in-memory ``getX`` / ``fetchX`` as a single-event
+  // stream; ``invalidateXCache`` is a no-op (no underlying cache).
+  @override
+  Stream<List<AgentStat>> watchAgents() async* {
+    yield await fetchAgents();
+  }
+
+  @override
+  void invalidateAgentsCache() {}
+
+  @override
+  Stream<AutoTradeUserStatus> watchAutoTradeUserStatus() async* {
+    yield await getAutoTradeUserStatus();
+  }
+
+  @override
+  void invalidateAutoTradeUserStatusCache() {}
+
+  @override
+  Stream<AutoTradeRuntimeStatus> watchAutoTradeRuntimeStatus() async* {
+    yield await getAutoTradeRuntimeStatus();
+  }
+
+  @override
+  void invalidateAutoTradeRuntimeStatusCache() {}
+
+  @override
+  Stream<List<ServerSidePosition>> watchAutoTradePositions() async* {
+    yield await getAutoTradePositions();
+  }
+
+  @override
+  void invalidateAutoTradePositionsCache() {}
+
+  @override
+  Stream<List<DispatchEvent>> watchRecentDispatchEvents({int limit = 20}) async* {
+    yield await getRecentDispatchEvents(limit: limit);
+  }
+
+  @override
+  void invalidateRecentDispatchEventsCache({int limit = 20}) {}
+
+  @override
+  Stream<UserPnlSnapshot> watchUserPnlSnapshot() async* {
+    yield await assembleUserPnlSnapshot(this);
+  }
+
+  @override
+  void invalidateUserPnlSnapshotCache() {}
+
   /// Mock pre-warm — no-op.  Mock fetches are synchronous-ish in-
   /// memory; there's nothing to pre-fetch.  Required because
   /// ``MockRepository implements LuminRepository`` and ``implements``
