@@ -161,12 +161,18 @@ class _PulsePageState extends State<PulsePage> {
         const SizedBox(height: LuminSpacing.md),
         _RegimeBar(engine: data.engine),
         const SizedBox(height: LuminSpacing.md),
-        _TodayPnlCard(engine: data.engine),
+        _TodayPnlCard(userPnl: data.userPnl),
         const SizedBox(height: LuminSpacing.md),
-        _PnlChartCard(history: data.pnlHistory),
-        const SizedBox(height: LuminSpacing.md),
-        _DailyLossBudgetCard(engine: data.engine),
-        const SizedBox(height: LuminSpacing.md),
+        // 30-day chart is engine-global PnL (per OWNER_BRIEF §3.8
+        // single paper book).  Only render to users who're actually
+        // trading on the engine — otherwise it's misleading.  Engine-
+        // health overview is the EngineStatusCard above.
+        if (data.userPnl.hasAnyTrading) ...[
+          _PnlChartCard(history: data.pnlHistory),
+          const SizedBox(height: LuminSpacing.md),
+          _DailyLossBudgetCard(engine: data.engine),
+          const SizedBox(height: LuminSpacing.md),
+        ],
         if (data.tickers.isNotEmpty) ...[
           _TopPairTickerStrip(tickers: data.tickers),
           const SizedBox(height: LuminSpacing.md),
@@ -386,14 +392,31 @@ class _RegimeBar extends StatelessWidget {
 /// to :class:`PaperTradesPage` so the daily aggregate has a one-tap
 /// drill-down to the per-trade ledger.  The Today/Weekly/Monthly
 /// aggregate layout above stays untouched.
+/// Per-user PnL card.  Renders the user's own realised PnL from
+/// server-side execution positions (B18) — not the engine-global
+/// number that was leaking across all users pre-2026-05-22.
+///
+/// Two render modes:
+///   * Active trader (``userPnl.hasAnyTrading``): show realised USD +
+///     open-position count + "View all trades" deep-link.
+///   * Not enabled yet: show "Trading not enabled" CTA pointing to
+///     the Trade tab.  Avoids the previous bug where every signed-in
+///     user — even brand-new accounts that hadn't opted in — saw the
+///     engine's shared PnL as if it were theirs.
 class _TodayPnlCard extends StatelessWidget {
-  const _TodayPnlCard({required this.engine});
-  final MockEngineSnapshot engine;
+  const _TodayPnlCard({required this.userPnl});
+  final UserPnlSnapshot userPnl;
 
   @override
   Widget build(BuildContext context) {
-    final positive = engine.todayPnlUsd >= 0;
+    if (!userPnl.hasAnyTrading) {
+      return const _NotTradingYetCard();
+    }
+    final positive = userPnl.realisedUsd >= 0;
     final color = positive ? LuminColors.success : LuminColors.loss;
+    final openSubtitle = userPnl.openPositionCount == 1
+        ? '1 open position'
+        : '${userPnl.openPositionCount} open positions';
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
       child: LuminCard(
@@ -411,9 +434,9 @@ class _TodayPnlCard extends StatelessWidget {
                 const SizedBox(width: LuminSpacing.md),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    Text(
-                      "TODAY'S P&L",
+                  children: [
+                    const Text(
+                      "YOUR REALISED P&L",
                       style: TextStyle(
                         color: LuminColors.textMuted,
                         fontSize: 10,
@@ -421,10 +444,10 @@ class _TodayPnlCard extends StatelessWidget {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    SizedBox(height: 2),
+                    const SizedBox(height: 2),
                     Text(
-                      'Realised across paper / live trades',
-                      style: TextStyle(
+                      openSubtitle,
+                      style: const TextStyle(
                         color: LuminColors.textSecondary,
                         fontSize: 11,
                       ),
@@ -432,36 +455,20 @@ class _TodayPnlCard extends StatelessWidget {
                   ],
                 ),
                 const Spacer(),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      '${positive ? '+' : ''}\$${engine.todayPnlUsd.toStringAsFixed(2)}',
-                      style: TextStyle(
-                        color: color,
-                        fontSize: 22,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.5,
-                      ),
-                    ),
-                    Text(
-                      '${positive ? '+' : ''}${engine.todayPnlPct.toStringAsFixed(2)}% on margin',
-                      style: TextStyle(
-                        color: color.withOpacity(0.85),
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
+                Text(
+                  '${positive ? '+' : ''}\$${userPnl.realisedUsd.toStringAsFixed(2)}',
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -0.5,
+                  ),
                 ),
               ],
             ),
             const SizedBox(height: LuminSpacing.sm),
             const Divider(color: LuminColors.cardBorder, height: 1),
             const SizedBox(height: 4),
-            // Drill-down to the paginated per-trade ledger — owner asked
-            // for honest "what would I have earned" context next to the
-            // aggregate number.
             Material(
               color: Colors.transparent,
               child: InkWell(
@@ -496,6 +503,75 @@ class _TodayPnlCard extends StatelessWidget {
                     ],
                   ),
                 ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Empty-state card for users who haven't enabled trading yet.
+/// Replaces the engine-global PnL number that was previously rendered
+/// to every signed-in user.
+class _NotTradingYetCard extends StatelessWidget {
+  const _NotTradingYetCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
+      child: LuminCard(
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: LuminColors.accent.withOpacity(0.10),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.rocket_launch_outlined,
+                color: LuminColors.accent,
+                size: 22,
+              ),
+            ),
+            const SizedBox(width: LuminSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Text(
+                    "YOUR REALISED P&L",
+                    style: TextStyle(
+                      color: LuminColors.textMuted,
+                      fontSize: 10,
+                      letterSpacing: 1.2,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'Trading not enabled yet',
+                    style: TextStyle(
+                      color: LuminColors.textPrimary,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  SizedBox(height: 2),
+                  Text(
+                    'Connect Binance on the Trade tab to start '
+                    'auto-trading signals on your own account.',
+                    style: TextStyle(
+                      color: LuminColors.textSecondary,
+                      fontSize: 11,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -600,13 +676,28 @@ class _PnlChartCard extends StatelessWidget {
               children: const [
                 Icon(Icons.show_chart, size: 16, color: LuminColors.accent),
                 SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'ENGINE — LAST 30 DAYS',
+                    style: TextStyle(
+                      color: LuminColors.textMuted,
+                      fontSize: 10,
+                      letterSpacing: 1.2,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                // Single shared paper book per OWNER_BRIEF §3.8 —
+                // this chart aggregates every signal across the
+                // project, not the viewing user's own trades.  Per-
+                // user lifetime history ships when the engine adds
+                // a per-user PnL endpoint.
                 Text(
-                  'P&L — LAST 30 DAYS',
+                  'shared',
                   style: TextStyle(
                     color: LuminColors.textMuted,
-                    fontSize: 10,
-                    letterSpacing: 1.2,
-                    fontWeight: FontWeight.w600,
+                    fontSize: 9,
+                    fontStyle: FontStyle.italic,
                   ),
                 ),
               ],

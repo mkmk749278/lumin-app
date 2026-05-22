@@ -770,11 +770,19 @@ class PulseBundle {
     required this.recent,
     required this.tickers,
     required this.pnlHistory,
+    required this.userPnl,
   });
   final MockEngineSnapshot engine;
   final List<MockSignal> recent;
   final List<MockTicker> tickers;
+  /// Engine-global PnL history (last 30 days).  Kept around for the
+  /// engine-health chart but **not** rendered as the user's own
+  /// performance — that's [userPnl] now.
   final PnlHistory pnlHistory;
+  /// Per-user PnL snapshot — replaces what used to be sourced from
+  /// ``engine.todayPnlUsd``.  See [UserPnlSnapshot] for the per-user
+  /// fix doctrine.
+  final UserPnlSnapshot userPnl;
 }
 
 /// Engine-side payload the Trade page consumes.  Pure repo data —
@@ -794,6 +802,86 @@ class TradeEngineSnapshot {
   final AutoTradeSettings userSettings;
   final List<MockPosition> positions;
   final List<MockActivityEvent> activity;
+}
+
+/// Per-user PnL snapshot — drives the Pulse tab "TODAY'S P&L" card.
+///
+/// Sources from ``GET /api/auto-trade/positions`` (per-user via
+/// Firebase ID token).  ``realisedUsd`` sums ``realized_pnl_total``
+/// across every open position the user has — that's the partial-close
+/// realised PnL booked on TP1 fills and pre-TP grabs (B17).  Closed
+/// positions aren't returned by that endpoint so historical PnL isn't
+/// part of this snapshot today; the page renders "No closed history
+/// yet" rather than a misleading aggregate.
+///
+/// ``hasAnyTrading`` lets the page distinguish "user is trading,
+/// PnL just happens to be 0 right now" from "user hasn't opted in at
+/// all" — the latter gets the "Enable trading from the Trade tab"
+/// CTA rather than a deceptive $0.00.
+class UserPnlSnapshot {
+  const UserPnlSnapshot({
+    required this.realisedUsd,
+    required this.openPositionCount,
+    required this.hasAnyTrading,
+  });
+  /// Sum of ``realized_pnl_total`` across the user's open positions.
+  /// Negative when partial closes booked losses.
+  final double realisedUsd;
+  /// How many positions the user currently has open server-side.
+  final int openPositionCount;
+  /// True when the user has at least one open position — proxy for
+  /// "user has opted into server-side auto-trade".  False = render
+  /// the not-enabled CTA on Pulse.
+  final bool hasAnyTrading;
+
+  static const empty = UserPnlSnapshot(
+    realisedUsd: 0.0,
+    openPositionCount: 0,
+    hasAnyTrading: false,
+  );
+}
+
+/// Top-level assembler — same rationale as ``assemblePulseBundle``.
+/// Per-user PnL is currently a client-side roll-up of the user's
+/// open server-side positions; when the engine adds a per-user PnL
+/// endpoint (deferred per OWNER_BRIEF §3.8), this is the swap point.
+///
+/// ``hasAnyTrading`` is true when either: (a) the user has at least
+/// one open server-side position, OR (b) the user's auto-trade mode
+/// is not ``'off'``.  Covers the "trading enabled but no signal has
+/// fired yet" edge case so brand-new opt-in users don't see the
+/// misleading "Trading not enabled yet" CTA.
+Future<UserPnlSnapshot> assembleUserPnlSnapshot(LuminRepository repo) async {
+  try {
+    final results = await Future.wait([
+      repo.getAutoTradePositions(),
+      // Runtime status carries the per-user mode pill — catch on the
+      // anonymous-device-JWT 401 path so we still produce a snapshot
+      // when only positions came back.
+      repo.getAutoTradeRuntimeStatus().then<AutoTradeRuntimeStatus?>(
+            (s) => s,
+            onError: (_) => null,
+          ),
+    ]);
+    final positions = results[0] as List<ServerSidePosition>;
+    final runtime = results[1] as AutoTradeRuntimeStatus?;
+    final modeOptedIn =
+        runtime != null && (runtime.userMode ?? 'off') != 'off';
+    if (positions.isEmpty && !modeOptedIn) {
+      return UserPnlSnapshot.empty;
+    }
+    final realised = positions.fold<double>(
+      0.0,
+      (acc, p) => acc + p.realizedPnlTotal,
+    );
+    return UserPnlSnapshot(
+      realisedUsd: realised,
+      openPositionCount: positions.length,
+      hasAnyTrading: true,
+    );
+  } catch (_) {
+    return UserPnlSnapshot.empty;
+  }
 }
 
 /// Top-level assembler — same rationale as ``assemblePulseBundle``
@@ -851,12 +939,17 @@ Future<PulseBundle> assemblePulseBundle(LuminRepository repo) async {
             monthlyPnlUsd: 0.0,
           ),
         ),
+    // Per-user PnL — replaces the engine-global todayPnlUsd that
+    // was leaking across users.  Already error-tolerant inside the
+    // assembler (falls through to ``UserPnlSnapshot.empty``).
+    assembleUserPnlSnapshot(repo),
   ]);
   return PulseBundle(
     engine: results[0] as MockEngineSnapshot,
     recent: (results[1] as List).cast<MockSignal>(),
     tickers: (results[2] as List).cast<MockTicker>(),
     pnlHistory: results[3] as PnlHistory,
+    userPnl: results[4] as UserPnlSnapshot,
   );
 }
 
@@ -924,6 +1017,55 @@ abstract class LuminRepository {
   void invalidateTradeEngineSnapshotCache() {
     // Default no-op.  HttpRepository overrides.
   }
+
+  // SWR-cached watches for the four user-scoped endpoints the Trade
+  // tab previously hit directly on every mount.  Wrapping them lets
+  // ``prewarmCaches`` warm them at sign-in so the first tap on the
+  // Trade tab is instant instead of waiting 4 sequential network
+  // round-trips.  Each is keyed without a user-id because the engine
+  // already scopes by Firebase ID token, and ``SwrCache.clear()``
+  // wipes everything on sign-out.
+  Stream<List<AgentStat>> watchAgents() async* {
+    yield await fetchAgents();
+  }
+  void invalidateAgentsCache() {}
+
+  Stream<AutoTradeUserStatus> watchAutoTradeUserStatus() async* {
+    yield await getAutoTradeUserStatus();
+  }
+  void invalidateAutoTradeUserStatusCache() {}
+
+  Stream<AutoTradeRuntimeStatus> watchAutoTradeRuntimeStatus() async* {
+    yield await getAutoTradeRuntimeStatus();
+  }
+  void invalidateAutoTradeRuntimeStatusCache() {}
+
+  Stream<List<ServerSidePosition>> watchAutoTradePositions() async* {
+    yield await getAutoTradePositions();
+  }
+  void invalidateAutoTradePositionsCache() {}
+
+  Stream<List<DispatchEvent>> watchRecentDispatchEvents({int limit = 20}) async* {
+    yield await getRecentDispatchEvents(limit: limit);
+  }
+  void invalidateRecentDispatchEventsCache({int limit = 20}) {}
+
+  /// Per-user daily-PnL snapshot — computed from the user's
+  /// server-side execution positions (``/api/auto-trade/positions``).
+  /// Replaces the pre-2026-05-22 Pulse card that surfaced
+  /// ``engine.todayPnlUsd`` from ``/api/pulse`` — that field is the
+  /// engine-global ``RiskManager.daily_realised_pnl_usd``, the same
+  /// number for every signed-in user, regardless of whether their
+  /// per-user trading was even enabled.  Owner-reported 2026-05-22:
+  /// "every user after logging seeing same PnL even not Paper mode
+  /// not enabled".  Compute lives on the client because the engine
+  /// doesn't expose a per-user PnL endpoint yet (single-tenant paper
+  /// book per OWNER_BRIEF §3.8).
+  Stream<UserPnlSnapshot> watchUserPnlSnapshot() async* {
+    yield await assembleUserPnlSnapshot(this);
+  }
+  void invalidateUserPnlSnapshotCache() {}
+
   Future<List<MockPosition>> fetchPositions();
   Future<List<MockActivityEvent>> fetchActivity({
     int limit = 50,
@@ -2181,6 +2323,13 @@ class HttpRepository implements LuminRepository {
 
   static const _kPulseBundleKey = 'pulse_bundle';
   static const _kTradeEngineKey = 'trade_engine_snapshot';
+  static const _kAgentsKey = 'agents';
+  static const _kAutoTradeUserStatusKey = 'auto_trade_user_status';
+  static const _kAutoTradeRuntimeStatusKey = 'auto_trade_runtime_status';
+  static const _kAutoTradePositionsKey = 'auto_trade_positions';
+  static const _kUserPnlSnapshotKey = 'user_pnl_snapshot';
+  static String _recentDispatchEventsKey(int limit) =>
+      'recent_dispatch_events:$limit';
 
   /// SWR-cached bundle.  Single cache entry for the whole bundle —
   /// tab re-entry within TTL renders synchronously from cache while
@@ -2215,6 +2364,89 @@ class HttpRepository implements LuminRepository {
   void invalidateTradeEngineSnapshotCache() {
     _swr.invalidate(_kTradeEngineKey);
   }
+
+  // ---- Per-tab SWR-cached watches (2026-05-22) -------------------------
+  //
+  // Wraps the four user-scoped + one engine-global fetches that
+  // TradePage used to hit directly in `didChangeDependencies`.
+  // Caching here lets `prewarmCaches` warm all of them at sign-in so
+  // the first tap on the Trade or Agents tab is instant instead of
+  // sequentially waiting on 4 fresh HTTP round-trips.
+
+  @override
+  Stream<List<AgentStat>> watchAgents() {
+    return _swr.watch<List<AgentStat>>(
+      _kAgentsKey,
+      fetch: () => fetchAgents(),
+    );
+  }
+
+  @override
+  void invalidateAgentsCache() => _swr.invalidate(_kAgentsKey);
+
+  @override
+  Stream<AutoTradeUserStatus> watchAutoTradeUserStatus() {
+    return _swr.watch<AutoTradeUserStatus>(
+      _kAutoTradeUserStatusKey,
+      fetch: () => getAutoTradeUserStatus(),
+    );
+  }
+
+  @override
+  void invalidateAutoTradeUserStatusCache() =>
+      _swr.invalidate(_kAutoTradeUserStatusKey);
+
+  @override
+  Stream<AutoTradeRuntimeStatus> watchAutoTradeRuntimeStatus() {
+    return _swr.watch<AutoTradeRuntimeStatus>(
+      _kAutoTradeRuntimeStatusKey,
+      fetch: () => getAutoTradeRuntimeStatus(),
+    );
+  }
+
+  @override
+  void invalidateAutoTradeRuntimeStatusCache() =>
+      _swr.invalidate(_kAutoTradeRuntimeStatusKey);
+
+  @override
+  Stream<List<ServerSidePosition>> watchAutoTradePositions() {
+    return _swr.watch<List<ServerSidePosition>>(
+      _kAutoTradePositionsKey,
+      fetch: () => getAutoTradePositions(),
+    );
+  }
+
+  @override
+  void invalidateAutoTradePositionsCache() {
+    _swr.invalidate(_kAutoTradePositionsKey);
+    // UserPnl reads from positions — invalidate both together so the
+    // Pulse card refreshes alongside the Trade tab on the same pull.
+    _swr.invalidate(_kUserPnlSnapshotKey);
+  }
+
+  @override
+  Stream<List<DispatchEvent>> watchRecentDispatchEvents({int limit = 20}) {
+    return _swr.watch<List<DispatchEvent>>(
+      _recentDispatchEventsKey(limit),
+      fetch: () => getRecentDispatchEvents(limit: limit),
+    );
+  }
+
+  @override
+  void invalidateRecentDispatchEventsCache({int limit = 20}) =>
+      _swr.invalidate(_recentDispatchEventsKey(limit));
+
+  @override
+  Stream<UserPnlSnapshot> watchUserPnlSnapshot() {
+    return _swr.watch<UserPnlSnapshot>(
+      _kUserPnlSnapshotKey,
+      fetch: () => assembleUserPnlSnapshot(this),
+    );
+  }
+
+  @override
+  void invalidateUserPnlSnapshotCache() =>
+      _swr.invalidate(_kUserPnlSnapshotKey);
 
   /// Pre-warm SWR caches in the background.  Called by the auth gate
   /// the moment a user becomes signed-in so the Live + Trade tabs
@@ -2272,6 +2504,52 @@ class HttpRepository implements LuminRepository {
       } catch (_) {
         // Swallow.
       }
+    });
+
+    // Agents — engine-global agent stats list.  First tap on Agents
+    // previously waited for a cold round-trip; the prewarm makes
+    // the list cards land instantly when the user navigates.
+    Future.microtask(() async {
+      try {
+        await watchAgents().last;
+      } catch (_) {}
+    });
+
+    // Trade tab — four parallel per-user fetches that previously fired
+    // sequentially in `didChangeDependencies` on first tab visit.
+    // Prewarming them in parallel here shifts that 4×RTT delay off
+    // the critical path (the user's first Trade tap).  Each is
+    // user-scoped via Firebase ID token; the SwrCache.clear() on
+    // sign-out keeps them from bleeding across identities.
+    Future.microtask(() async {
+      try {
+        await watchAutoTradeUserStatus().last;
+      } catch (_) {}
+    });
+    Future.microtask(() async {
+      try {
+        await watchAutoTradeRuntimeStatus().last;
+      } catch (_) {}
+    });
+    Future.microtask(() async {
+      try {
+        await watchAutoTradePositions().last;
+      } catch (_) {}
+    });
+    Future.microtask(() async {
+      try {
+        await watchRecentDispatchEvents(limit: 20).last;
+      } catch (_) {}
+    });
+
+    // Per-user PnL snapshot — drives the Pulse "TODAY'S P&L" card.
+    // Shares the underlying `getAutoTradePositions` fetch with the
+    // Trade tab prewarm above (SwrCache in-flight dedup hands them
+    // the same network call).
+    Future.microtask(() async {
+      try {
+        await watchUserPnlSnapshot().last;
+      } catch (_) {}
     });
 
     // RegionInfo — auto-trade gate.  fetchRegion already soft-fails
