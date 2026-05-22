@@ -139,17 +139,20 @@ class _PulsePageState extends State<PulsePage> {
 
   Widget _buildBody(AppConfigScope scope) {
     final data = _data;
-    if (data == null && _streamError == null) {
+    if (data == null) {
+      if (_streamError != null) {
+        return _ErrorView(
+          key: const ValueKey('pulse-error'),
+          error: _streamError.toString(),
+          onRetry: _refresh,
+          isLive: scope.repo.isLive,
+        );
+      }
       return const _PulseSkeleton(key: ValueKey('pulse-skeleton'));
     }
-    if (data == null && _streamError != null) {
-      return _ErrorView(
-        key: const ValueKey('pulse-error'),
-        error: _streamError.toString(),
-        onRetry: _refresh,
-        isLive: scope.repo.isLive,
-      );
-    }
+    // Past this point `data` is promoted to non-null PulseBundle for
+    // the remainder of the method — every child below reads through
+    // a single local without inline `!` operators.
     return ListView(
       key: const ValueKey('pulse-data'),
       physics: const AlwaysScrollableScrollPhysics(
@@ -157,7 +160,7 @@ class _PulsePageState extends State<PulsePage> {
       ),
       children: [
         if (!scope.repo.isLive) const PreviewBadge(),
-        _EngineStatusCard(engine: data!.engine),
+        _EngineStatusCard(engine: data.engine),
         const SizedBox(height: LuminSpacing.md),
         _RegimeBar(engine: data.engine),
         const SizedBox(height: LuminSpacing.md),
