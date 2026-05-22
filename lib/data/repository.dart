@@ -2260,6 +2260,20 @@ class HttpRepository implements LuminRepository {
       }
     });
 
+    // Signals list — first tap on the Signals tab previously waited
+    // for a cold network RTT (200-800ms+ depending on engine state +
+    // geo).  Same key the page subscribes to (`signals:all:100:_`)
+    // and the PulseBundle reuses via `assemblePulseBundle`, so the
+    // dedup hands all three consumers (Pulse bundle, Signals page,
+    // AutoTradeWatcher) one shared cache entry.
+    Future.microtask(() async {
+      try {
+        await watchSignals(status: 'all', limit: 100).last;
+      } catch (_) {
+        // Swallow.
+      }
+    });
+
     // RegionInfo — auto-trade gate.  fetchRegion already soft-fails
     // internally (returns "unknown" + not-blocked on any error), so
     // the try/catch here is purely defensive.

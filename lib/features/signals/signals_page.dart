@@ -5,6 +5,8 @@
 /// (All / TP / SL / Invalidated / Expired) and is applied client-side
 /// so we don't multiply API requests for what is essentially a status
 /// projection of the same closed-pool.
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../data/app_config.dart';
@@ -14,6 +16,7 @@ import '../../shared/format.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
 import '../../shared/widgets/preview_badge.dart';
+import '../../shared/widgets/shimmer.dart';
 import 'take_signal_sheet.dart';
 
 enum _SignalFilter { all, open, closed }
@@ -98,10 +101,19 @@ class _SignalsPageState extends State<SignalsPage> {
   // Stream-based load (Phase 2a perf push) — yields cached signals
   // synchronously on subscribe when ``HttpRepository`` has a fresh SWR
   // entry, then yields fresh data when the network round-trip
-  // completes.  First paint goes from "spinner during 200-2000ms RTT"
-  // to "instant cached list + seamless refresh".
-  late Stream<List<MockSignal>> _stream;
+  // completes.  We listen directly (instead of feeding StreamBuilder)
+  // so pull-to-refresh's Completer can signal off the same emit that
+  // drives the UI — matching the Trade tab's spinner-holds-until-done
+  // pattern.
+  StreamSubscription<List<MockSignal>>? _sub;
+  List<MockSignal>? _data;
+  Object? _streamError;
   LuminRepository? _lastRepo;
+
+  /// Completed by the stream listener on the post-invalidate emit so
+  /// [_refresh] can hold the RefreshIndicator spinner until fresh
+  /// data lands.  Same pattern as PulsePage / TradePage.
+  Completer<void>? _refreshDone;
 
   @override
   void didChangeDependencies() {
@@ -113,22 +125,56 @@ class _SignalsPageState extends State<SignalsPage> {
     }
   }
 
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
   void _resubscribe() {
+    _sub?.cancel();
     final repo = AppConfigScope.of(context).repo;
+    final stream = repo.watchSignals(status: _filter.apiValue, limit: 100);
     setState(() {
-      _stream = repo.watchSignals(status: _filter.apiValue, limit: 100);
+      _streamError = null;
     });
+    _sub = stream.listen(
+      (items) {
+        if (!mounted) return;
+        setState(() {
+          _data = items;
+          _streamError = null;
+        });
+        final done = _refreshDone;
+        if (done != null && !done.isCompleted) done.complete();
+      },
+      onError: (Object e, StackTrace _) {
+        if (!mounted) return;
+        setState(() => _streamError = e);
+        final done = _refreshDone;
+        if (done != null && !done.isCompleted) done.complete();
+      },
+    );
   }
 
   Future<void> _refresh() async {
-    // Pull-to-refresh: drop the SWR entry so the new stream re-fetches
-    // (the user explicitly asked for fresh), then resubscribe.  We
-    // deliberately don't await the stream — StreamBuilder repaints
-    // when fresh data lands, and RefreshIndicator releases its spinner
-    // immediately so the gesture feels responsive.
+    // Pull-to-refresh: invalidate the SWR entry, resubscribe to a
+    // fresh stream, and hold the spinner until the next emit lands
+    // (or 5s elapses).  Prior implementation released the spinner
+    // instantly and users couldn't tell whether the pull triggered
+    // a refresh — same regression the Trade tab fixed earlier.
     final repo = AppConfigScope.of(context).repo;
+    final completer = Completer<void>();
+    _refreshDone = completer;
     repo.invalidateSignalsCache(status: _filter.apiValue, limit: 100);
     _resubscribe();
+    try {
+      await completer.future.timeout(const Duration(seconds: 5));
+    } on TimeoutException {
+      // Stream didn't emit within 5s — release the spinner anyway.
+    } finally {
+      if (identical(_refreshDone, completer)) _refreshDone = null;
+    }
   }
 
   void _setFilter(_SignalFilter f) {
@@ -137,6 +183,11 @@ class _SignalsPageState extends State<SignalsPage> {
       _filter = f;
       // Reset sub-filter when switching primary chip — hidden when not Closed.
       _subFilter = _ClosedSubFilter.all;
+      // Clear data on filter change — the existing list is for a
+      // different status projection so showing it while the new one
+      // loads would be misleading.  Pull-to-refresh keeps data
+      // visible (SWR stale-while-revalidate); filter-tap doesn't.
+      _data = null;
     });
     _resubscribe();
   }
@@ -164,57 +215,56 @@ class _SignalsPageState extends State<SignalsPage> {
             child: RefreshIndicator(
               color: LuminColors.accent,
               onRefresh: _refresh,
-              child: StreamBuilder<List<MockSignal>>(
-                stream: _stream,
-                builder: (context, snap) {
-                  // Stale-while-revalidate: ``HttpRepository.watchSignals``
-                  // emits cached payload synchronously when a fresh
-                  // entry sits in the SWR cache, then emits fresh from
-                  // the network.  When neither has landed yet we show
-                  // skeleton cards (looks like the real list, no
-                  // spinner) — perceived-speed win over the prior
-                  // CircularProgressIndicator.
-                  if (!snap.hasData && snap.connectionState != ConnectionState.done) {
-                    return const _SignalsSkeleton();
-                  }
-                  if (snap.hasError && !snap.hasData) {
-                    return _SignalsError(
-                      error: snap.error.toString(),
-                      onRetry: _refresh,
-                    );
-                  }
-                  var items = snap.data ?? const <MockSignal>[];
-                  if (_filter == _SignalFilter.closed &&
-                      _subFilter != _ClosedSubFilter.all) {
-                    items = items
-                        .where((s) => _matchesSubFilter(s, _subFilter))
-                        .toList(growable: false);
-                  }
-                  if (items.isEmpty) {
-                    return _SignalsEmpty(
-                      filter: _filter,
-                      subFilter: _subFilter,
-                      isLive: scope.repo.isLive,
-                    );
-                  }
-                  return ListView.separated(
-                    physics: const AlwaysScrollableScrollPhysics(
-                      parent: BouncingScrollPhysics(),
-                    ),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: LuminSpacing.lg,
-                    ),
-                    itemCount: items.length,
-                    separatorBuilder: (_, __) =>
-                        const SizedBox(height: LuminSpacing.md),
-                    itemBuilder: (_, i) => _SignalCard(sig: items[i]),
-                  );
-                },
+              child: AnimatedSwitcher(
+                // 200ms cross-fade between skeleton ↔ data so the
+                // layout doesn't snap.  Matches PulsePage's pattern.
+                duration: const Duration(milliseconds: 200),
+                switchInCurve: Curves.easeOut,
+                switchOutCurve: Curves.easeIn,
+                child: _buildList(scope),
               ),
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildList(AppConfigScope scope) {
+    if (_data == null && _streamError == null) {
+      return const _SignalsSkeleton(key: ValueKey('signals-skeleton'));
+    }
+    if (_data == null && _streamError != null) {
+      return _SignalsError(
+        key: const ValueKey('signals-error'),
+        error: _streamError.toString(),
+        onRetry: _refresh,
+      );
+    }
+    var items = _data ?? const <MockSignal>[];
+    if (_filter == _SignalFilter.closed &&
+        _subFilter != _ClosedSubFilter.all) {
+      items = items
+          .where((s) => _matchesSubFilter(s, _subFilter))
+          .toList(growable: false);
+    }
+    if (items.isEmpty) {
+      return _SignalsEmpty(
+        key: const ValueKey('signals-empty'),
+        filter: _filter,
+        subFilter: _subFilter,
+        isLive: scope.repo.isLive,
+      );
+    }
+    return ListView.separated(
+      key: const ValueKey('signals-data'),
+      physics: const AlwaysScrollableScrollPhysics(
+        parent: BouncingScrollPhysics(),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
+      itemCount: items.length,
+      separatorBuilder: (_, __) => const SizedBox(height: LuminSpacing.md),
+      itemBuilder: (_, i) => _SignalCard(sig: items[i]),
     );
   }
 }
@@ -331,6 +381,7 @@ class _Chip extends StatelessWidget {
 
 class _SignalsEmpty extends StatelessWidget {
   const _SignalsEmpty({
+    super.key,
     required this.filter,
     required this.subFilter,
     required this.isLive,
@@ -395,21 +446,23 @@ class _SignalsEmpty extends StatelessWidget {
 /// dep we don't have yet; the static placeholder is already a big
 /// perceived-speed win over CircularProgressIndicator.
 class _SignalsSkeleton extends StatelessWidget {
-  const _SignalsSkeleton();
+  const _SignalsSkeleton({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return ListView.separated(
-      physics: const AlwaysScrollableScrollPhysics(
-        parent: BouncingScrollPhysics(),
+    return Shimmer(
+      child: ListView.separated(
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics(),
+        ),
+        padding: const EdgeInsets.symmetric(
+          horizontal: LuminSpacing.md,
+          vertical: LuminSpacing.sm,
+        ),
+        itemCount: 5,
+        separatorBuilder: (_, __) => const SizedBox(height: LuminSpacing.sm),
+        itemBuilder: (_, __) => const _SkeletonCard(),
       ),
-      padding: const EdgeInsets.symmetric(
-        horizontal: LuminSpacing.md,
-        vertical: LuminSpacing.sm,
-      ),
-      itemCount: 5,
-      separatorBuilder: (_, __) => const SizedBox(height: LuminSpacing.sm),
-      itemBuilder: (_, __) => const _SkeletonCard(),
     );
   }
 }
@@ -467,7 +520,11 @@ class _SkeletonBox extends StatelessWidget {
 }
 
 class _SignalsError extends StatelessWidget {
-  const _SignalsError({required this.error, required this.onRetry});
+  const _SignalsError({
+    super.key,
+    required this.error,
+    required this.onRetry,
+  });
   final String error;
   final Future<void> Function() onRetry;
 

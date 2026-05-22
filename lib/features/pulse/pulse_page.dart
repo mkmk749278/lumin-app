@@ -1,8 +1,13 @@
 /// Pulse — engine status dashboard.
 ///
-/// FutureBuilder against the live repo (or MockRepository when offline).
-/// Pull-to-refresh re-fetches; tier-conditional rendering hooks added so
-/// v0.0.8+ can hide paid-only widgets without restructuring the page.
+/// StreamBuilder against the live repo (or MockRepository when offline)
+/// with SWR caching at the repo layer.  Pull-to-refresh invalidates the
+/// SWR entry and holds the spinner until fresh data lands (5s timeout),
+/// mirroring the Trade tab's pattern — previously the spinner released
+/// instantly and users couldn't tell whether the pull triggered a
+/// refresh.
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../data/app_config.dart';
@@ -12,6 +17,7 @@ import '../../shared/format.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
 import '../../shared/widgets/preview_badge.dart';
+import '../../shared/widgets/shimmer.dart';
 import '../trade/paper_trades_page.dart';
 
 // _PulseBundle promoted to ``PulseBundle`` in lib/data/repository.dart
@@ -30,9 +36,20 @@ class _PulsePageState extends State<PulsePage> {
   // PulseBundle synchronously on subscribe when HttpRepository has a
   // fresh SWR entry, then yields fresh data when the network
   // round-trip completes.  First paint on tab re-entry goes from
-  // "spinner during 200-2000ms RTT" to instant.
-  late Stream<PulseBundle> _stream;
+  // "spinner during 200-2000ms RTT" to instant.  We listen directly
+  // (instead of feeding StreamBuilder) so the pull-to-refresh
+  // Completer can signal off the same stream emit that drives the UI.
+  StreamSubscription<PulseBundle>? _sub;
+  PulseBundle? _data;
+  Object? _streamError;
   LuminRepository? _lastRepo;
+
+  /// Set by [_refresh] so it can await the next fresh emit.  Completed
+  /// by the stream listener on the post-invalidate emit.  Without
+  /// this, RefreshIndicator released its spinner instantly and users
+  /// couldn't tell whether the pull actually triggered a refresh.
+  /// Same pattern as TradePage._refreshDone.
+  Completer<void>? _refreshDone;
 
   @override
   void didChangeDependencies() {
@@ -44,21 +61,59 @@ class _PulsePageState extends State<PulsePage> {
     }
   }
 
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
   void _resubscribe() {
+    _sub?.cancel();
     final repo = AppConfigScope.of(context).repo;
+    final stream = repo.watchPulseBundle();
     setState(() {
-      _stream = repo.watchPulseBundle();
+      _streamError = null;
     });
+    _sub = stream.listen(
+      (bundle) {
+        if (!mounted) return;
+        setState(() {
+          _data = bundle;
+          _streamError = null;
+        });
+        final done = _refreshDone;
+        if (done != null && !done.isCompleted) done.complete();
+      },
+      onError: (Object e, StackTrace _) {
+        if (!mounted) return;
+        setState(() => _streamError = e);
+        final done = _refreshDone;
+        if (done != null && !done.isCompleted) done.complete();
+      },
+    );
   }
 
   Future<void> _refresh() async {
-    // Pull-to-refresh: drop the SWR entry so the next emit re-fetches
-    // instead of serving stale.  We deliberately don't await the stream
-    // — StreamBuilder repaints when fresh data lands, and
-    // RefreshIndicator releases its spinner immediately.
+    // Pull-to-refresh: drop the SWR entry so the resubscribed stream
+    // refetches, then hold the spinner until the next emit lands so
+    // the gesture has visible feedback (the prior fire-and-forget
+    // released the spinner instantly — users couldn't tell whether
+    // the refresh actually triggered).  Timeout at 5s so a backend
+    // stall doesn't strand the UI in spin-forever.
     final repo = AppConfigScope.of(context).repo;
+    final completer = Completer<void>();
+    _refreshDone = completer;
     repo.invalidatePulseBundleCache();
     _resubscribe();
+    try {
+      await completer.future.timeout(const Duration(seconds: 5));
+    } on TimeoutException {
+      // Stream didn't emit within 5s — release the spinner anyway;
+      // the page either kept its previous data or shows the error
+      // path via the StreamBuilder.
+    } finally {
+      if (identical(_refreshDone, completer)) _refreshDone = null;
+    }
   }
 
   @override
@@ -69,47 +124,56 @@ class _PulsePageState extends State<PulsePage> {
       body: RefreshIndicator(
         color: LuminColors.accent,
         onRefresh: _refresh,
-        child: StreamBuilder<PulseBundle>(
-          stream: _stream,
-          builder: (context, snap) {
-            if (!snap.hasData && snap.connectionState != ConnectionState.done) {
-              return const _PulseSkeleton();
-            }
-            if (snap.hasError && !snap.hasData) {
-              return _ErrorView(
-                error: snap.error.toString(),
-                onRetry: _refresh,
-                isLive: scope.repo.isLive,
-              );
-            }
-            final data = snap.data!;
-            return ListView(
-              physics: const AlwaysScrollableScrollPhysics(
-                parent: BouncingScrollPhysics(),
-              ),
-              children: [
-                if (!scope.repo.isLive) const PreviewBadge(),
-                _EngineStatusCard(engine: data.engine),
-                const SizedBox(height: LuminSpacing.md),
-                _RegimeBar(engine: data.engine),
-                const SizedBox(height: LuminSpacing.md),
-                _TodayPnlCard(engine: data.engine),
-                const SizedBox(height: LuminSpacing.md),
-                _PnlChartCard(history: data.pnlHistory),
-                const SizedBox(height: LuminSpacing.md),
-                _DailyLossBudgetCard(engine: data.engine),
-                const SizedBox(height: LuminSpacing.md),
-                if (data.tickers.isNotEmpty) ...[
-                  _TopPairTickerStrip(tickers: data.tickers),
-                  const SizedBox(height: LuminSpacing.md),
-                ],
-                _RecentSignalsCard(recent: data.recent),
-                const SizedBox(height: LuminSpacing.xl),
-              ],
-            );
-          },
+        child: AnimatedSwitcher(
+          // 200ms cross-fade between skeleton ↔ data so the layout
+          // doesn't snap.  Matches the Binance / Robinhood feel where
+          // skeletons gently dissolve into populated cards.
+          duration: const Duration(milliseconds: 200),
+          switchInCurve: Curves.easeOut,
+          switchOutCurve: Curves.easeIn,
+          child: _buildBody(scope),
         ),
       ),
+    );
+  }
+
+  Widget _buildBody(AppConfigScope scope) {
+    final data = _data;
+    if (data == null && _streamError == null) {
+      return const _PulseSkeleton(key: ValueKey('pulse-skeleton'));
+    }
+    if (data == null && _streamError != null) {
+      return _ErrorView(
+        key: const ValueKey('pulse-error'),
+        error: _streamError.toString(),
+        onRetry: _refresh,
+        isLive: scope.repo.isLive,
+      );
+    }
+    return ListView(
+      key: const ValueKey('pulse-data'),
+      physics: const AlwaysScrollableScrollPhysics(
+        parent: BouncingScrollPhysics(),
+      ),
+      children: [
+        if (!scope.repo.isLive) const PreviewBadge(),
+        _EngineStatusCard(engine: data!.engine),
+        const SizedBox(height: LuminSpacing.md),
+        _RegimeBar(engine: data.engine),
+        const SizedBox(height: LuminSpacing.md),
+        _TodayPnlCard(engine: data.engine),
+        const SizedBox(height: LuminSpacing.md),
+        _PnlChartCard(history: data.pnlHistory),
+        const SizedBox(height: LuminSpacing.md),
+        _DailyLossBudgetCard(engine: data.engine),
+        const SizedBox(height: LuminSpacing.md),
+        if (data.tickers.isNotEmpty) ...[
+          _TopPairTickerStrip(tickers: data.tickers),
+          const SizedBox(height: LuminSpacing.md),
+        ],
+        _RecentSignalsCard(recent: data.recent),
+        const SizedBox(height: LuminSpacing.xl),
+      ],
     );
   }
 }
@@ -991,34 +1055,39 @@ class _RecentSignalRow extends StatelessWidget {
 /// shimmer dep added in this phase; the layout match alone delivers
 /// the perceived-speed win.
 class _PulseSkeleton extends StatelessWidget {
-  const _PulseSkeleton();
+  const _PulseSkeleton({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(
-        parent: BouncingScrollPhysics(),
+    // Single Shimmer ancestor — shaders compose cheaper as one mask
+    // over the whole list than per-card.  ScrollPhysics matches the
+    // populated list so pull-to-refresh still works while loading.
+    return Shimmer(
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics(),
+        ),
+        padding: const EdgeInsets.symmetric(
+          horizontal: LuminSpacing.md,
+          vertical: LuminSpacing.sm,
+        ),
+        children: const [
+          _PulseSkeletonCard(height: 92), // EngineStatus
+          SizedBox(height: LuminSpacing.md),
+          _PulseSkeletonCard(height: 44), // RegimeBar
+          SizedBox(height: LuminSpacing.md),
+          _PulseSkeletonCard(height: 96), // TodayPnl
+          SizedBox(height: LuminSpacing.md),
+          _PulseSkeletonCard(height: 180), // PnlChart
+          SizedBox(height: LuminSpacing.md),
+          _PulseSkeletonCard(height: 64), // DailyLossBudget
+          SizedBox(height: LuminSpacing.md),
+          _PulseSkeletonCard(height: 56), // Ticker strip
+          SizedBox(height: LuminSpacing.md),
+          _PulseSkeletonCard(height: 156), // RecentSignals (3 rows)
+          SizedBox(height: LuminSpacing.xl),
+        ],
       ),
-      padding: const EdgeInsets.symmetric(
-        horizontal: LuminSpacing.md,
-        vertical: LuminSpacing.sm,
-      ),
-      children: const [
-        _PulseSkeletonCard(height: 92), // EngineStatus
-        SizedBox(height: LuminSpacing.md),
-        _PulseSkeletonCard(height: 44), // RegimeBar
-        SizedBox(height: LuminSpacing.md),
-        _PulseSkeletonCard(height: 96), // TodayPnl
-        SizedBox(height: LuminSpacing.md),
-        _PulseSkeletonCard(height: 180), // PnlChart
-        SizedBox(height: LuminSpacing.md),
-        _PulseSkeletonCard(height: 64), // DailyLossBudget
-        SizedBox(height: LuminSpacing.md),
-        _PulseSkeletonCard(height: 56), // Ticker strip
-        SizedBox(height: LuminSpacing.md),
-        _PulseSkeletonCard(height: 156), // RecentSignals (3 rows)
-        SizedBox(height: LuminSpacing.xl),
-      ],
     );
   }
 }
@@ -1042,6 +1111,7 @@ class _PulseSkeletonCard extends StatelessWidget {
 
 class _ErrorView extends StatelessWidget {
   const _ErrorView({
+    super.key,
     required this.error,
     required this.onRetry,
     required this.isLive,
