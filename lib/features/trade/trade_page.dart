@@ -97,22 +97,25 @@ class _TradePageState extends State<TradePage> {
   Completer<void>? _refreshDone;
 
   // Auto-trade disabled banner state (PR-14 follow-up 3/3).
-  // Refreshed when the page mounts + on every pull-to-refresh.
-  // ``null`` while loading; populated once the engine returns.
+  // Now consumed via the SWR cache (``watchAutoTradeUserStatus``) so
+  // the prewarm at sign-in lands the value before the user navigates
+  // to Trade — first tap renders synchronously from cache instead of
+  // waiting on a fresh network round-trip.  ``null`` while loading.
   AutoTradeUserStatus? _autoTradeStatus;
+  StreamSubscription<AutoTradeUserStatus>? _userStatusSub;
 
   // Runtime composite status + server-side open positions (PR-C
-  // 2026-05-19).  Drive the Live-tab "Auto-trade armed" card and
-  // "your open positions" card respectively.  ``null`` until the
-  // first fetch lands.
+  // 2026-05-19).  Same SWR-stream pattern as ``_autoTradeStatus`` —
+  // prewarmed at sign-in for instant first paint.
   AutoTradeRuntimeStatus? _runtimeStatus;
+  StreamSubscription<AutoTradeRuntimeStatus>? _runtimeStatusSub;
   List<ServerSidePosition>? _serverPositions;
-  // Recent dispatch events (placed + rejected) from
-  // ``/api/auto-trade/recent-events`` — drives the Trade-tab Recent
-  // Activity card so the user can see *why* a signal didn't open on
-  // their Binance account (e.g. ``-2019 'Margin is insufficient.'``
-  // when the Futures wallet is empty).  ``null`` until first fetch.
+  StreamSubscription<List<ServerSidePosition>>? _positionsSub;
+  // Recent dispatch events (placed + rejected) — same SWR-stream
+  // pattern.  Engine endpoint ``/api/auto-trade/recent-events`` is
+  // user-scoped via Firebase ID token.
   List<DispatchEvent>? _recentDispatchEvents;
+  StreamSubscription<List<DispatchEvent>>? _dispatchEventsSub;
 
   @override
   void didChangeDependencies() {
@@ -121,72 +124,75 @@ class _TradePageState extends State<TradePage> {
     if (repo != _lastRepo) {
       _lastRepo = repo;
       _resubscribe();
-      _refreshAutoTradeStatus();
-      _refreshRuntimeStatus();
-      _refreshServerPositions();
-      _refreshRecentDispatchEvents();
+      _resubscribeAuxStreams();
     }
   }
 
-  Future<void> _refreshAutoTradeStatus() async {
-    try {
-      final repo = AppConfigScope.of(context).repo;
-      final status = await repo.getAutoTradeUserStatus();
-      if (!mounted) return;
-      setState(() => _autoTradeStatus = status);
-    } catch (_) {
-      // Status fetch failure is non-fatal — the banner just doesn't
-      // render.  Engine returns a safe default + 200 even under
-      // Firestore outages, so the only way to hit this catch is a
-      // network/5xx failure.
-      if (!mounted) return;
-      setState(() => _autoTradeStatus = null);
-    }
-  }
+  /// Re-subscribe to the four per-user SWR streams the page consumes
+  /// alongside the engine snapshot.  Called on initial dependency
+  /// resolution + on pull-to-refresh (after the relevant SWR keys
+  /// are invalidated so the resubscribe yields fresh values).
+  void _resubscribeAuxStreams() {
+    final repo = AppConfigScope.of(context).repo;
 
-  Future<void> _refreshRuntimeStatus() async {
-    try {
-      final repo = AppConfigScope.of(context).repo;
-      final status = await repo.getAutoTradeRuntimeStatus();
-      if (!mounted) return;
-      setState(() => _runtimeStatus = status);
-    } catch (_) {
-      if (!mounted) return;
-      // Leave whatever we last had — a transient 5xx shouldn't blank
-      // the gate card.  Initial-load failure leaves ``null`` so the
-      // Live body falls through to the legacy "disabled banner only"
-      // path.
-    }
-  }
+    _userStatusSub?.cancel();
+    _userStatusSub = repo.watchAutoTradeUserStatus().listen(
+      (status) {
+        if (!mounted) return;
+        setState(() => _autoTradeStatus = status);
+      },
+      onError: (Object _, StackTrace __) {
+        // Status fetch failure is non-fatal — the banner just doesn't
+        // render.  Engine returns a safe default + 200 even under
+        // Firestore outages, so the only way to hit this is a
+        // network/5xx failure.
+        if (!mounted) return;
+        setState(() => _autoTradeStatus = null);
+      },
+    );
 
-  Future<void> _refreshServerPositions() async {
-    try {
-      final repo = AppConfigScope.of(context).repo;
-      final positions = await repo.getAutoTradePositions();
-      if (!mounted) return;
-      setState(() => _serverPositions = positions);
-    } catch (_) {
-      if (!mounted) return;
-      // Same posture as runtime status: keep prior value on transient
-      // failure; ``null`` on initial-load failure hides the card.
-    }
-  }
+    _runtimeStatusSub?.cancel();
+    _runtimeStatusSub = repo.watchAutoTradeRuntimeStatus().listen(
+      (status) {
+        if (!mounted) return;
+        setState(() => _runtimeStatus = status);
+      },
+      onError: (Object _, StackTrace __) {
+        // Keep whatever we last had — a transient 5xx shouldn't
+        // blank the gate card.
+      },
+    );
 
-  Future<void> _refreshRecentDispatchEvents() async {
-    try {
-      final repo = AppConfigScope.of(context).repo;
-      final events = await repo.getRecentDispatchEvents(limit: 20);
-      if (!mounted) return;
-      setState(() => _recentDispatchEvents = events);
-    } catch (_) {
-      if (!mounted) return;
-      // Same posture — transient failure keeps the prior list.
-    }
+    _positionsSub?.cancel();
+    _positionsSub = repo.watchAutoTradePositions().listen(
+      (positions) {
+        if (!mounted) return;
+        setState(() => _serverPositions = positions);
+      },
+      onError: (Object _, StackTrace __) {
+        // Same posture as runtime status.
+      },
+    );
+
+    _dispatchEventsSub?.cancel();
+    _dispatchEventsSub = repo.watchRecentDispatchEvents(limit: 20).listen(
+      (events) {
+        if (!mounted) return;
+        setState(() => _recentDispatchEvents = events);
+      },
+      onError: (Object _, StackTrace __) {
+        // Same posture — transient failure keeps the prior list.
+      },
+    );
   }
 
   @override
   void dispose() {
     _engineSub?.cancel();
+    _userStatusSub?.cancel();
+    _runtimeStatusSub?.cancel();
+    _positionsSub?.cancel();
+    _dispatchEventsSub?.cancel();
     _bundleController?.close();
     super.dispose();
   }
@@ -250,34 +256,24 @@ class _TradePageState extends State<TradePage> {
   // positions via Firestore listeners in a follow-up PR.
 
   Future<void> _refresh() async {
-    // Pull-to-refresh also re-fetches the auto-trade status so a
-    // freshly-tripped per-user breaker shows the banner on the
-    // next user-visible refresh, not next Trade-tab navigation.
-    unawaited(_refreshAutoTradeStatus());
-    unawaited(_refreshRuntimeStatus());
-    unawaited(_refreshServerPositions());
-    // Recent dispatch events — without this, the Trade-tab Recent
-    // Activity card stays stuck on the first-load snapshot until
-    // the user navigates away and back to the Trade tab.  Owner
-    // reported 2026-05-20: "still old binance activity showing
-    // not updating".
-    unawaited(_refreshRecentDispatchEvents());
-    // Pull-to-refresh: invalidate the engine SWR entry so the next
-    // emit refetches; ``_resubscribe`` rebuilds the bundle controller
-    // and starts a fresh Binance slice future.
-    //
-    // We hold the RefreshIndicator spinner until the first fresh emit
-    // arrives (signalled by the engine listener completing
-    // ``_refreshDone``) so the user sees a visible "refreshing" state
-    // for the duration of the round-trip — previously the spinner
-    // snapped shut instantly and users couldn't tell whether the pull
-    // actually triggered a refresh.  Timeout caps the spinner at 5 s
-    // so a backend stall doesn't strand the UI in spin-forever.
+    // Pull-to-refresh: invalidate every SWR key this page consumes,
+    // then resubscribe so the streams yield fresh values.  We hold
+    // the RefreshIndicator spinner until the engine emit arrives
+    // (the slowest of the bunch — auxes are typically smaller
+    // single-shot Firestore reads) so the gesture has visible
+    // feedback.  Owner reported 2026-05-20: "still old binance
+    // activity showing not updating" — fixed once aux fetches
+    // started going through the SWR invalidate path too.
     final repo = AppConfigScope.of(context).repo;
     final completer = Completer<void>();
     _refreshDone = completer;
     repo.invalidateTradeEngineSnapshotCache();
+    repo.invalidateAutoTradeUserStatusCache();
+    repo.invalidateAutoTradeRuntimeStatusCache();
+    repo.invalidateAutoTradePositionsCache();
+    repo.invalidateRecentDispatchEventsCache(limit: 20);
     _resubscribe();
+    _resubscribeAuxStreams();
     try {
       await completer.future.timeout(const Duration(seconds: 5));
     } on TimeoutException {
@@ -285,9 +281,6 @@ class _TradePageState extends State<TradePage> {
       // The page either kept its previous data or shows the error
       // path via the StreamBuilder; this method has done its job.
     } finally {
-      // Drop the reference so a subsequent emit doesn't try to
-      // complete an already-completed completer.  Future emits are
-      // routine SWR refreshes, not pull-to-refresh.
       if (identical(_refreshDone, completer)) _refreshDone = null;
     }
   }

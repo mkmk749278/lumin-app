@@ -1,8 +1,13 @@
 /// Pulse — engine status dashboard.
 ///
-/// FutureBuilder against the live repo (or MockRepository when offline).
-/// Pull-to-refresh re-fetches; tier-conditional rendering hooks added so
-/// v0.0.8+ can hide paid-only widgets without restructuring the page.
+/// StreamBuilder against the live repo (or MockRepository when offline)
+/// with SWR caching at the repo layer.  Pull-to-refresh invalidates the
+/// SWR entry and holds the spinner until fresh data lands (5s timeout),
+/// mirroring the Trade tab's pattern — previously the spinner released
+/// instantly and users couldn't tell whether the pull triggered a
+/// refresh.
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../data/app_config.dart';
@@ -12,6 +17,7 @@ import '../../shared/format.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
 import '../../shared/widgets/preview_badge.dart';
+import '../../shared/widgets/shimmer.dart';
 import '../trade/paper_trades_page.dart';
 
 // _PulseBundle promoted to ``PulseBundle`` in lib/data/repository.dart
@@ -30,9 +36,20 @@ class _PulsePageState extends State<PulsePage> {
   // PulseBundle synchronously on subscribe when HttpRepository has a
   // fresh SWR entry, then yields fresh data when the network
   // round-trip completes.  First paint on tab re-entry goes from
-  // "spinner during 200-2000ms RTT" to instant.
-  late Stream<PulseBundle> _stream;
+  // "spinner during 200-2000ms RTT" to instant.  We listen directly
+  // (instead of feeding StreamBuilder) so the pull-to-refresh
+  // Completer can signal off the same stream emit that drives the UI.
+  StreamSubscription<PulseBundle>? _sub;
+  PulseBundle? _data;
+  Object? _streamError;
   LuminRepository? _lastRepo;
+
+  /// Set by [_refresh] so it can await the next fresh emit.  Completed
+  /// by the stream listener on the post-invalidate emit.  Without
+  /// this, RefreshIndicator released its spinner instantly and users
+  /// couldn't tell whether the pull actually triggered a refresh.
+  /// Same pattern as TradePage._refreshDone.
+  Completer<void>? _refreshDone;
 
   @override
   void didChangeDependencies() {
@@ -44,72 +61,128 @@ class _PulsePageState extends State<PulsePage> {
     }
   }
 
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
   void _resubscribe() {
+    _sub?.cancel();
     final repo = AppConfigScope.of(context).repo;
+    final stream = repo.watchPulseBundle();
     setState(() {
-      _stream = repo.watchPulseBundle();
+      _streamError = null;
     });
+    _sub = stream.listen(
+      (bundle) {
+        if (!mounted) return;
+        setState(() {
+          _data = bundle;
+          _streamError = null;
+        });
+        final done = _refreshDone;
+        if (done != null && !done.isCompleted) done.complete();
+      },
+      onError: (Object e, StackTrace _) {
+        if (!mounted) return;
+        setState(() => _streamError = e);
+        final done = _refreshDone;
+        if (done != null && !done.isCompleted) done.complete();
+      },
+    );
   }
 
   Future<void> _refresh() async {
-    // Pull-to-refresh: drop the SWR entry so the next emit re-fetches
-    // instead of serving stale.  We deliberately don't await the stream
-    // — StreamBuilder repaints when fresh data lands, and
-    // RefreshIndicator releases its spinner immediately.
+    // Pull-to-refresh: drop the SWR entry so the resubscribed stream
+    // refetches, then hold the spinner until the next emit lands so
+    // the gesture has visible feedback (the prior fire-and-forget
+    // released the spinner instantly — users couldn't tell whether
+    // the refresh actually triggered).  Timeout at 5s so a backend
+    // stall doesn't strand the UI in spin-forever.
     final repo = AppConfigScope.of(context).repo;
+    final completer = Completer<void>();
+    _refreshDone = completer;
     repo.invalidatePulseBundleCache();
     _resubscribe();
+    try {
+      await completer.future.timeout(const Duration(seconds: 5));
+    } on TimeoutException {
+      // Stream didn't emit within 5s — release the spinner anyway;
+      // the page either kept its previous data or shows the error
+      // path via the StreamBuilder.
+    } finally {
+      if (identical(_refreshDone, completer)) _refreshDone = null;
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final scope = AppConfigScope.of(context);
+    final isLive = AppConfigScope.of(context).repo.isLive;
     return Scaffold(
       appBar: AppBar(title: const Text('Pulse')),
       body: RefreshIndicator(
         color: LuminColors.accent,
         onRefresh: _refresh,
-        child: StreamBuilder<PulseBundle>(
-          stream: _stream,
-          builder: (context, snap) {
-            if (!snap.hasData && snap.connectionState != ConnectionState.done) {
-              return const _PulseSkeleton();
-            }
-            if (snap.hasError && !snap.hasData) {
-              return _ErrorView(
-                error: snap.error.toString(),
-                onRetry: _refresh,
-                isLive: scope.repo.isLive,
-              );
-            }
-            final data = snap.data!;
-            return ListView(
-              physics: const AlwaysScrollableScrollPhysics(
-                parent: BouncingScrollPhysics(),
-              ),
-              children: [
-                if (!scope.repo.isLive) const PreviewBadge(),
-                _EngineStatusCard(engine: data.engine),
-                const SizedBox(height: LuminSpacing.md),
-                _RegimeBar(engine: data.engine),
-                const SizedBox(height: LuminSpacing.md),
-                _TodayPnlCard(engine: data.engine),
-                const SizedBox(height: LuminSpacing.md),
-                _PnlChartCard(history: data.pnlHistory),
-                const SizedBox(height: LuminSpacing.md),
-                _DailyLossBudgetCard(engine: data.engine),
-                const SizedBox(height: LuminSpacing.md),
-                if (data.tickers.isNotEmpty) ...[
-                  _TopPairTickerStrip(tickers: data.tickers),
-                  const SizedBox(height: LuminSpacing.md),
-                ],
-                _RecentSignalsCard(recent: data.recent),
-                const SizedBox(height: LuminSpacing.xl),
-              ],
-            );
-          },
+        child: AnimatedSwitcher(
+          // 200ms cross-fade between skeleton ↔ data so the layout
+          // doesn't snap.  Matches the Binance / Robinhood feel where
+          // skeletons gently dissolve into populated cards.
+          duration: const Duration(milliseconds: 200),
+          switchInCurve: Curves.easeOut,
+          switchOutCurve: Curves.easeIn,
+          child: _buildBody(isLive: isLive),
         ),
       ),
+    );
+  }
+
+  Widget _buildBody({required bool isLive}) {
+    final data = _data;
+    if (data == null) {
+      if (_streamError != null) {
+        return _ErrorView(
+          key: const ValueKey('pulse-error'),
+          error: _streamError.toString(),
+          onRetry: _refresh,
+          isLive: isLive,
+        );
+      }
+      return const _PulseSkeleton(key: ValueKey('pulse-skeleton'));
+    }
+    // Past this point `data` is promoted to non-null PulseBundle for
+    // the remainder of the method — every child below reads through
+    // a single local without inline `!` operators.
+    return ListView(
+      key: const ValueKey('pulse-data'),
+      physics: const AlwaysScrollableScrollPhysics(
+        parent: BouncingScrollPhysics(),
+      ),
+      children: [
+        if (!isLive) const PreviewBadge(),
+        _EngineStatusCard(engine: data.engine),
+        const SizedBox(height: LuminSpacing.md),
+        _RegimeBar(engine: data.engine),
+        const SizedBox(height: LuminSpacing.md),
+        _TodayPnlCard(userPnl: data.userPnl),
+        const SizedBox(height: LuminSpacing.md),
+        // 30-day chart is engine-global PnL (per OWNER_BRIEF §3.8
+        // single paper book).  Only render to users who're actually
+        // trading on the engine — otherwise it's misleading.  Engine-
+        // health overview is the EngineStatusCard above.
+        if (data.userPnl.hasAnyTrading) ...[
+          _PnlChartCard(history: data.pnlHistory),
+          const SizedBox(height: LuminSpacing.md),
+          _DailyLossBudgetCard(engine: data.engine),
+          const SizedBox(height: LuminSpacing.md),
+        ],
+        if (data.tickers.isNotEmpty) ...[
+          _TopPairTickerStrip(tickers: data.tickers),
+          const SizedBox(height: LuminSpacing.md),
+        ],
+        _RecentSignalsCard(recent: data.recent),
+        const SizedBox(height: LuminSpacing.xl),
+      ],
     );
   }
 }
@@ -322,14 +395,31 @@ class _RegimeBar extends StatelessWidget {
 /// to :class:`PaperTradesPage` so the daily aggregate has a one-tap
 /// drill-down to the per-trade ledger.  The Today/Weekly/Monthly
 /// aggregate layout above stays untouched.
+/// Per-user PnL card.  Renders the user's own realised PnL from
+/// server-side execution positions (B18) — not the engine-global
+/// number that was leaking across all users pre-2026-05-22.
+///
+/// Two render modes:
+///   * Active trader (``userPnl.hasAnyTrading``): show realised USD +
+///     open-position count + "View all trades" deep-link.
+///   * Not enabled yet: show "Trading not enabled" CTA pointing to
+///     the Trade tab.  Avoids the previous bug where every signed-in
+///     user — even brand-new accounts that hadn't opted in — saw the
+///     engine's shared PnL as if it were theirs.
 class _TodayPnlCard extends StatelessWidget {
-  const _TodayPnlCard({required this.engine});
-  final MockEngineSnapshot engine;
+  const _TodayPnlCard({required this.userPnl});
+  final UserPnlSnapshot userPnl;
 
   @override
   Widget build(BuildContext context) {
-    final positive = engine.todayPnlUsd >= 0;
+    if (!userPnl.hasAnyTrading) {
+      return const _NotTradingYetCard();
+    }
+    final positive = userPnl.realisedUsd >= 0;
     final color = positive ? LuminColors.success : LuminColors.loss;
+    final openSubtitle = userPnl.openPositionCount == 1
+        ? '1 open position'
+        : '${userPnl.openPositionCount} open positions';
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
       child: LuminCard(
@@ -347,9 +437,9 @@ class _TodayPnlCard extends StatelessWidget {
                 const SizedBox(width: LuminSpacing.md),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    Text(
-                      "TODAY'S P&L",
+                  children: [
+                    const Text(
+                      "YOUR REALISED P&L",
                       style: TextStyle(
                         color: LuminColors.textMuted,
                         fontSize: 10,
@@ -357,10 +447,10 @@ class _TodayPnlCard extends StatelessWidget {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    SizedBox(height: 2),
+                    const SizedBox(height: 2),
                     Text(
-                      'Realised across paper / live trades',
-                      style: TextStyle(
+                      openSubtitle,
+                      style: const TextStyle(
                         color: LuminColors.textSecondary,
                         fontSize: 11,
                       ),
@@ -368,36 +458,20 @@ class _TodayPnlCard extends StatelessWidget {
                   ],
                 ),
                 const Spacer(),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      '${positive ? '+' : ''}\$${engine.todayPnlUsd.toStringAsFixed(2)}',
-                      style: TextStyle(
-                        color: color,
-                        fontSize: 22,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.5,
-                      ),
-                    ),
-                    Text(
-                      '${positive ? '+' : ''}${engine.todayPnlPct.toStringAsFixed(2)}% on margin',
-                      style: TextStyle(
-                        color: color.withOpacity(0.85),
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
+                Text(
+                  '${positive ? '+' : ''}\$${userPnl.realisedUsd.toStringAsFixed(2)}',
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -0.5,
+                  ),
                 ),
               ],
             ),
             const SizedBox(height: LuminSpacing.sm),
             const Divider(color: LuminColors.cardBorder, height: 1),
             const SizedBox(height: 4),
-            // Drill-down to the paginated per-trade ledger — owner asked
-            // for honest "what would I have earned" context next to the
-            // aggregate number.
             Material(
               color: Colors.transparent,
               child: InkWell(
@@ -432,6 +506,75 @@ class _TodayPnlCard extends StatelessWidget {
                     ],
                   ),
                 ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Empty-state card for users who haven't enabled trading yet.
+/// Replaces the engine-global PnL number that was previously rendered
+/// to every signed-in user.
+class _NotTradingYetCard extends StatelessWidget {
+  const _NotTradingYetCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
+      child: LuminCard(
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: LuminColors.accent.withOpacity(0.10),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.rocket_launch_outlined,
+                color: LuminColors.accent,
+                size: 22,
+              ),
+            ),
+            const SizedBox(width: LuminSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Text(
+                    "YOUR REALISED P&L",
+                    style: TextStyle(
+                      color: LuminColors.textMuted,
+                      fontSize: 10,
+                      letterSpacing: 1.2,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'Trading not enabled yet',
+                    style: TextStyle(
+                      color: LuminColors.textPrimary,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  SizedBox(height: 2),
+                  Text(
+                    'Connect Binance on the Trade tab to start '
+                    'auto-trading signals on your own account.',
+                    style: TextStyle(
+                      color: LuminColors.textSecondary,
+                      fontSize: 11,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -536,13 +679,28 @@ class _PnlChartCard extends StatelessWidget {
               children: const [
                 Icon(Icons.show_chart, size: 16, color: LuminColors.accent),
                 SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'ENGINE — LAST 30 DAYS',
+                    style: TextStyle(
+                      color: LuminColors.textMuted,
+                      fontSize: 10,
+                      letterSpacing: 1.2,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                // Single shared paper book per OWNER_BRIEF §3.8 —
+                // this chart aggregates every signal across the
+                // project, not the viewing user's own trades.  Per-
+                // user lifetime history ships when the engine adds
+                // a per-user PnL endpoint.
                 Text(
-                  'P&L — LAST 30 DAYS',
+                  'shared',
                   style: TextStyle(
                     color: LuminColors.textMuted,
-                    fontSize: 10,
-                    letterSpacing: 1.2,
-                    fontWeight: FontWeight.w600,
+                    fontSize: 9,
+                    fontStyle: FontStyle.italic,
                   ),
                 ),
               ],
@@ -991,34 +1149,39 @@ class _RecentSignalRow extends StatelessWidget {
 /// shimmer dep added in this phase; the layout match alone delivers
 /// the perceived-speed win.
 class _PulseSkeleton extends StatelessWidget {
-  const _PulseSkeleton();
+  const _PulseSkeleton({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(
-        parent: BouncingScrollPhysics(),
+    // Single Shimmer ancestor — shaders compose cheaper as one mask
+    // over the whole list than per-card.  ScrollPhysics matches the
+    // populated list so pull-to-refresh still works while loading.
+    return Shimmer(
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics(),
+        ),
+        padding: const EdgeInsets.symmetric(
+          horizontal: LuminSpacing.md,
+          vertical: LuminSpacing.sm,
+        ),
+        children: const [
+          _PulseSkeletonCard(height: 92), // EngineStatus
+          SizedBox(height: LuminSpacing.md),
+          _PulseSkeletonCard(height: 44), // RegimeBar
+          SizedBox(height: LuminSpacing.md),
+          _PulseSkeletonCard(height: 96), // TodayPnl
+          SizedBox(height: LuminSpacing.md),
+          _PulseSkeletonCard(height: 180), // PnlChart
+          SizedBox(height: LuminSpacing.md),
+          _PulseSkeletonCard(height: 64), // DailyLossBudget
+          SizedBox(height: LuminSpacing.md),
+          _PulseSkeletonCard(height: 56), // Ticker strip
+          SizedBox(height: LuminSpacing.md),
+          _PulseSkeletonCard(height: 156), // RecentSignals (3 rows)
+          SizedBox(height: LuminSpacing.xl),
+        ],
       ),
-      padding: const EdgeInsets.symmetric(
-        horizontal: LuminSpacing.md,
-        vertical: LuminSpacing.sm,
-      ),
-      children: const [
-        _PulseSkeletonCard(height: 92), // EngineStatus
-        SizedBox(height: LuminSpacing.md),
-        _PulseSkeletonCard(height: 44), // RegimeBar
-        SizedBox(height: LuminSpacing.md),
-        _PulseSkeletonCard(height: 96), // TodayPnl
-        SizedBox(height: LuminSpacing.md),
-        _PulseSkeletonCard(height: 180), // PnlChart
-        SizedBox(height: LuminSpacing.md),
-        _PulseSkeletonCard(height: 64), // DailyLossBudget
-        SizedBox(height: LuminSpacing.md),
-        _PulseSkeletonCard(height: 56), // Ticker strip
-        SizedBox(height: LuminSpacing.md),
-        _PulseSkeletonCard(height: 156), // RecentSignals (3 rows)
-        SizedBox(height: LuminSpacing.xl),
-      ],
     );
   }
 }
@@ -1042,6 +1205,7 @@ class _PulseSkeletonCard extends StatelessWidget {
 
 class _ErrorView extends StatelessWidget {
   const _ErrorView({
+    super.key,
     required this.error,
     required this.onRetry,
     required this.isLive,

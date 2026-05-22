@@ -16,12 +16,21 @@ class NavShell extends StatefulWidget {
 class _NavShellState extends State<NavShell> {
   int _index = 0;
 
-  static const _pages = <Widget>[
-    PulsePage(),
-    SignalsPage(),
-    AgentsPage(),
-    TradePage(),
-    SettingsPage(),
+  /// Lazy mount — IndexedStack mounts every child on first build, so a
+  /// vanilla list of 5 tabs fires `initState` + `didChangeDependencies`
+  /// on every one of them at cold open.  TradePage alone kicks off
+  /// five parallel `/api/...` fetches in `didChangeDependencies`; if
+  /// the user lands on Pulse and never opens Trade, those are pure
+  /// waste.  Tracking a "has this tab ever been selected" bool per
+  /// index lets us render `SizedBox.shrink()` for unvisited tabs and
+  /// keep state preservation for visited ones (once true, never
+  /// flipped back to false).
+  late final List<bool> _visited = [
+    true, // Pulse — landing tab, always built
+    false,
+    false,
+    false,
+    false,
   ];
 
   static const _destinations = <NavigationDestination>[
@@ -39,6 +48,31 @@ class _NavShellState extends State<NavShell> {
   // surfaced on the Trade tab via AutoTradeUserStatus + on the Server-side
   // execution settings page).
 
+  Widget _tabAt(int i) {
+    if (!_visited[i]) return const SizedBox.shrink();
+    switch (i) {
+      case 0:
+        return const PulsePage();
+      case 1:
+        return const SignalsPage();
+      case 2:
+        return const AgentsPage();
+      case 3:
+        return const TradePage();
+      case 4:
+        return const SettingsPage();
+    }
+    return const SizedBox.shrink();
+  }
+
+  void _onSelect(int i) {
+    if (i == _index) return;
+    setState(() {
+      _visited[i] = true;
+      _index = i;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -47,12 +81,17 @@ class _NavShellState extends State<NavShell> {
           // Update banner sits above all tabs — sticky-on-top, ignored
           // when no newer GitHub Release is available.
           const UpdateBanner(),
-          Expanded(child: IndexedStack(index: _index, children: _pages)),
+          Expanded(
+            child: IndexedStack(
+              index: _index,
+              children: List.generate(5, _tabAt),
+            ),
+          ),
         ],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() => _index = i),
+        onDestinationSelected: _onSelect,
         destinations: _destinations,
       ),
     );
