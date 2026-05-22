@@ -115,14 +115,31 @@ class AuthService {
   ///     completes invisible verification — there's no code to type.
   ///   * `onVerificationFailed` fires on any error before code-sent
   ///     (invalid number, quota exceeded, reCAPTCHA dismissed, etc.).
+  ///
+  /// `timeout` is the Firebase session-validity window — past this
+  /// point [confirmSmsCode] will fail with `session-expired`.  We pin
+  /// it to 2 minutes (the Android maximum) rather than letting the
+  /// SDK use its 30-second default, which is shorter than SMS-delivery
+  /// latency in India / EU and caused a fleet-wide
+  /// "The SMS code has expired" regression once the Play Integrity
+  /// path-fix on 2026-05-21 unblocked actual code delivery.
+  ///
+  /// `resendToken` — pass the int captured from a previous
+  /// `codeSent(verificationId, resendToken)` callback to re-issue
+  /// on the same Firebase session (skips the reCAPTCHA round-trip).
+  /// Null on the first send.
   Future<void> startSmsSignIn({
     required String phoneE164,
     required void Function(String verificationId, int? resendToken) onCodeSent,
     required void Function(FirebaseAuthException error) onVerificationFailed,
     required void Function(UserCredential credential) onAutoVerified,
+    int? resendToken,
+    Duration timeout = const Duration(seconds: 120),
   }) async {
     await _auth.verifyPhoneNumber(
       phoneNumber: phoneE164,
+      timeout: timeout,
+      forceResendingToken: resendToken,
       verificationCompleted: (credential) async {
         final result = await _auth.signInWithCredential(credential);
         onAutoVerified(result);
@@ -270,6 +287,23 @@ class AuthService {
   /// what the engine now stores.
   Future<void> markOnboarded() async {
     _cachedNeedsOnboarding = false;
+  }
+
+  /// Hydrate the cached engine metadata from a `GET /api/profile`
+  /// response.  Used by the SMS path after `confirmSmsCode` succeeds —
+  /// Firebase doesn't know about tier / user_id / needs_onboarding,
+  /// only the engine does, so the OTP page does one round-trip and
+  /// hands the result here.
+  void cacheEngineMetadata({
+    int? userId,
+    String? tier,
+    String? paidUntil,
+    required bool needsOnboarding,
+  }) {
+    _cachedUserId = userId;
+    _cachedTier = tier;
+    _cachedPaidUntil = paidUntil;
+    _cachedNeedsOnboarding = needsOnboarding;
   }
 
   /// Quick boot-time check: is a Firebase user currently signed in?
