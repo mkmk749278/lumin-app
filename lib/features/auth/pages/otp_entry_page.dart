@@ -12,14 +12,20 @@
 ///     receives a Firebase custom token, and signs in.
 ///
 /// On success the AuthGate stream listener in `main.dart` swaps the
-/// shell to NavShell automatically.  For brand-new users (cached
-/// `needs_onboarding=true` from the verify response) we route to
-/// SignupPage first.
+/// shell to NavShell automatically.  Brand-new users land on
+/// SignupPage first — Telegram path uses the cached
+/// `needs_onboarding` from the verify response; SMS path round-trips
+/// `/api/profile` after Firebase signin to learn the same bit (since
+/// the SMS verify itself doesn't touch the engine).
 ///
-/// "Resend" re-issues the OTP on the same channel.  Telegram
-/// re-uses [AuthService.startTelegramSignIn]; SMS sends the user
-/// back to PhoneSignInPage so Firebase can regenerate the
-/// verification ID and resend token.
+/// "Resend" re-issues the OTP on the same channel.  Telegram re-uses
+/// [AuthService.startTelegramSignIn].  SMS re-invokes the same call
+/// with the saved `forceResendingToken` so Firebase dispatches a
+/// fresh code on the same session (no reCAPTCHA round-trip), and the
+/// page swaps in the new verificationId + resendToken without
+/// navigating away.  If Firebase reports `session-expired`, the
+/// resend CTA is promoted to primary so the user has a one-tap
+/// recovery instead of a dead-end error.
 import 'dart:async';
 
 import 'package:firebase_auth/firebase_auth.dart';
@@ -30,6 +36,7 @@ import '../../../app/nav_shell.dart';
 import '../../../data/app_config.dart';
 import '../../../data/auth_service.dart';
 import '../../../data/country_codes.dart';
+import '../../../data/repository.dart';
 import '../../../shared/tokens.dart';
 import '../../../shared/widgets/lumin_card.dart';
 import 'signup_page.dart';
@@ -45,6 +52,7 @@ class OtpEntryPage extends StatefulWidget {
     required this.channel,
     required this.expiresInSeconds,
     this.verificationId,
+    this.resendToken,
     this.channelUsed,
     this.countryHint,
   });
@@ -57,6 +65,13 @@ class OtpEntryPage extends StatefulWidget {
   /// Firebase `verificationId` from the `codeSent` callback.  Required
   /// for SMS, ignored for Telegram.
   final String? verificationId;
+
+  /// Firebase resend token captured alongside [verificationId] on the
+  /// initial `codeSent` callback.  Passed back into
+  /// [AuthService.startSmsSignIn] on resend so Firebase reuses the
+  /// same Phone Auth session (skipping the reCAPTCHA round-trip).
+  /// Null for the Telegram channel.
+  final int? resendToken;
 
   final int expiresInSeconds;
 
@@ -80,13 +95,29 @@ class _OtpEntryPageState extends State<OtpEntryPage> {
   bool _busy = false;
   String? _error;
 
+  /// True when the most recent failure was a `session-expired` from
+  /// Firebase — in that state the Verify button is useless until a
+  /// fresh code arrives, so we swap the bottom CTA to "Send a new
+  /// code" and hide the countdown.
+  bool _sessionExpired = false;
+
+  /// Live verificationId / resendToken — start with whatever
+  /// PhoneSignInPage handed us, then update on each successful resend
+  /// so the next [_submit] uses the most-recent session.
+  String? _verificationId;
+  int? _resendToken;
+
   late int _secondsLeft;
+  late int _windowSeconds;
   Timer? _ticker;
 
   @override
   void initState() {
     super.initState();
-    _secondsLeft = widget.expiresInSeconds;
+    _verificationId = widget.verificationId;
+    _resendToken = widget.resendToken;
+    _windowSeconds = widget.expiresInSeconds;
+    _secondsLeft = _windowSeconds;
     _startTicker();
   }
 
@@ -95,7 +126,7 @@ class _OtpEntryPageState extends State<OtpEntryPage> {
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       setState(() {
-        _secondsLeft = (_secondsLeft - 1).clamp(0, widget.expiresInSeconds);
+        _secondsLeft = (_secondsLeft - 1).clamp(0, _windowSeconds);
       });
       if (_secondsLeft == 0) {
         _ticker?.cancel();
@@ -121,7 +152,8 @@ class _OtpEntryPageState extends State<OtpEntryPage> {
 
   Future<void> _submit() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
-    final auth = AppConfigScope.of(context).auth;
+    final scope = AppConfigScope.of(context);
+    final auth = scope.auth;
     if (auth == null) {
       setState(() => _error = 'Live backend not configured.');
       return;
@@ -129,26 +161,44 @@ class _OtpEntryPageState extends State<OtpEntryPage> {
     setState(() {
       _busy = true;
       _error = null;
+      _sessionExpired = false;
     });
     try {
       if (widget.channel == OtpChannel.sms) {
-        final vid = widget.verificationId;
+        final vid = _verificationId;
         if (vid == null) {
           throw AuthError(
             'SMS verification id missing — restart signin from the phone page.',
           );
         }
         await auth.confirmSmsCode(vid, _codeCtl.text.trim());
+        // SMS path doesn't go through the engine for the OTP itself —
+        // ask `/api/profile` whether this user is new so we route them
+        // to SignupPage like the Telegram path does.  Failure here
+        // (engine down, transient 5xx) falls through to NavShell; the
+        // user can complete profile from Settings → Profile later.
+        try {
+          final Profile profile = await scope.repo.fetchProfile();
+          auth.cacheEngineMetadata(
+            userId: profile.userId,
+            tier: profile.tier,
+            paidUntil: profile.paidUntil,
+            needsOnboarding: profile.needsOnboarding,
+          );
+        } catch (_) {
+          // Swallow — needsOnboarding stays at its default (false for
+          // the SMS path).  Worst case: a brand-new user lands on
+          // NavShell instead of SignupPage and finishes profile from
+          // Settings → Profile.  Better than blocking signin on a
+          // transient profile-fetch failure.
+        }
       } else {
         await auth.confirmTelegramCode(widget.phone, _codeCtl.text.trim());
       }
       if (!mounted) return;
-      // Brand-new users still need to land on SignupPage before the
-      // AuthGate stream routes them to NavShell.  The cached flag is
-      // populated by [AuthService.confirmTelegramCode]; the SMS path
-      // leaves it false (engine backfills `firebase_uid` on existing
-      // users — if they actually are new the `/api/profile` round-trip
-      // surfaces it and Settings → Profile picks up the slack).
+      // Brand-new users land on SignupPage before NavShell.  Telegram
+      // populates `currentNeedsOnboarding` from the verify response;
+      // SMS populates it from the `/api/profile` round-trip above.
       if (auth.currentNeedsOnboarding()) {
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(
@@ -171,7 +221,26 @@ class _OtpEntryPageState extends State<OtpEntryPage> {
       }
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.message ?? 'Verify failed (${e.code})');
+      // `session-expired` means the Firebase verification window
+      // (pinned to 120s in AuthService.startSmsSignIn) elapsed before
+      // the user typed the code, OR the SDK invalidated the session
+      // for some other reason.  In either case the same code-entry
+      // can't recover; the user needs a fresh SMS.  Surface a clear
+      // "Send a new code" CTA and stop the countdown.
+      if (e.code == 'session-expired') {
+        _ticker?.cancel();
+        setState(() {
+          _sessionExpired = true;
+          _secondsLeft = 0;
+          _error = 'That code expired — tap "Send a new code" below '
+              'and we\'ll text you a fresh one.';
+        });
+      } else if (e.code == 'invalid-verification-code') {
+        setState(() => _error = 'That code didn\'t match — double-check '
+            'and try again.');
+      } else {
+        setState(() => _error = e.message ?? 'Verify failed (${e.code})');
+      }
     } on AuthError catch (e) {
       if (!mounted) return;
       setState(() => _error = e.message);
@@ -195,7 +264,9 @@ class _OtpEntryPageState extends State<OtpEntryPage> {
         final result = await auth.startTelegramSignIn(widget.phone);
         if (!mounted) return;
         setState(() {
+          _windowSeconds = result.expiresInSeconds;
           _secondsLeft = result.expiresInSeconds;
+          _sessionExpired = false;
         });
         _startTicker();
         ScaffoldMessenger.of(context).showSnackBar(
@@ -205,18 +276,59 @@ class _OtpEntryPageState extends State<OtpEntryPage> {
           ),
         );
       } else {
-        // For SMS we'd need to call `verifyPhoneNumber` again and that
-        // produces a brand-new verificationId — easier (and less
-        // confusing) to send the user back to PhoneSignInPage so they
-        // can re-confirm the number first.  Firebase's resend token
-        // is opaque + can't survive a Navigator.pop without state
-        // hoisting; that's a future polish.
-        if (!mounted) return;
-        Navigator.of(context).pop();
+        // SMS resend — re-issue on the same Firebase Phone Auth
+        // session by handing the saved [_resendToken] back via
+        // `forceResendingToken`.  Firebase skips the reCAPTCHA step
+        // and dispatches a fresh code; the `codeSent` callback hands
+        // us a refreshed verificationId + resendToken which we swap
+        // into state so the next [_submit] uses them.
+        final completer = Completer<void>();
+        await auth.startSmsSignIn(
+          phoneE164: widget.phone,
+          resendToken: _resendToken,
+          onCodeSent: (verificationId, resendToken) {
+            if (!mounted) {
+              if (!completer.isCompleted) completer.complete();
+              return;
+            }
+            setState(() {
+              _verificationId = verificationId;
+              _resendToken = resendToken;
+              _windowSeconds = 120;
+              _secondsLeft = 120;
+              _sessionExpired = false;
+              _codeCtl.clear();
+            });
+            _startTicker();
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('New code sent'),
+                duration: Duration(seconds: 2),
+              ),
+            );
+            if (!completer.isCompleted) completer.complete();
+          },
+          onVerificationFailed: (FirebaseAuthException e) {
+            if (mounted) {
+              setState(() => _error = e.message ?? 'Couldn\'t resend (${e.code})');
+            }
+            if (!completer.isCompleted) completer.complete();
+          },
+          onAutoVerified: (_) {
+            // Auto-resolution signed the user in directly — the
+            // AuthGate stream listener will route forward on the next
+            // tick.  Nothing for us to do here.
+            if (!completer.isCompleted) completer.complete();
+          },
+        );
+        await completer.future;
       }
     } on AuthError catch (e) {
       if (!mounted) return;
       setState(() => _error = e.message);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = 'Couldn\'t resend: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -233,7 +345,7 @@ class _OtpEntryPageState extends State<OtpEntryPage> {
 
   @override
   Widget build(BuildContext context) {
-    final canResend = _secondsLeft == 0 && !_busy;
+    final canResend = (_secondsLeft == 0 || _sessionExpired) && !_busy;
     return Scaffold(
       backgroundColor: LuminColors.bgDeep,
       appBar: AppBar(
@@ -329,7 +441,7 @@ class _OtpEntryPageState extends State<OtpEntryPage> {
                       borderRadius: BorderRadius.circular(LuminRadii.md),
                     ),
                   ),
-                  onPressed: _busy ? null : _submit,
+                  onPressed: (_busy || _sessionExpired) ? null : _submit,
                   child: _busy
                       ? const SizedBox(
                           width: 18,
@@ -352,14 +464,19 @@ class _OtpEntryPageState extends State<OtpEntryPage> {
                   child: TextButton(
                     onPressed: canResend ? _resend : null,
                     child: Text(
-                      canResend
-                          ? 'Resend code'
-                          : 'Resend in ${_formatCountdown(_secondsLeft)}',
+                      _sessionExpired
+                          ? 'Send a new code'
+                          : canResend
+                              ? 'Resend code'
+                              : 'Resend in ${_formatCountdown(_secondsLeft)}',
                       style: TextStyle(
                         color: canResend
                             ? LuminColors.accent
                             : LuminColors.textMuted,
                         fontSize: 13,
+                        fontWeight: _sessionExpired
+                            ? FontWeight.w600
+                            : FontWeight.w400,
                       ),
                     ),
                   ),

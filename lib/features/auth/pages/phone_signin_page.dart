@@ -117,7 +117,7 @@ class _PhoneSignInPageState extends State<PhoneSignInPage> {
     try {
       await auth.startSmsSignIn(
         phoneE164: phone,
-        onCodeSent: (verificationId, _) {
+        onCodeSent: (verificationId, resendToken) {
           if (!mounted) return;
           setState(() => _busy = false);
           Navigator.of(context).push(
@@ -126,7 +126,12 @@ class _PhoneSignInPageState extends State<PhoneSignInPage> {
                 phone: phone,
                 channel: OtpChannel.sms,
                 verificationId: verificationId,
-                expiresInSeconds: 60, // matches Firebase auto-retrieval timeout
+                resendToken: resendToken,
+                // Firebase session timeout is pinned to 120s in
+                // AuthService.startSmsSignIn — match it here so the
+                // countdown's "Resend" enables exactly when the prior
+                // session has actually expired.
+                expiresInSeconds: 120,
                 countryHint: _country,
               ),
             ),
