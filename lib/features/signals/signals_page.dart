@@ -199,12 +199,12 @@ class _SignalsPageState extends State<SignalsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final scope = AppConfigScope.of(context);
+    final isLive = AppConfigScope.of(context).repo.isLive;
     return Scaffold(
       appBar: AppBar(title: const Text('Signals')),
       body: Column(
         children: [
-          if (!scope.repo.isLive) const PreviewBadge(),
+          if (!isLive) const PreviewBadge(),
           _FilterRow(current: _filter, onChanged: _setFilter),
           if (_filter == _SignalFilter.closed) ...[
             const SizedBox(height: LuminSpacing.sm),
@@ -221,7 +221,7 @@ class _SignalsPageState extends State<SignalsPage> {
                 duration: const Duration(milliseconds: 200),
                 switchInCurve: Curves.easeOut,
                 switchOutCurve: Curves.easeIn,
-                child: _buildList(scope),
+                child: _buildList(isLive: isLive),
               ),
             ),
           ),
@@ -230,7 +230,7 @@ class _SignalsPageState extends State<SignalsPage> {
     );
   }
 
-  Widget _buildList(AppConfigScope scope) {
+  Widget _buildList({required bool isLive}) {
     if (_data == null && _streamError == null) {
       return const _SignalsSkeleton(key: ValueKey('signals-skeleton'));
     }
@@ -253,7 +253,7 @@ class _SignalsPageState extends State<SignalsPage> {
         key: const ValueKey('signals-empty'),
         filter: _filter,
         subFilter: _subFilter,
-        isLive: scope.repo.isLive,
+        isLive: isLive,
       );
     }
     return ListView.separated(

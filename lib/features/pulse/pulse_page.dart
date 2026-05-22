@@ -118,7 +118,7 @@ class _PulsePageState extends State<PulsePage> {
 
   @override
   Widget build(BuildContext context) {
-    final scope = AppConfigScope.of(context);
+    final isLive = AppConfigScope.of(context).repo.isLive;
     return Scaffold(
       appBar: AppBar(title: const Text('Pulse')),
       body: RefreshIndicator(
@@ -131,13 +131,13 @@ class _PulsePageState extends State<PulsePage> {
           duration: const Duration(milliseconds: 200),
           switchInCurve: Curves.easeOut,
           switchOutCurve: Curves.easeIn,
-          child: _buildBody(scope),
+          child: _buildBody(isLive: isLive),
         ),
       ),
     );
   }
 
-  Widget _buildBody(AppConfigScope scope) {
+  Widget _buildBody({required bool isLive}) {
     final data = _data;
     if (data == null) {
       if (_streamError != null) {
@@ -145,7 +145,7 @@ class _PulsePageState extends State<PulsePage> {
           key: const ValueKey('pulse-error'),
           error: _streamError.toString(),
           onRetry: _refresh,
-          isLive: scope.repo.isLive,
+          isLive: isLive,
         );
       }
       return const _PulseSkeleton(key: ValueKey('pulse-skeleton'));
@@ -159,7 +159,7 @@ class _PulsePageState extends State<PulsePage> {
         parent: BouncingScrollPhysics(),
       ),
       children: [
-        if (!scope.repo.isLive) const PreviewBadge(),
+        if (!isLive) const PreviewBadge(),
         _EngineStatusCard(engine: data.engine),
         const SizedBox(height: LuminSpacing.md),
         _RegimeBar(engine: data.engine),
