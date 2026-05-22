@@ -126,7 +126,7 @@ class _PhoneSignInPageState extends State<PhoneSignInPage> {
                 phone: phone,
                 channel: OtpChannel.sms,
                 verificationId: verificationId,
-                expiresInSeconds: 60, // matches Firebase auto-retrieval timeout
+                expiresInSeconds: 180, // matches the 180s timeout we pass to verifyPhoneNumber
                 countryHint: _country,
               ),
             ),

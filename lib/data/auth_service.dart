@@ -123,6 +123,14 @@ class AuthService {
   }) async {
     await _auth.verifyPhoneNumber(
       phoneNumber: phoneE164,
+      // SDK default is 30s — too tight for Indian carriers, where SMS
+      // delivery routinely takes 30–60s.  By the time the user opens
+      // the SMS, reads, and types, the verificationId is past its
+      // server-side window and `signInWithCredential` rejects with
+      // "The sms code has expired."  3 minutes covers worst-case
+      // delivery + tester typing comfortably while still staying inside
+      // Firebase's documented 5-minute max.
+      timeout: const Duration(seconds: 180),
       verificationCompleted: (credential) async {
         final result = await _auth.signInWithCredential(credential);
         onAutoVerified(result);
