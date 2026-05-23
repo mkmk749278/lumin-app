@@ -38,6 +38,7 @@ import '../../shared/format.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
 import '../../shared/widgets/preview_badge.dart';
+import '../settings/pages/symbol_preference_page.dart';
 import 'paper_trades_page.dart';
 
 class _TradeBundle {
@@ -490,6 +491,16 @@ class _TradePageState extends State<TradePage> {
     final runtime = _runtimeStatus;
     final serverPositions = _serverPositions;
     final recentEvents = _recentDispatchEvents;
+    // Non-traders get a stripped-down Live tab: just the gate checklist
+    // pointing them at what they need to enable.  The dispatch-event
+    // history + engine signal stream + open positions card are noise
+    // when there's no Binance key connected — there's nothing to
+    // surface in any of them, and stacking three empty cards under the
+    // gates is the "Trade > Live tab became messy" symptom the owner
+    // reported 2026-05-23.  Once the user connects a key, these come
+    // back into view because the data they carry becomes meaningful.
+    final hasBinanceKey =
+        runtime != null && runtime.binanceKeyConnected;
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(
         parent: BouncingScrollPhysics(),
@@ -510,29 +521,25 @@ class _TradePageState extends State<TradePage> {
           _AutoTradeArmedCard(runtime: runtime),
           const SizedBox(height: LuminSpacing.md),
         ],
-        // Your server-side open positions (engine reads Firestore).
-        // Empty list → empty-state card.  ``null`` (load failed) →
-        // hidden, runtime-status card carries the diagnostic.
-        if (serverPositions != null) ...[
-          _ServerPositionsCard(positions: serverPositions),
-          const SizedBox(height: LuminSpacing.md),
+        // The remaining cards (open positions, recent activity on
+        // YOUR account, engine signal stream) only render once the
+        // user has actually connected a Binance key.  Until then the
+        // gate checklist above is the actionable surface.
+        if (hasBinanceKey) ...[
+          if (serverPositions != null) ...[
+            _ServerPositionsCard(positions: serverPositions),
+            const SizedBox(height: LuminSpacing.md),
+          ],
+          if (recentEvents != null) ...[
+            _RecentDispatchEventsCard(events: recentEvents),
+            const SizedBox(height: LuminSpacing.md),
+          ],
+          // Engine signal stream — what the engine is detecting right
+          // now.  NOT user-specific.  Useful for traders to see
+          // momentum; pure noise to users who haven't enabled.
+          _ActivityCard(events: data.activity),
+          const SizedBox(height: LuminSpacing.xl),
         ],
-        // Recent activity for your account — placed + rejected orders
-        // the engine attempted on your Binance key, with plain-English
-        // translations for rejection codes (most commonly empty
-        // Futures wallet → "Insufficient margin").  Hidden until first
-        // fetch; ``null`` = load failed (transient).
-        if (recentEvents != null) ...[
-          _RecentDispatchEventsCard(events: recentEvents),
-          const SizedBox(height: LuminSpacing.md),
-        ],
-        // Engine signal stream — what the engine is detecting right
-        // now.  NOT user-specific.  Useful informational view: a
-        // signal in this feed only triggers a user order when the
-        // symbol is on the allowlist (shown in the armed card above)
-        // AND every other gate is green.
-        _ActivityCard(events: data.activity),
-        const SizedBox(height: LuminSpacing.xl),
       ],
     );
   }
@@ -549,7 +556,14 @@ class _TradePageState extends State<TradePage> {
   ///   * Paper trade history (PaperTradesPage inline).
   Widget _buildPaperBody(BuildContext context, _TradeBundle data) {
     final scope = AppConfigScope.of(context);
-    final activeMode = data.userSettings.mode ?? data.autoMode.mode;
+    // Per-user only — do NOT fall back to ``data.autoMode.mode``
+    // (engine-wide).  Pre-2026-05-23 the fallback was rendering Paper
+    // mode "on" for every authenticated user whenever the engine's
+    // global auto-mode was 'paper', because new users hadn't set
+    // their own ``userSettings.mode`` yet.  Owner-reported: "trade>
+    // paper there it's still showing default on".  Now null = off
+    // and the off-state notice fires correctly.
+    final activeMode = data.userSettings.mode ?? 'off';
     final paperActive = activeMode == 'paper';
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(
@@ -1886,51 +1900,17 @@ class _AutoTradeArmedCard extends StatelessWidget {
                       : 'Currently ${runtime.userMode!.toUpperCase()} — '
                           'switch to Live to place real orders.',
             ),
-            if (runtime.allowedSymbols.isNotEmpty) ...[
+            // Symbol allowlist — only meaningful once the user has a
+            // Binance key connected (otherwise no orders flow through
+            // anyway, so showing "85 active symbols" is just clutter).
+            // When shown, render as a compact count + "view details"
+            // link to Settings → Symbol preference rather than dumping
+            // the full 85-pair list as a wall of text.  Owner-reported
+            // 2026-05-23: "pairs list is ugly".
+            if (runtime.binanceKeyConnected &&
+                runtime.allowedSymbols.isNotEmpty) ...[
               const SizedBox(height: LuminSpacing.sm),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: LuminSpacing.sm,
-                  vertical: LuminSpacing.xs,
-                ),
-                decoration: BoxDecoration(
-                  color: LuminColors.bgDeep,
-                  borderRadius: BorderRadius.circular(LuminRadii.sm),
-                ),
-                child: Text(
-                  // Effective list = engine cap ∩ user's symbol_preference.
-                  // When the user has narrowed via Settings → Symbol
-                  // preference, this shows only the pairs they kept.
-                  // When effective < engine cap we also surface a hint
-                  // line so the user understands their own narrowing
-                  // is causing the difference.
-                  runtime.effectiveAllowedSymbols.isEmpty
-                      ? 'You opted out of all symbols.  No orders '
-                          'will be placed for your account.'
-                      : 'Your active symbols: '
-                          '${runtime.effectiveAllowedSymbols.join(', ')}',
-                  style: const TextStyle(
-                    color: LuminColors.textSecondary,
-                    fontSize: 11,
-                    height: 1.4,
-                  ),
-                ),
-              ),
-              const SizedBox(height: LuminSpacing.xs),
-              Text(
-                runtime.effectiveAllowedSymbols.length ==
-                        runtime.allowedSymbols.length
-                    ? 'Signals outside this list are filtered before '
-                        'reaching Binance — by design (blast-radius cap).'
-                    : 'You\'ve narrowed from the engine allowlist of '
-                        '${runtime.allowedSymbols.length}.  Edit in '
-                        'Settings → Symbol preference.',
-                style: const TextStyle(
-                  color: LuminColors.textMuted,
-                  fontSize: 10,
-                  height: 1.4,
-                ),
-              ),
+              _SymbolAllowlistSummary(runtime: runtime),
             ],
           ],
         ),
@@ -1978,6 +1958,98 @@ class _AutoTradeArmedCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+
+/// Compact replacement for the pre-2026-05-23 80-pair wall-of-text
+/// inside :class:`_AutoTradeArmedCard`.  Renders one line summarising
+/// the user's effective allowlist + a single-line variant of the
+/// "blast-radius cap" footnote.  Detail belongs on Settings → Symbol
+/// preference, not on the Live tab.
+///
+/// Three states:
+///   * Effective list empty: explicit "opted out of everything" note.
+///   * Effective < engine cap (user has narrowed): "N of M symbols".
+///   * Effective == engine cap: "N symbols allowed".
+class _SymbolAllowlistSummary extends StatelessWidget {
+  const _SymbolAllowlistSummary({required this.runtime});
+
+  final AutoTradeRuntimeStatus runtime;
+
+  @override
+  Widget build(BuildContext context) {
+    final effective = runtime.effectiveAllowedSymbols.length;
+    final total = runtime.allowedSymbols.length;
+    final narrowed = effective != total;
+    final String headline;
+    final Color headlineColor;
+    if (effective == 0) {
+      headline = 'You opted out of every symbol';
+      headlineColor = LuminColors.loss;
+    } else if (narrowed) {
+      headline = '$effective of $total symbols enabled';
+      headlineColor = LuminColors.accent;
+    } else {
+      headline = '$total symbols enabled — engine allowlist';
+      headlineColor = LuminColors.textSecondary;
+    }
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(LuminRadii.sm),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => const SymbolPreferencePage(),
+          ),
+        ),
+        child: Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: LuminSpacing.sm,
+            vertical: LuminSpacing.xs,
+          ),
+          decoration: BoxDecoration(
+            color: LuminColors.bgDeep,
+            borderRadius: BorderRadius.circular(LuminRadii.sm),
+          ),
+          child: Row(
+            children: [
+              const Icon(
+                Icons.filter_list,
+                size: 14,
+                color: LuminColors.textMuted,
+              ),
+              const SizedBox(width: LuminSpacing.xs),
+              Expanded(
+                child: Text(
+                  headline,
+                  style: TextStyle(
+                    color: headlineColor,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+              ),
+              const Text(
+                'Edit',
+                style: TextStyle(
+                  color: LuminColors.accent,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(width: 2),
+              const Icon(
+                Icons.arrow_forward,
+                size: 12,
+                color: LuminColors.accent,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
