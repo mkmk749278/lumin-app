@@ -660,8 +660,12 @@ class _DailyLossBudgetCard extends StatelessWidget {
 /// 30-day P&L chart + weekly/monthly summary header.
 ///
 /// Owner audit (2026-05-08): "Daily, Weekly and monthly PnL along Daily PnL
-/// Chat".  Sources from the engine's persistent ``pnl_history.json`` ledger
-/// via the ``/api/pnl/history`` endpoint (engine PR #338).
+/// Chat".  Sources from ``/api/pnl/history`` (engine PR #338); since
+/// 2026-05-24 the engine filters the paper series per user by their
+/// paper-subscription windows when the caller carries a user_id token,
+/// so the chart shows trades that closed while THIS user had paper
+/// auto-trade on — not engine-wide. Label was renamed from
+/// "ENGINE — LAST 30 DAYS" to make the per-user scope explicit.
 class _PnlChartCard extends StatelessWidget {
   const _PnlChartCard({required this.history});
   final PnlHistory history;
@@ -681,7 +685,7 @@ class _PnlChartCard extends StatelessWidget {
                 SizedBox(width: 6),
                 Expanded(
                   child: Text(
-                    'ENGINE — LAST 30 DAYS',
+                    'YOUR PAPER P&L — LAST 30 DAYS',
                     style: TextStyle(
                       color: LuminColors.textMuted,
                       fontSize: 10,
