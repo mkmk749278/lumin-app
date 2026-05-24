@@ -512,6 +512,19 @@ class _TradePageState extends State<TradePage> {
         // this user's per-user circuit breaker hasn't tripped).
         if (_autoTradeStatus != null && !_autoTradeStatus!.isFullyEnabled)
           _AutoTradeDisabledBanner(status: _autoTradeStatus!),
+        // Insufficient-margin auto-pause banner (engine PR #479,
+        // 2026-05-24).  Renders when the engine has stamped the user's
+        // dispatcher as paused after N consecutive Binance -2019
+        // rejections.  Carries an inline "Resume" button that fires
+        // POST /api/auto-mode/resume-mine — the user-facing reset of
+        // the pause flag.  Owner-reported 2026-05-23: every signal
+        // was spamming the Recent Activity card with the same
+        // insufficient-margin error.
+        if (data.userSettings.isAutoPaused)
+          _AutoPauseBanner(
+            settings: data.userSettings,
+            onResumed: _refresh,
+          ),
         const SizedBox(height: LuminSpacing.md),
         // Auto-trade armed card (PR-C 2026-05-19) — per-gate green/red
         // checks + the symbol allowlist as a footnote.  Hidden until
@@ -1814,6 +1827,182 @@ class _AutoTradeDisabledBanner extends StatelessWidget {
                   ),
                 ),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+/// Per-user auto-pause banner (engine PR #479).
+///
+/// Renders on the Live tab when ``data.userSettings.pausedReason`` is set,
+/// which happens after the engine sees N consecutive Binance ``-2019``
+/// (insufficient margin) rejections for this user. Carries an inline
+/// "Resume" button that fires :meth:`LuminRepository.resumeMineAutoTrade`
+/// to clear the pause; the parent's ``onResumed`` callback triggers a
+/// refresh so the banner disappears and Recent Activity starts updating
+/// again on the next signal.
+///
+/// Why a separate banner rather than reusing ``_AutoTradeDisabledBanner``:
+/// the existing banner is sourced from ``AutoTradeUserStatus`` (the
+/// engine-wide + per-user safety-gate result), and its messaging is
+/// "contact support" — the user can't self-recover. Auto-pause is the
+/// opposite: it IS the user's job to fix (top up Futures wallet) and
+/// they CAN self-recover (tap Resume).  Sharing the widget would force
+/// awkward branches; cleaner to keep them as sibling banners.
+class _AutoPauseBanner extends StatefulWidget {
+  const _AutoPauseBanner({
+    required this.settings,
+    required this.onResumed,
+  });
+
+  final AutoTradeSettings settings;
+  final Future<void> Function() onResumed;
+
+  @override
+  State<_AutoPauseBanner> createState() => _AutoPauseBannerState();
+}
+
+class _AutoPauseBannerState extends State<_AutoPauseBanner> {
+  bool _resuming = false;
+
+  /// Plain-English copy keyed off the engine's typed reason string.
+  /// Forward-compatible default: when the engine introduces a new
+  /// reason (e.g. ``'binance_key_revoked'``), the app renders a
+  /// generic banner instead of a blank — the raw reason becomes the
+  /// subtitle so the operator can still see what happened.
+  String get _title {
+    switch (widget.settings.pausedReason) {
+      case 'insufficient_margin':
+        return 'Auto-trade paused — wallet empty';
+      default:
+        return 'Auto-trade paused';
+    }
+  }
+
+  String get _body {
+    switch (widget.settings.pausedReason) {
+      case 'insufficient_margin':
+        return 'Your Binance Futures wallet does not have enough '
+            'USDT to open positions at your current notional. '
+            'Top up the Futures wallet, then tap Resume.';
+      default:
+        return 'The engine paused dispatching for this account. '
+            'Reason: ${widget.settings.pausedReason ?? "unknown"}. '
+            'Tap Resume to clear once the underlying issue is fixed.';
+    }
+  }
+
+  Future<void> _onResume() async {
+    if (_resuming) return;
+    setState(() => _resuming = true);
+    final repo = AppConfigScope.of(context).repo;
+    try {
+      final cleared = await repo.resumeMineAutoTrade();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            cleared
+                ? 'Auto-trade resumed. Next signal will dispatch.'
+                : 'Already active — no pause to clear.',
+          ),
+          duration: const Duration(seconds: 3),
+          backgroundColor: LuminColors.success,
+        ),
+      );
+      await widget.onResumed();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Resume failed: $e'),
+          duration: const Duration(seconds: 4),
+          backgroundColor: LuminColors.loss,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _resuming = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.symmetric(
+        horizontal: LuminSpacing.lg,
+        vertical: LuminSpacing.sm,
+      ),
+      padding: const EdgeInsets.all(LuminSpacing.md),
+      decoration: BoxDecoration(
+        color: LuminColors.bgCard,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: LuminColors.warn, width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(
+                Icons.pause_circle_outline,
+                color: LuminColors.warn,
+                size: 20,
+              ),
+              const SizedBox(width: LuminSpacing.sm),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _title,
+                      style: const TextStyle(
+                        color: LuminColors.warn,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: LuminSpacing.xs),
+                    Text(
+                      _body,
+                      style: const TextStyle(
+                        color: LuminColors.textPrimary,
+                        fontSize: 12,
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: LuminSpacing.sm),
+          Align(
+            alignment: Alignment.centerRight,
+            child: FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: LuminColors.warn,
+                foregroundColor: LuminColors.bgDeep,
+              ),
+              onPressed: _resuming ? null : _onResume,
+              icon: _resuming
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 1.6,
+                        color: LuminColors.bgDeep,
+                      ),
+                    )
+                  : const Icon(Icons.play_arrow, size: 16),
+              label: const Text(
+                'Resume',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
             ),
           ),
         ],
