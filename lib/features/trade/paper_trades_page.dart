@@ -6,18 +6,20 @@
 /// ROI% pill, entry/exit/qty/notional grid, fees + net PnL + timestamps.
 /// Tap a row → :class:`PaperTradeDetailPage`.
 ///
-/// The app-bar overflow menu carries two destructive actions:
+/// The app-bar overflow menu carries up to two destructive actions:
 ///
-///   * **Close all open positions** — flattens the paper book at zero-
-///     move fills (entry price; fees only) via
-///     ``POST /api/auto-mode/paper/close-all``.  The reset endpoint
-///     refuses while open positions exist (B12 lifecycle guard) and
-///     directs users here, so this is the prerequisite step for the
-///     reset flow.
-///   * **Reset balance** — zeros cumulative paper PnL and archives the
-///     ledger via ``POST /api/auto-mode/paper/reset``.  Owner-confirmed
-///     via dialog before firing; falls back to a "Close all first?"
-///     prompt when the 409-open-positions error surfaces.
+///   * **Clear my history** (all users) — carves a fresh per-user
+///     paper-visibility window via ``POST /api/auto-mode/paper/reset-mine``
+///     (engine PR #478, 2026-05-23). The user's view of
+///     ``GET /api/trades`` becomes empty; engine state is untouched;
+///     other users' views are unaffected.  Replaces the pre-2026-05-23
+///     ``/reset`` call which returned 403 to non-owner users (the
+///     headline bug this surface was sending to fresh signups).
+///   * **Close all engine positions** (owner only) — flattens the
+///     engine's paper book at zero-move fills (entry price; fees only)
+///     via ``POST /api/auto-mode/paper/close-all``. Owner-only because
+///     it affects every user who has paper mode enabled, not just the
+///     caller — the action mutates shared engine state.
 import 'package:flutter/material.dart';
 
 import '../../data/app_config.dart';
@@ -143,9 +145,10 @@ class _PaperTradesPageState extends State<PaperTradesPage> {
     }
   }
 
-  /// Confirm + fire ``resetPaperBalance``.  Identical body to the
-  /// owner's spec so subscribers see a consistent destructive-action
-  /// warning across the app.
+  /// Confirm + fire ``resetMinePaperHistory``. Per-user reset (carves a
+  /// fresh visibility window) — works for every tier including free.
+  /// Replaces the pre-2026-05-23 ``resetPaperBalance`` call which was
+  /// owner-only on the engine and 403'd free users.
   Future<void> _confirmReset() async {
     if (_resetting) return;
     final ok = await showDialog<bool>(
@@ -158,7 +161,7 @@ class _PaperTradesPageState extends State<PaperTradesPage> {
             SizedBox(width: LuminSpacing.sm),
             Expanded(
               child: Text(
-                'Reset paper balance?',
+                'Clear my paper history?',
                 style: TextStyle(
                   color: LuminColors.textPrimary,
                   fontSize: 16,
@@ -169,9 +172,9 @@ class _PaperTradesPageState extends State<PaperTradesPage> {
           ],
         ),
         content: const Text(
-          'This zeros your cumulative paper PnL and resets your paper '
-          'equity to \$1000. The trade history will be archived but '
-          "you'll start a fresh set. This cannot be undone.",
+          'Your paper trade list will start fresh from now. '
+          'Prior trades stay in the engine for the audit ledger '
+          'but disappear from your view. This cannot be undone.',
           style: TextStyle(
             color: LuminColors.textPrimary,
             fontSize: 13,
@@ -193,7 +196,7 @@ class _PaperTradesPageState extends State<PaperTradesPage> {
             ),
             onPressed: () => Navigator.of(ctx).pop(true),
             child: const Text(
-              'Reset',
+              'Clear',
               style: TextStyle(fontWeight: FontWeight.w700),
             ),
           ),
@@ -201,101 +204,38 @@ class _PaperTradesPageState extends State<PaperTradesPage> {
       ),
     );
     if (ok != true || !mounted) return;
-    await _doReset();
+    await _doResetMine();
   }
 
-  /// Inner reset call — pulled out of ``_confirmReset`` so the
-  /// 409 → close-all → retry recovery flow can call it without
-  /// re-prompting for confirmation.
-  Future<void> _doReset() async {
+  /// Per-user "clear my history" call. Replaces the prior
+  /// ``_doReset`` + ``_closeAllThenReset`` recovery flow — the new
+  /// ``/reset-mine`` endpoint doesn't have a 409-open-positions
+  /// constraint (it operates on the user's visibility window, not
+  /// engine state) so the close-all recovery path is gone.
+  Future<void> _doResetMine() async {
     final repo = AppConfigScope.of(context).repo;
     setState(() => _resetting = true);
     try {
-      final resp = await repo.resetPaperBalance();
+      await repo.resetMinePaperHistory();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Paper balance reset to \$${resp.startingEquityUsd.toStringAsFixed(2)}',
-          ),
-          duration: const Duration(seconds: 3),
+        const SnackBar(
+          content: Text('Paper history cleared.'),
+          duration: Duration(seconds: 3),
           backgroundColor: LuminColors.success,
         ),
       );
       await _refresh();
     } catch (e) {
       if (!mounted) return;
-      final msg = e.toString();
-      // Engine PR #401 — reset refuses while open positions exist
-      // (B12 lifecycle guard).  The 409 detail explicitly directs the
-      // user to close-all-first; offer a one-tap recovery path inline
-      // instead of just surfacing the raw error.
-      final isOpenPositionsConflict = msg.contains('409') &&
-          (msg.contains('open positions') || msg.contains('orphaned'));
-      if (isOpenPositionsConflict) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text(
-              'Open paper positions block reset. Close them first?',
-            ),
-            duration: const Duration(seconds: 6),
-            backgroundColor: LuminColors.warn,
-            action: SnackBarAction(
-              label: 'CLOSE ALL',
-              textColor: LuminColors.bgDeep,
-              onPressed: _closeAllThenReset,
-            ),
-          ),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Reset failed: $e'),
-            duration: const Duration(seconds: 4),
-            backgroundColor: LuminColors.loss,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _resetting = false);
-    }
-  }
-
-  /// SnackBar-action handler for the 409 recovery flow: flatten the
-  /// paper book then immediately retry the reset.  No extra dialog —
-  /// the surrounding snackbar's "Open positions block reset" already
-  /// communicates the destructive intent.
-  Future<void> _closeAllThenReset() async {
-    if (_resetting) return;
-    final repo = AppConfigScope.of(context).repo;
-    setState(() => _resetting = true);
-    try {
-      final resp = await repo.closeAllPaperPositions();
-      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            'Closed ${resp.closedCount} paper position'
-            '${resp.closedCount == 1 ? "" : "s"} (PnL '
-            '${resp.realisedPnlTotal >= 0 ? "+" : ""}'
-            '\$${resp.realisedPnlTotal.toStringAsFixed(2)}). Retrying reset…',
-          ),
-          duration: const Duration(seconds: 3),
-          backgroundColor: LuminColors.success,
-        ),
-      );
-      // ``_doReset`` re-sets ``_resetting`` itself, so release first.
-      if (mounted) setState(() => _resetting = false);
-      await _doReset();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Close all failed: $e'),
+          content: Text('Clear failed: $e'),
           duration: const Duration(seconds: 4),
           backgroundColor: LuminColors.loss,
         ),
       );
+    } finally {
       if (mounted) setState(() => _resetting = false);
     }
   }
@@ -395,6 +335,12 @@ class _PaperTradesPageState extends State<PaperTradesPage> {
   @override
   Widget build(BuildContext context) {
     final scope = AppConfigScope.of(context);
+    // Close-all mutates the engine's shared paper book — affects every
+    // user with paper enabled, not just the caller. Owner-only on the
+    // engine; hide the menu entry for non-owner tiers so they don't see
+    // the 403 they used to get on tap (the headline bug fix shipped
+    // 2026-05-23 with engine PR #478 + this PR).
+    final isOwner = scope.tier == 'owner';
     return Scaffold(
       appBar: AppBar(
         title: const Text('Paper Trades'),
@@ -411,17 +357,18 @@ class _PaperTradesPageState extends State<PaperTradesPage> {
               if (v == 'reset') _confirmReset();
             },
             itemBuilder: (_) => [
-              const PopupMenuItem<String>(
-                value: 'close_all',
-                child: Row(
-                  children: [
-                    Icon(Icons.close_fullscreen,
-                        color: LuminColors.warn, size: 18),
-                    SizedBox(width: LuminSpacing.sm),
-                    Text('Close all open positions'),
-                  ],
+              if (isOwner)
+                const PopupMenuItem<String>(
+                  value: 'close_all',
+                  child: Row(
+                    children: [
+                      Icon(Icons.close_fullscreen,
+                          color: LuminColors.warn, size: 18),
+                      SizedBox(width: LuminSpacing.sm),
+                      Text('Close all engine positions'),
+                    ],
+                  ),
                 ),
-              ),
               const PopupMenuItem<String>(
                 value: 'reset',
                 child: Row(
@@ -429,7 +376,7 @@ class _PaperTradesPageState extends State<PaperTradesPage> {
                     Icon(Icons.restart_alt,
                         color: LuminColors.warn, size: 18),
                     SizedBox(width: LuminSpacing.sm),
-                    Text('Reset balance'),
+                    Text('Clear my history'),
                   ],
                 ),
               ),
