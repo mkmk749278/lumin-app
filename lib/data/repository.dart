@@ -648,6 +648,28 @@ class PaperResetResponse {
       );
 }
 
+/// Response from ``POST /api/auto-mode/paper/reset-mine`` — the per-user
+/// "clear my paper history" endpoint introduced 2026-05-23 to unblock
+/// non-owner users (the existing ``/reset`` endpoint requires
+/// ``tier='owner'`` and returned 403 to free users hitting the in-app
+/// Reset button).
+///
+/// ``newStartedAt`` is the timestamp of the user's fresh paper-
+/// subscription window. ``GET /api/trades`` only returns rows closed
+/// at-or-after this stamp until the user disables paper or calls
+/// reset-mine again.
+class PaperResetMineResponse {
+  const PaperResetMineResponse({required this.newStartedAt});
+  final DateTime newStartedAt;
+
+  factory PaperResetMineResponse.fromJson(Map<String, dynamic> j) =>
+      PaperResetMineResponse(
+        newStartedAt: DateTime.tryParse(j['new_started_at'] as String? ?? '')
+                ?.toUtc() ??
+            DateTime.now().toUtc(),
+      );
+}
+
 /// Response from ``POST /api/auto-mode/paper/close-all``.
 ///
 /// Engine PR #403 (2026-05-16) added this endpoint to flatten the paper
@@ -1126,7 +1148,20 @@ abstract class LuminRepository {
   /// engine archives prior trade history (the audit ledger keeps the
   /// raw rows) but the live ``/api/trades?mode=paper`` view starts
   /// empty.  Owner-confirmed via dialog before this fires.
+  ///
+  /// Owner-only on the engine — non-owner users get a 403. For per-user
+  /// "clear my history" use :meth:`resetMinePaperHistory` instead.
   Future<PaperResetResponse> resetPaperBalance();
+
+  /// Per-user "clear my paper history" — opens a fresh subscription
+  /// window so the user's view of ``GET /api/trades`` returns empty
+  /// until new trades close inside the new window. Engine state is
+  /// untouched; other users' views are unaffected.
+  ///
+  /// User-callable for every tier (paid, free, owner). Replaces the
+  /// owner-only ``/reset`` flow in the in-app Reset Balance action so
+  /// fresh-signup users don't get 403'd.
+  Future<PaperResetMineResponse> resetMinePaperHistory();
 
   /// Connect a Binance API key for server-side execution (engine B18 +
   /// PR-2 ``/api/binance/connect``).  Posts the key to the engine,
@@ -2188,6 +2223,12 @@ class MockRepository implements LuminRepository {
   }
 
   @override
+  Future<PaperResetMineResponse> resetMinePaperHistory() async {
+    _mockTrades = <TradeRecord>[];
+    return PaperResetMineResponse(newStartedAt: DateTime.now().toUtc());
+  }
+
+  @override
   Future<BinanceConnectSuccess> connectBinanceServerSide({
     required String apiKey,
     required String apiSecret,
@@ -2884,6 +2925,19 @@ class HttpRepository implements LuminRepository {
     _swr.invalidate(_kTradeEngineKey);
     _swr.invalidate(_kPulseBundleKey);
     return PaperResetResponse.fromJson(j);
+  }
+
+  @override
+  Future<PaperResetMineResponse> resetMinePaperHistory() async {
+    final j = (await client.post('/api/auto-mode/paper/reset-mine'))
+        as Map<String, dynamic>;
+    // The user's visibility window just rolled forward, so any cached
+    // trades-list pages are no longer valid (rows from the prior window
+    // are now invisible). Invalidate the same SWR keys as the engine-wide
+    // reset so the next subscribe forces a fresh fetch.
+    _swr.invalidate(_kTradeEngineKey);
+    _swr.invalidate(_kPulseBundleKey);
+    return PaperResetMineResponse.fromJson(j);
   }
 
   @override
