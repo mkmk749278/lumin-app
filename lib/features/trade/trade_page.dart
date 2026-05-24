@@ -531,7 +531,10 @@ class _TradePageState extends State<TradePage> {
         // the first runtime-status fetch lands so the card doesn't
         // flicker red→green during the initial RTT.
         if (runtime != null) ...[
-          _AutoTradeArmedCard(runtime: runtime),
+          _AutoTradeArmedCard(
+            runtime: runtime,
+            userSettings: data.userSettings,
+          ),
           const SizedBox(height: LuminSpacing.md),
         ],
         // The remaining cards (open positions, recent activity on
@@ -2018,14 +2021,41 @@ class _AutoPauseBannerState extends State<_AutoPauseBanner> {
 /// green when all four gates pass + user_mode == 'live', warn-yellow
 /// otherwise.
 class _AutoTradeArmedCard extends StatelessWidget {
-  const _AutoTradeArmedCard({required this.runtime});
+  const _AutoTradeArmedCard({
+    required this.runtime,
+    required this.userSettings,
+  });
 
   final AutoTradeRuntimeStatus runtime;
 
+  /// Per-user settings — carries the engine PR #479 ``pausedReason``
+  /// flag the dispatcher sets after consecutive ``-2019`` rejections.
+  /// Folded into the "Your account not paused" gate below so the card
+  /// matches the [_AutoPauseBanner] sibling above it (pre-2026-05-24,
+  /// the card read ``autoTradeUserDisabled`` only and would show "not
+  /// paused ✓" while the banner above declared the user paused —
+  /// owner-reported contradiction).
+  final AutoTradeSettings userSettings;
+
+  /// True when EITHER the engine-wide per-user circuit breaker has
+  /// tripped (operator-managed, ``contact support`` flow) OR the
+  /// dispatcher has auto-paused this user (#479, self-recoverable
+  /// via the Resume button on the banner above). Either condition
+  /// stops live orders — collapsing them under one gate row keeps
+  /// the card honest about whether dispatch can fire.
+  bool get _isPaused =>
+      runtime.autoTradeUserDisabled || userSettings.isAutoPaused;
+
+  /// Card-level "armed" state: the engine's snapshot AND no per-user
+  /// pause. The engine's ``armed`` already accounts for
+  /// ``autoTradeUserDisabled``; we AND-in ``isAutoPaused`` because
+  /// the engine's runtime status is engine-wide-stack snapshot, not
+  /// per-user pause state.
+  bool get _armed => runtime.armed && !userSettings.isAutoPaused;
+
   @override
   Widget build(BuildContext context) {
-    final accent =
-        runtime.armed ? LuminColors.success : LuminColors.warn;
+    final accent = _armed ? LuminColors.success : LuminColors.warn;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
       child: LuminCard(
@@ -2037,7 +2067,7 @@ class _AutoTradeArmedCard extends StatelessWidget {
             Row(
               children: [
                 Icon(
-                  runtime.armed
+                  _armed
                       ? Icons.shield_outlined
                       : Icons.shield_moon_outlined,
                   size: 18,
@@ -2045,7 +2075,7 @@ class _AutoTradeArmedCard extends StatelessWidget {
                 ),
                 const SizedBox(width: LuminSpacing.sm),
                 Text(
-                  runtime.armed
+                  _armed
                       ? 'Auto-trade ARMED'
                       : 'Auto-trade not armed',
                   style: TextStyle(
@@ -2067,9 +2097,14 @@ class _AutoTradeArmedCard extends StatelessWidget {
             ),
             _gateRow(
               label: 'Your account not paused',
-              ok: !runtime.autoTradeUserDisabled,
-              hint: runtime.autoTradeUserDisabled
-                  ? 'Per-user circuit breaker tripped.'
+              ok: !_isPaused,
+              hint: _isPaused
+                  ? (userSettings.isAutoPaused
+                      ? (userSettings.pausedReason == 'insufficient_margin'
+                          ? 'Wallet empty — top up + tap Resume above.'
+                          : 'Auto-paused: ${userSettings.pausedReason ?? "unknown"}. '
+                              'Tap Resume above.')
+                      : 'Per-user circuit breaker tripped.')
                   : null,
             ),
             _gateRow(
