@@ -340,6 +340,8 @@ class AutoTradeSettings {
     this.symbolPreferenceSet = false,
     this.notionalUsd,
     this.usingDefaults,
+    this.pausedReason,
+    this.pausedAt,
   });
 
   /// "off" | "paper" | "live".
@@ -373,6 +375,27 @@ class AutoTradeSettings {
   /// Only present on ``/api/settings/user/auto-trade`` responses.
   final bool? usingDefaults;
 
+  /// Auto-pause state (engine PR #479, 2026-05-24). Set by the engine
+  /// after N consecutive Binance ``-2019`` rejections; cleared by the
+  /// user calling ``POST /api/auto-mode/resume-mine`` (typically via
+  /// the "Resume" button on the Live tab's empty-wallet banner).
+  /// Read-only — the app never PUTs these back.
+  ///
+  /// * ``pausedReason == null`` → user is dispatching normally.
+  /// * ``pausedReason == 'insufficient_margin'`` → Futures wallet was
+  ///   empty for 3+ signals; engine stopped dispatching to silence the
+  ///   Recent Activity spam; user needs to top up + tap Resume.
+  /// * ``pausedReason == <other>`` → reserved for future pause
+  ///   reasons; render the generic banner with the raw reason as the
+  ///   subtitle (forward-compatible default).
+  final String? pausedReason;
+
+  /// ISO-8601 UTC timestamp of the pause event. Useful for banner copy
+  /// ("Paused 5m ago"). Null when ``pausedReason`` is null.
+  final String? pausedAt;
+
+  bool get isAutoPaused => pausedReason != null && pausedReason!.isNotEmpty;
+
   factory AutoTradeSettings.fromJson(Map<String, dynamic> j) {
     final symsRaw = j['symbol_preference'];
     final symsParsed = symsRaw is List
@@ -391,6 +414,8 @@ class AutoTradeSettings {
       symbolPreferenceSet: symsRaw is List || symsRaw == null && j.containsKey('symbol_preference'),
       notionalUsd: (j['notional_usd'] as num?)?.toDouble(),
       usingDefaults: j['using_defaults'] as bool?,
+      pausedReason: j['paused_reason'] as String?,
+      pausedAt: j['paused_at'] as String?,
     );
   }
 
@@ -1162,6 +1187,19 @@ abstract class LuminRepository {
   /// owner-only ``/reset`` flow in the in-app Reset Balance action so
   /// fresh-signup users don't get 403'd.
   Future<PaperResetMineResponse> resetMinePaperHistory();
+
+  /// Clear the engine's auto-pause flag for this user (engine PR #479,
+  /// 2026-05-24). The engine auto-pauses a user's dispatcher after N
+  /// consecutive Binance ``-2019`` (insufficient margin) rejections —
+  /// stopping the Recent Activity spam. Calling this resumes
+  /// dispatching; the user should call it AFTER topping up their
+  /// Futures wallet, otherwise the next signal will just re-pause.
+  ///
+  /// Returns ``true`` when an active pause was cleared, ``false`` on
+  /// the idempotent no-op path (user wasn't paused — happens if the
+  /// user tapped Resume after the operator already cleared the pause
+  /// or after the engine restarted).
+  Future<bool> resumeMineAutoTrade();
 
   /// Connect a Binance API key for server-side execution (engine B18 +
   /// PR-2 ``/api/binance/connect``).  Posts the key to the engine,
@@ -2229,6 +2267,13 @@ class MockRepository implements LuminRepository {
   }
 
   @override
+  Future<bool> resumeMineAutoTrade() async {
+    // Mock mode has no real engine pause-state — successful resume
+    // every time so the UI flow can be exercised in dev builds.
+    return true;
+  }
+
+  @override
   Future<BinanceConnectSuccess> connectBinanceServerSide({
     required String apiKey,
     required String apiSecret,
@@ -2938,6 +2983,21 @@ class HttpRepository implements LuminRepository {
     _swr.invalidate(_kTradeEngineKey);
     _swr.invalidate(_kPulseBundleKey);
     return PaperResetMineResponse.fromJson(j);
+  }
+
+  @override
+  Future<bool> resumeMineAutoTrade() async {
+    final j = (await client.post('/api/auto-mode/resume-mine'))
+        as Map<String, dynamic>;
+    // The user's pause flag just cleared — the next watchUserAutoTrade
+    // subscribe must refetch so the banner disappears immediately
+    // instead of staying visible for up to the SWR TTL.
+    _swr.invalidate(_kAutoTradeUserStatusKey);
+    // Recent Activity will start updating again once the next signal
+    // fires; invalidate so the "paused" derived state on the Trade
+    // tab clears immediately rather than on the next polling tick.
+    _swr.invalidate(_kTradeEngineKey);
+    return (j['resumed'] as bool?) ?? false;
   }
 
   @override
