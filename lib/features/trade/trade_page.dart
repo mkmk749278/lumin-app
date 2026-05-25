@@ -14,10 +14,10 @@
 ///     + trade history (with ``include_open=true`` so live activity
 ///     surfaces alongside closed history).
 ///
-/// The two tabs are mutually exclusive at the engine — the ``mode`` field
-/// is a single tri-state string, so turning ON one auto-forces the other
-/// OFF on the next refresh.  Each tab's toggle is a view onto the shared
-/// state from that tab's perspective.
+/// Both tabs can be ON simultaneously via ``mode='both'``: enabling live
+/// while paper is active sends 'both'; the toggle on each tab preserves
+/// the other tab's state.  Each tab's toggle is a view onto the shared
+/// ``mode`` string from that tab's perspective.
 ///
 /// Phase 3c carries forward: when the user has Binance keys connected,
 /// the Live tab queries their real Binance positions via
@@ -88,6 +88,7 @@ class _TradePageState extends State<TradePage> {
   StreamSubscription<TradeEngineSnapshot>? _engineSub;
   StreamController<_TradeBundle>? _bundleController;
   LuminRepository? _lastRepo;
+  _TradeBundle? _lastBundle;
   bool _switchingMode = false;
   // Set by ``_refresh`` so it can await the next fresh engine emit.
   // Completed by the engine listener in ``_resubscribe`` on the first
@@ -368,7 +369,7 @@ class _TradePageState extends State<TradePage> {
     final repo = AppConfigScope.of(context).repo;
     // Real-money confirmation before LIVE — same gate as the
     // Auto-trade settings page (3b-2).  Off / Paper bypass.
-    if (newMode == 'live') {
+    if (newMode == 'live' || newMode == 'both') {
       final ok = await _confirmLiveFlip();
       if (ok != true) return;
     }
@@ -423,16 +424,27 @@ class _TradePageState extends State<TradePage> {
     //     trade history).  Has a single Paper toggle that flips mode
     //     'paper' <-> 'off'.
     //
-    // The two toggles are mutually exclusive at the engine layer (mode
-    // is a single string).  Turning ON one automatically forces the
-    // other to OFF on the next refresh — _activeMode resolution below.
+    // Both toggles can be ON simultaneously (mode='both').  Each toggle
+    // preserves the other tab's state — enabling live while paper is on
+    // sends 'both' rather than overwriting paper with 'off'.
     return Scaffold(
       appBar: AppBar(title: const Text('Trade')),
       body: Column(
         children: [
           _SubTabStrip(
             view: _view,
-            onChanged: (v) => setState(() => _view = v),
+            onChanged: (v) {
+              setState(() => _view = v);
+              // Auto-enable paper when switching to the Paper tab only if
+              // mode is currently off — no confirmation needed since paper
+              // is zero-risk simulated fills.  Live is left untouched.
+              if (v == _TradeView.paper) {
+                final mode = _lastBundle?.userSettings.mode ?? 'off';
+                if (mode == 'off') {
+                  _changeMode('paper');
+                }
+              }
+            },
           ),
           Expanded(
             child: RefreshIndicator(
@@ -455,6 +467,12 @@ class _TradePageState extends State<TradePage> {
                         error: snap.error.toString(), onRetry: _refresh);
                   }
                   final data = snap.data!;
+                  // Cache latest bundle so tab-switch handler above can
+                  // read the current mode without a round-trip.
+                  if (_lastBundle != data) {
+                    WidgetsBinding.instance.addPostFrameCallback(
+                        (_) { if (mounted) setState(() => _lastBundle = data); });
+                  }
                   return _view == _TradeView.paper
                       ? _buildPaperBody(context, data)
                       : _buildLiveBody(context, data);
@@ -491,6 +509,9 @@ class _TradePageState extends State<TradePage> {
     final runtime = _runtimeStatus;
     final serverPositions = _serverPositions;
     final recentEvents = _recentDispatchEvents;
+    final activeMode = data.userSettings.mode ?? 'off';
+    final liveActive = activeMode == 'live' || activeMode == 'both';
+    final paperActive = activeMode == 'paper' || activeMode == 'both';
     // Non-traders get a stripped-down Live tab: just the gate checklist
     // pointing them at what they need to enable.  The dispatch-event
     // history + engine signal stream + open positions card are noise
@@ -507,6 +528,33 @@ class _TradePageState extends State<TradePage> {
       ),
       children: [
         if (!scope.repo.isLive) const PreviewBadge(),
+        // Live-mode toggle — same pattern as the Paper tab.  Preserves
+        // paper mode when toggling live: enabling live while paper is on
+        // sends 'both'; disabling live while paper is on keeps 'paper'.
+        _BinaryModeToggle(
+          label: 'Live auto-trade',
+          subtitle: liveActive
+              ? 'Engine places real Binance Futures orders on your key.'
+              : 'Off — enable to place real orders on the next signal.',
+          icon: Icons.bolt_rounded,
+          activeColor: LuminColors.accent,
+          isOn: liveActive,
+          switching: _switchingMode,
+          onChanged: (on) {
+            if (on) {
+              _changeMode(paperActive ? 'both' : 'live');
+            } else {
+              _changeMode(paperActive ? 'paper' : 'off');
+            }
+          },
+        ),
+        if (!liveActive)
+          const _OffStateNotice(
+            label: 'Live trading off',
+            description: 'Enable the toggle above, or go to '
+                'Settings → Server-side auto-trade to configure '
+                'your Binance key and position size.',
+          ),
         // Server-side auto-trade state banner.  Hidden when the user
         // is fully enabled (operator has flipped the global flag AND
         // this user's per-user circuit breaker hasn't tripped).
@@ -596,7 +644,18 @@ class _TradePageState extends State<TradePage> {
           activeColor: LuminColors.warn, // Paper = caution colour, less than live
           isOn: paperActive,
           switching: _switchingMode,
-          onChanged: (on) => _changeMode(on ? 'paper' : 'off'),
+          onChanged: (on) {
+            // Preserve live mode: turning paper on while live is active
+            // sends 'both'; turning paper off while live is active keeps
+            // 'live' rather than falling back to 'off'.
+            final liveActive =
+                activeMode == 'live' || activeMode == 'both';
+            if (on) {
+              _changeMode(liveActive ? 'both' : 'paper');
+            } else {
+              _changeMode(liveActive ? 'live' : 'off');
+            }
+          },
         ),
         if (!paperActive)
           const _OffStateNotice(
