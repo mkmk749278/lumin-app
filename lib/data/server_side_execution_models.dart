@@ -483,6 +483,16 @@ class DispatchEventTranslation {
               'your account.',
           severity: DispatchEventSeverity.system,
         );
+      case 'NotionalTooSmall':
+        return DispatchEventTranslation(
+          headline: 'Position size too small',
+          action:
+              'Your notional (position size) is too small to open a '
+              '${e.symbol} order at the current price after lot-size '
+              'rounding. Go to Settings → Server-side auto-trade and '
+              'increase your notional to at least \$10.',
+          severity: DispatchEventSeverity.userAction,
+        );
       case 'OrderRejectedByBinance':
         // Fell through code-switch (Binance returned an error
         // without a parseable numeric code).  Surface the detail.
