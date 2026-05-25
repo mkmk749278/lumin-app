@@ -6,8 +6,10 @@
 /// so we don't multiply API requests for what is essentially a status
 /// projection of the same closed-pool.
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 
 import '../../data/app_config.dart';
 import '../../data/mock_data.dart';
@@ -18,6 +20,44 @@ import '../../shared/widgets/lumin_card.dart';
 import '../../shared/widgets/preview_badge.dart';
 import '../../shared/widgets/shimmer.dart';
 import 'take_signal_sheet.dart';
+
+/// Fetch mark prices for a batch of symbols from Binance's public
+/// premiumIndex endpoint.  Fires requests concurrently; any individual
+/// failure is silently dropped so a single bad symbol can't block the
+/// rest.  Returns a map of symbol → mark price for every symbol that
+/// responded successfully.
+Future<Map<String, double>> _fetchMarkPrices(List<String> symbols) async {
+  if (symbols.isEmpty) return const {};
+  final client = http.Client();
+  try {
+    final results = await Future.wait(
+      symbols.map((sym) async {
+        try {
+          final uri = Uri.parse(
+              'https://fapi.binance.com/fapi/v1/premiumIndex?symbol=$sym');
+          final resp = await client.get(uri).timeout(const Duration(seconds: 8));
+          if (resp.statusCode != 200) return MapEntry(sym, 0.0);
+          final j = jsonDecode(resp.body);
+          if (j is Map<String, dynamic> && j['markPrice'] != null) {
+            final price = double.tryParse(j['markPrice'].toString()) ?? 0.0;
+            return MapEntry(sym, price);
+          }
+          return MapEntry(sym, 0.0);
+        } catch (_) {
+          return MapEntry(sym, 0.0);
+        }
+      }),
+      eagerError: false,
+    );
+    final out = <String, double>{};
+    for (final e in results) {
+      if (e.value > 0) out[e.key] = e.value;
+    }
+    return out;
+  } finally {
+    client.close();
+  }
+}
 
 enum _SignalFilter { all, open, closed }
 
@@ -115,6 +155,14 @@ class _SignalsPageState extends State<SignalsPage> {
   /// data lands.  Same pattern as PulsePage / TradePage.
   Completer<void>? _refreshDone;
 
+  /// Live Binance mark prices — polled every 5 s for ACTIVE signals.
+  /// Key = symbol (e.g. "CHZUSDT"), value = latest mark price.
+  /// Only populated when ``isLive == true`` and at least one ACTIVE
+  /// signal is visible.  Empty in mock/preview mode — the card falls
+  /// back to the static ``MockSignal.currentPrice`` field.
+  final Map<String, double> _livePrices = {};
+  Timer? _priceTimer;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -128,7 +176,52 @@ class _SignalsPageState extends State<SignalsPage> {
   @override
   void dispose() {
     _sub?.cancel();
+    _priceTimer?.cancel();
     super.dispose();
+  }
+
+  /// Returns the unique set of symbols for ACTIVE signals in the current
+  /// list.  Used to decide which symbols need live price polling.
+  List<String> _activeSymbols() {
+    final data = _data;
+    if (data == null) return const [];
+    final seen = <String>{};
+    for (final s in data) {
+      if (s.status == 'ACTIVE') seen.add(s.symbol);
+    }
+    return seen.toList();
+  }
+
+  /// Starts or restarts the live-price polling timer.  Cancels any
+  /// existing timer first, then fires immediately and every 5 s.
+  /// No-op when in mock/preview mode or when no ACTIVE signals are
+  /// visible — avoids redundant Binance requests.
+  void _restartPricePolling() {
+    _priceTimer?.cancel();
+    _priceTimer = null;
+    // Only poll for live data — mock mode uses static fixture prices.
+    if (!(_lastRepo?.isLive ?? false)) return;
+    final syms = _activeSymbols();
+    if (syms.isEmpty) return;
+    _priceTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      _doFetchPrices();
+    });
+    // Fire immediately on start so prices appear without a 5 s delay.
+    _doFetchPrices();
+  }
+
+  Future<void> _doFetchPrices() async {
+    final syms = _activeSymbols();
+    if (syms.isEmpty) {
+      _priceTimer?.cancel();
+      _priceTimer = null;
+      return;
+    }
+    final fresh = await _fetchMarkPrices(syms);
+    if (!mounted) return;
+    if (fresh.isNotEmpty) {
+      setState(() => _livePrices.addAll(fresh));
+    }
   }
 
   void _resubscribe() {
@@ -145,6 +238,7 @@ class _SignalsPageState extends State<SignalsPage> {
           _data = items;
           _streamError = null;
         });
+        _restartPricePolling();
         final done = _refreshDone;
         if (done != null && !done.isCompleted) done.complete();
       },
@@ -179,6 +273,8 @@ class _SignalsPageState extends State<SignalsPage> {
 
   void _setFilter(_SignalFilter f) {
     if (f == _filter) return;
+    _priceTimer?.cancel();
+    _priceTimer = null;
     setState(() {
       _filter = f;
       // Reset sub-filter when switching primary chip — hidden when not Closed.
@@ -264,7 +360,10 @@ class _SignalsPageState extends State<SignalsPage> {
       padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
       itemCount: items.length,
       separatorBuilder: (_, __) => const SizedBox(height: LuminSpacing.md),
-      itemBuilder: (_, i) => _SignalCard(sig: items[i]),
+      itemBuilder: (_, i) => _SignalCard(
+        sig: items[i],
+        livePrice: _livePrices[items[i].symbol],
+      ),
     );
   }
 }
@@ -576,8 +675,29 @@ class _SignalsError extends StatelessWidget {
 }
 
 class _SignalCard extends StatelessWidget {
-  const _SignalCard({required this.sig});
+  const _SignalCard({required this.sig, this.livePrice});
   final MockSignal sig;
+  /// Live mark price from the 5 s Binance poll.  When non-null and the
+  /// signal is still ACTIVE, overrides ``sig.currentPrice`` for display
+  /// and drives a fresh PnL % calculation.
+  final double? livePrice;
+
+  /// Effective current price — live when available, API snapshot otherwise.
+  double get _currentPrice =>
+      (sig.status == 'ACTIVE' && (livePrice ?? 0) > 0)
+          ? livePrice!
+          : sig.currentPrice;
+
+  /// Effective PnL % — recomputed from live price for ACTIVE signals;
+  /// uses the finalised snapshot value for closed signals.
+  double get _pnlPct {
+    if (sig.status == 'ACTIVE' && (livePrice ?? 0) > 0 && sig.entry > 0) {
+      return sig.direction == 'LONG'
+          ? (livePrice! - sig.entry) / sig.entry * 100
+          : (sig.entry - livePrice!) / sig.entry * 100;
+    }
+    return sig.pnlPct;
+  }
 
   Color _statusColor() {
     switch (sig.status) {
@@ -600,7 +720,8 @@ class _SignalCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isLong = sig.direction == 'LONG';
-    final pnlPositive = sig.pnlPct >= 0;
+    final effectivePnl = _pnlPct;
+    final pnlPositive = effectivePnl >= 0;
     return LuminCard(
       onTap: () => _showDetail(context),
       child: Column(
@@ -766,9 +887,9 @@ class _SignalCard extends StatelessWidget {
                 ),
               ),
               const Spacer(),
-              if (sig.currentPrice > 0) ...[
+              if (_currentPrice > 0) ...[
                 Text(
-                  formatPrice(sig.currentPrice),
+                  formatPrice(_currentPrice),
                   style: const TextStyle(
                     color: LuminColors.textPrimary,
                     fontSize: 13,
@@ -779,7 +900,7 @@ class _SignalCard extends StatelessWidget {
                 const SizedBox(width: LuminSpacing.sm),
               ],
               Text(
-                formatPct(sig.pnlPct),
+                formatPct(effectivePnl),
                 style: TextStyle(
                   color: pnlPositive ? LuminColors.success : LuminColors.loss,
                   fontSize: 14,
@@ -802,83 +923,9 @@ class _SignalCard extends StatelessWidget {
           top: Radius.circular(LuminRadii.lg),
         ),
       ),
-      builder: (_) => Padding(
-        padding: const EdgeInsets.all(LuminSpacing.xl),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: LuminColors.textMuted,
-                  borderRadius: BorderRadius.circular(LuminRadii.pill),
-                ),
-              ),
-            ),
-            const SizedBox(height: LuminSpacing.lg),
-            Text(
-              '${sig.symbol} ${sig.direction}',
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-            const SizedBox(height: LuminSpacing.xs),
-            Text(
-              'Signal ${sig.id} • ${sig.agentName}',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            const SizedBox(height: LuminSpacing.lg),
-            Container(
-              height: 120,
-              decoration: BoxDecoration(
-                color: LuminColors.bgElevated,
-                borderRadius: BorderRadius.circular(LuminRadii.md),
-                border: Border.all(color: LuminColors.cardBorder),
-              ),
-              child: const Center(
-                child: Text(
-                  'Chart preview — coming with v0.1.0',
-                  style: TextStyle(
-                    color: LuminColors.textMuted,
-                    fontSize: 12,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: LuminSpacing.lg),
-            // Pre-TP centerpiece — shown when the engine stamped a trigger
-            // at dispatch (B11 fee-aware doctrine).  Doctrine 2026-05-07:
-            // Pre-TP is the primary scalp outcome; subscribers see it
-            // before the TP ladder.
-            if (sig.preTpTriggerPrice > 0) ...[
-              _PreTpCard(sig: sig),
-              const SizedBox(height: LuminSpacing.md),
-            ],
-            _DetailRow('Entry', formatPrice(sig.entry)),
-            if (sig.currentPrice > 0)
-              _DetailRow('Current', formatPrice(sig.currentPrice)),
-            _DetailRow(
-              'SL',
-              _isBreakeven(sig) ? 'BE (banked)' : formatPrice(sig.sl),
-            ),
-            _DetailRow('TP1', formatPrice(sig.tp1)),
-            _DetailRow('TP2', formatPrice(sig.tp2)),
-            _DetailRow('PnL', formatPct(sig.pnlPct)),
-            _DetailRow('Confidence',
-                '${sig.confidence.toStringAsFixed(1)} (${sig.tier})'),
-            _DetailRow('Status', sig.status),
-            // Take Signal — Phase 3b-1 manual order placement.  Visible
-            // only when the signal is still actionable (ACTIVE status)
-            // — TP/SL/expired signals are read-only.  Inside the sheet
-            // the user confirms again before any order fires, and we
-            // short-circuit on a prior signal_id (idempotency).
-            if (sig.status == 'ACTIVE') ...[
-              const SizedBox(height: LuminSpacing.lg),
-              _TakeSignalAction(sig: sig),
-            ],
-          ],
-        ),
+      builder: (_) => _SignalDetailSheet(
+        sig: sig,
+        initialLivePrice: _currentPrice > 0 ? _currentPrice : null,
       ),
     );
   }
@@ -912,6 +959,143 @@ class _TakeSignalAction extends StatelessWidget {
           'Take signal',
           style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
         ),
+      ),
+    );
+  }
+}
+
+/// Bottom-sheet detail view for a single signal.  Polls Binance's
+/// public mark-price endpoint every 5 s while open (ACTIVE signals
+/// only) so the "Current" row reflects live market price rather than
+/// the SWR-cached snapshot.
+class _SignalDetailSheet extends StatefulWidget {
+  const _SignalDetailSheet({required this.sig, this.initialLivePrice});
+  final MockSignal sig;
+  final double? initialLivePrice;
+
+  @override
+  State<_SignalDetailSheet> createState() => _SignalDetailSheetState();
+}
+
+class _SignalDetailSheetState extends State<_SignalDetailSheet> {
+  late double _livePrice;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _livePrice = widget.initialLivePrice ??
+        (widget.sig.currentPrice > 0 ? widget.sig.currentPrice : 0.0);
+    if (widget.sig.status == 'ACTIVE') {
+      _timer = Timer.periodic(const Duration(seconds: 5), (_) => _fetch());
+      // Fetch immediately so we show a fresh price on sheet open without
+      // waiting the full 5 s interval.
+      _fetch();
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _fetch() async {
+    try {
+      final prices = await _fetchMarkPrices([widget.sig.symbol]);
+      final price = prices[widget.sig.symbol];
+      if (!mounted || price == null || price <= 0) return;
+      setState(() => _livePrice = price);
+    } catch (_) {}
+  }
+
+  double get _pnlPct {
+    if (widget.sig.status == 'ACTIVE' && _livePrice > 0 && widget.sig.entry > 0) {
+      return widget.sig.direction == 'LONG'
+          ? (_livePrice - widget.sig.entry) / widget.sig.entry * 100
+          : (widget.sig.entry - _livePrice) / widget.sig.entry * 100;
+    }
+    return widget.sig.pnlPct;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sig = widget.sig;
+    return Padding(
+      padding: const EdgeInsets.all(LuminSpacing.xl),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: LuminColors.textMuted,
+                borderRadius: BorderRadius.circular(LuminRadii.pill),
+              ),
+            ),
+          ),
+          const SizedBox(height: LuminSpacing.lg),
+          Text(
+            '${sig.symbol} ${sig.direction}',
+            style: Theme.of(context).textTheme.headlineMedium,
+          ),
+          const SizedBox(height: LuminSpacing.xs),
+          Text(
+            'Signal ${sig.id} • ${sig.agentName}',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          const SizedBox(height: LuminSpacing.lg),
+          Container(
+            height: 120,
+            decoration: BoxDecoration(
+              color: LuminColors.bgElevated,
+              borderRadius: BorderRadius.circular(LuminRadii.md),
+              border: Border.all(color: LuminColors.cardBorder),
+            ),
+            child: const Center(
+              child: Text(
+                'Chart preview — coming with v0.1.0',
+                style: TextStyle(
+                  color: LuminColors.textMuted,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: LuminSpacing.lg),
+          if (sig.preTpTriggerPrice > 0) ...[
+            _PreTpCard(sig: sig),
+            const SizedBox(height: LuminSpacing.md),
+          ],
+          _DetailRow('Entry', formatPrice(sig.entry)),
+          if (_livePrice > 0)
+            _DetailRow(
+              'Current',
+              formatPrice(_livePrice),
+              valueColor: sig.status == 'ACTIVE' ? LuminColors.accent : null,
+            ),
+          _DetailRow(
+            'SL',
+            _isBreakeven(sig) ? 'BE (banked)' : formatPrice(sig.sl),
+          ),
+          _DetailRow('TP1', formatPrice(sig.tp1)),
+          _DetailRow('TP2', formatPrice(sig.tp2)),
+          _DetailRow(
+            'PnL',
+            formatPct(_pnlPct),
+            valueColor: _pnlPct >= 0 ? LuminColors.success : LuminColors.loss,
+          ),
+          _DetailRow('Confidence',
+              '${sig.confidence.toStringAsFixed(1)} (${sig.tier})'),
+          _DetailRow('Status', sig.status),
+          if (sig.status == 'ACTIVE') ...[
+            const SizedBox(height: LuminSpacing.lg),
+            _TakeSignalAction(sig: sig),
+          ],
+        ],
       ),
     );
   }
@@ -1009,9 +1193,10 @@ class _PriceCol extends StatelessWidget {
 }
 
 class _DetailRow extends StatelessWidget {
-  const _DetailRow(this.label, this.value);
+  const _DetailRow(this.label, this.value, {this.valueColor});
   final String label;
   final String value;
+  final Color? valueColor;
 
   @override
   Widget build(BuildContext context) {
@@ -1032,8 +1217,8 @@ class _DetailRow extends StatelessWidget {
           ),
           Text(
             value,
-            style: const TextStyle(
-              color: LuminColors.textPrimary,
+            style: TextStyle(
+              color: valueColor ?? LuminColors.textPrimary,
               fontSize: 13,
               fontWeight: FontWeight.w500,
             ),
