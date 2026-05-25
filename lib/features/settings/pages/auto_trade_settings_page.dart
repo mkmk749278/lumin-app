@@ -479,23 +479,93 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
                 onChanged: (v) => setState(() => _maxConcurrent = v.round()),
               ),
             ),
-            _slider(
-              label: 'Position notional (live)',
-              value: '\$${_notionalUsd.toStringAsFixed(0)}',
-              slider: Slider(
-                value: _notionalUsd,
-                min: 5,
-                max: 2000,
-                divisions: 80,
-                activeColor: LuminColors.accent,
-                inactiveColor: LuminColors.cardBorder,
-                onChanged: (v) => setState(() {
-                  _notionalUsd = (v / 5).round() * 5.0;
-                }),
-              ),
-            ),
+            _notionalSliderWithInput(),
           ],
         ),
+      ),
+    );
+  }
+
+  /// Notional slider with an inline text field for direct dollar-amount entry.
+  Widget _notionalSliderWithInput() {
+    final controller = TextEditingController(
+      text: _notionalUsd.toStringAsFixed(0),
+    );
+    // Keep cursor at end after external setState rebuilds.
+    controller.selection = TextSelection.collapsed(offset: controller.text.length);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: LuminSpacing.sm),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Position notional (live)',
+                  style: TextStyle(
+                    color: LuminColors.textPrimary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              SizedBox(
+                width: 80,
+                height: 32,
+                child: TextField(
+                  controller: controller,
+                  keyboardType: TextInputType.number,
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(
+                    color: LuminColors.accent,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  decoration: const InputDecoration(
+                    prefixText: '\$',
+                    prefixStyle: TextStyle(
+                      color: LuminColors.accent,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 6,
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: LuminColors.cardBorder),
+                      borderRadius: BorderRadius.all(Radius.circular(LuminRadii.sm)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: LuminColors.accent),
+                      borderRadius: BorderRadius.all(Radius.circular(LuminRadii.sm)),
+                    ),
+                  ),
+                  onChanged: (raw) {
+                    final parsed = double.tryParse(raw);
+                    if (parsed == null) return;
+                    final clamped = parsed.clamp(5.0, 2000.0);
+                    final snapped = (clamped / 5).round() * 5.0;
+                    setState(() => _notionalUsd = snapped);
+                  },
+                ),
+              ),
+            ],
+          ),
+          Slider(
+            value: _notionalUsd,
+            min: 5,
+            max: 2000,
+            divisions: 80,
+            activeColor: LuminColors.accent,
+            inactiveColor: LuminColors.cardBorder,
+            onChanged: (v) => setState(() {
+              _notionalUsd = (v / 5).round() * 5.0;
+            }),
+          ),
+        ],
       ),
     );
   }
