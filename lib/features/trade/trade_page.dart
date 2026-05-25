@@ -580,7 +580,7 @@ class _TradePageState extends State<TradePage> {
     // paper there it's still showing default on".  Now null = off
     // and the off-state notice fires correctly.
     final activeMode = data.userSettings.mode ?? 'off';
-    final paperActive = activeMode == 'paper';
+    final paperActive = activeMode == 'paper' || activeMode == 'both';
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(
         parent: BouncingScrollPhysics(),
@@ -975,7 +975,7 @@ class _ModePnlCard extends StatelessWidget {
     if (mode == 'off') {
       return _OffStateCard();
     }
-    final isPaper = mode == 'paper';
+    final isPaper = mode == 'paper' || mode == 'both';
     final pnl = autoMode.dailyPnlUsd;
     final positive = pnl >= 0;
     final accent = positive ? LuminColors.success : LuminColors.loss;
@@ -2116,13 +2116,13 @@ class _AutoTradeArmedCard extends StatelessWidget {
             ),
             _gateRow(
               label: 'Mode = live',
-              ok: runtime.userMode == 'live',
-              hint: runtime.userMode == 'live'
+              ok: runtime.userMode == 'live' || runtime.userMode == 'both',
+              hint: (runtime.userMode == 'live' || runtime.userMode == 'both')
                   ? null
                   : runtime.userMode == null
-                      ? 'Settings → Auto-trade → flip to Live.'
+                      ? 'Settings → Auto-trade → enable Live.'
                       : 'Currently ${runtime.userMode!.toUpperCase()} — '
-                          'switch to Live to place real orders.',
+                          'enable Live in Auto-trade settings.',
             ),
             // Symbol allowlist — only meaningful once the user has a
             // Binance key connected (otherwise no orders flow through
