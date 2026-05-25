@@ -344,7 +344,8 @@ class AutoTradeSettings {
     this.pausedAt,
   });
 
-  /// "off" | "paper" | "live".
+  /// "off" | "paper" | "live" | "both".
+  /// "both" = live orders fire AND paper simulation runs simultaneously.
   final String? mode;
   final double? positionSizePct;
   final double? leverageCap;

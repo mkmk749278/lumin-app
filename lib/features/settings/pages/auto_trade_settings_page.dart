@@ -1,15 +1,12 @@
-/// Auto-trade settings — per-user overrides (Phase 2).
+/// Auto-trade settings — per-user overrides.
 ///
-/// Loads the current user's overrides from
-/// ``GET /api/settings/user/auto-trade`` (engine defaults when the user
-/// has none yet) and persists changes via ``PUT``.  Per-user mode flips
-/// do NOT change engine-global execution — Phase 3 wires per-user
-/// execution; until then the engine continues operating in whatever
-/// mode the operator picked.  The banner at the top says so honestly.
+/// Two independent toggles: Live and Paper.
+/// Both can be active simultaneously (mode='both'): live orders fire on Binance
+/// AND the paper simulator runs in parallel for comparison.
 ///
-/// The operator's engine-wide defaults live on a separate page (Settings →
-/// Engine defaults, owner-only entry), pointed at
-/// ``/api/settings/auto-trade``.
+/// Loads overrides from ``GET /api/settings/user/auto-trade`` and persists
+/// via ``PUT``.  The page also surfaces the auto-pause state inline so users
+/// don't have to navigate to the Trade tab to see why orders aren't dispatching.
 import 'package:flutter/material.dart';
 
 import '../../../data/api_client.dart';
@@ -28,29 +25,36 @@ class AutoTradeSettingsPage extends StatefulWidget {
 }
 
 class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
-  // 0 = Off, 1 = Paper, 2 = Live — local UI representation.
-  int _mode = 1;
+  // Independent mode flags — both can be true simultaneously (mode='both').
+  bool _liveEnabled = false;
+  bool _paperEnabled = false;
+
   double _positionSizePct = 2.0;
-  double _leverageCap = 10.0;     // 1x..30x — B12 hard cap
+  double _leverageCap = 10.0;
   int _maxConcurrent = 3;
-  // Per-user live-trading notional in USD.  Engine clamps to [$5, $2000];
-  // default $500 matches the engine's _DEFAULT_NOTIONAL_USD when unset.
   double _notionalUsd = 500.0;
+
+  // Full settings response — carries pausedReason, pausedAt.
+  AutoTradeSettings? _settings;
 
   bool _loaded = false;
   bool _saving = false;
+  bool _resuming = false;
   String? _loadError;
   bool _usingDefaults = true;
 
-  static const _kModeIndexToString = {0: 'off', 1: 'paper', 2: 'live'};
-  static const _kModeStringToIndex = {'off': 0, 'paper': 1, 'live': 2};
+  /// Derive the mode string from the two independent flags.
+  String get _computedMode {
+    if (_liveEnabled && _paperEnabled) return 'both';
+    if (_liveEnabled) return 'live';
+    if (_paperEnabled) return 'paper';
+    return 'off';
+  }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (!_loaded) {
-      _load();
-    }
+    if (!_loaded) _load();
   }
 
   Future<void> _load() async {
@@ -58,10 +62,11 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
     try {
       final s = await repo.fetchUserAutoTradeSettings();
       if (!mounted) return;
+      final mode = s.mode?.toLowerCase() ?? 'off';
       setState(() {
-        if (s.mode != null) {
-          _mode = _kModeStringToIndex[s.mode!.toLowerCase()] ?? _mode;
-        }
+        _settings = s;
+        _liveEnabled = mode == 'live' || mode == 'both';
+        _paperEnabled = mode == 'paper' || mode == 'both';
         _positionSizePct = s.positionSizePct ?? _positionSizePct;
         _leverageCap = s.leverageCap ?? _leverageCap;
         _maxConcurrent = s.maxConcurrentPositions ?? _maxConcurrent;
@@ -85,22 +90,22 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
     }
   }
 
-  Future<void> _save() async {
-    if (_saving) return;
-    final newModeToken = _kModeIndexToString[_mode];
-    // Flipping to LIVE shows an explicit confirmation modal with a
-    // real-money warning.  Phase 3b-2 wires the AutoTradeWatcher to
-    // pick up live mode → fire orders without per-signal user
-    // confirmation, so this is the last clear opt-in moment.
-    if (newModeToken == 'live') {
+  /// Toggle the live switch.  Fires a real-money confirmation dialog before
+  /// enabling.  Paper toggle bypasses the dialog.
+  Future<void> _toggleLive(bool newValue) async {
+    if (newValue) {
       final ok = await _confirmLiveFlip();
       if (ok != true) return;
     }
+    setState(() => _liveEnabled = newValue);
+  }
+
+  Future<void> _save() async {
+    if (_saving) return;
     setState(() => _saving = true);
-    final scope = AppConfigScope.of(context);
-    final repo = scope.repo;
+    final repo = AppConfigScope.of(context).repo;
     final partial = AutoTradeSettings(
-      mode: newModeToken,
+      mode: _computedMode,
       positionSizePct: _positionSizePct,
       leverageCap: _leverageCap,
       maxConcurrentPositions: _maxConcurrent,
@@ -109,7 +114,11 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
     try {
       final saved = await repo.updateUserAutoTradeSettings(partial);
       if (!mounted) return;
-      setState(() => _usingDefaults = saved.usingDefaults ?? false);
+      setState(() {
+        _usingDefaults = saved.usingDefaults ?? false;
+        // Refresh pause state from the server response.
+        _settings = saved;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Auto-trade settings saved'),
@@ -134,6 +143,44 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
       );
     } finally {
       if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _resume() async {
+    if (_resuming) return;
+    setState(() => _resuming = true);
+    final repo = AppConfigScope.of(context).repo;
+    try {
+      final cleared = await repo.resumeMineAutoTrade();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            cleared
+                ? 'Resumed. Next signal will dispatch.'
+                : 'Already active — nothing to clear.',
+          ),
+          backgroundColor: LuminColors.success,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+      // Reload to reflect the cleared pause state.
+      setState(() {
+        _loaded = false;
+        _loadError = null;
+      });
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Resume failed: $e'),
+          backgroundColor: LuminColors.loss,
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _resuming = false);
     }
   }
 
@@ -162,10 +209,6 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
             ),
         ],
       ),
-      // Region gate (Play Store launch A6, 2026-05-20).  Replaces
-      // the settings form with a "not available in your region" card
-      // when CF-IPCountry reports the user is in a blocked
-      // jurisdiction.  Soft-fails open on unknown / error.
       body: RegionGate(child: _bodyFor(isLive)),
     );
   }
@@ -231,21 +274,13 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
     );
   }
 
-  /// Per-user scope banner — explains that settings persist to the
-  /// user's profile but aren't consumed at signal-time yet (Phase 3
-  /// wires the user-side execution path).
   Widget _scopeBanner() {
     final usingDefaults = _usingDefaults;
     final accent = usingDefaults ? LuminColors.textMuted : LuminColors.accent;
-    final label = usingDefaults
-        ? 'Using engine defaults.'
-        : 'Custom — your overrides.';
+    final label = usingDefaults ? 'Using engine defaults.' : 'Custom — your overrides.';
     return Padding(
       padding: const EdgeInsets.fromLTRB(
-        LuminSpacing.lg,
-        LuminSpacing.sm,
-        LuminSpacing.lg,
-        LuminSpacing.md,
+        LuminSpacing.lg, LuminSpacing.sm, LuminSpacing.lg, LuminSpacing.md,
       ),
       child: Container(
         padding: const EdgeInsets.symmetric(
@@ -280,8 +315,8 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
                   ),
                   const SizedBox(height: 2),
                   const Text(
-                    'Saved to your profile. Takes effect once auto-trade '
-                    'execution ships (Phase 3).',
+                    'Saved to your profile. Settings take effect on the '
+                    'next signal dispatch.',
                     style: TextStyle(
                       color: LuminColors.textSecondary,
                       fontSize: 11,
@@ -297,83 +332,8 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
     );
   }
 
-  /// Show a real-money confirmation dialog before flipping to LIVE
-  /// mode.  Returns true when the user explicitly confirms.  Off /
-  /// paper transitions bypass this.
-  Future<bool?> _confirmLiveFlip() {
-    return showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: LuminColors.bgCard,
-        title: const Row(
-          children: [
-            Icon(Icons.warning_amber_rounded,
-                color: LuminColors.loss, size: 20),
-            SizedBox(width: LuminSpacing.sm),
-            Expanded(
-              child: Text(
-                'Enable LIVE auto-trade?',
-                style: TextStyle(
-                  color: LuminColors.textPrimary,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ],
-        ),
-        content: const Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Lumin will place real Binance Futures orders without per-'
-              'signal confirmation while the app is open.',
-              style: TextStyle(
-                color: LuminColors.textPrimary,
-                fontSize: 13,
-                height: 1.4,
-              ),
-            ),
-            SizedBox(height: LuminSpacing.sm),
-            Text(
-              '• Sized by your position-size % × leverage cap\n'
-              '• Idempotent per signal (each fires at most once)\n'
-              '• Auto-trade pauses when the app backgrounds\n'
-              '• Tap the AUTO banner to stop immediately',
-              style: TextStyle(
-                color: LuminColors.textSecondary,
-                fontSize: 12,
-                height: 1.5,
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text(
-              'Cancel',
-              style: TextStyle(color: LuminColors.textSecondary),
-            ),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: LuminColors.loss,
-              foregroundColor: LuminColors.bgDeep,
-            ),
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text(
-              'Enable LIVE',
-              style: TextStyle(fontWeight: FontWeight.w700),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _modeCard() {
+    final isPaused = _settings?.isAutoPaused ?? false;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
       child: LuminCard(
@@ -390,80 +350,77 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
               ),
             ),
             const SizedBox(height: LuminSpacing.md),
-            Row(
-              children: [
-                _modeBtn(0, 'Off', Icons.power_settings_new, LuminColors.textMuted),
-                const SizedBox(width: LuminSpacing.sm),
-                _modeBtn(1, 'Paper', Icons.science_outlined, LuminColors.warn),
-                const SizedBox(width: LuminSpacing.sm),
-                _modeBtn(2, 'Live', Icons.bolt, LuminColors.loss),
-              ],
+            // ── Live toggle ──────────────────────────────────────────────
+            _ModeToggleRow(
+              icon: Icons.bolt,
+              iconColor: LuminColors.loss,
+              label: 'Live Trading',
+              description: 'Real orders on Binance Futures — real money.',
+              enabled: _liveEnabled,
+              statusWidget: _liveStatusChip(isPaused),
+              onChanged: _toggleLive,
             ),
-            const SizedBox(height: LuminSpacing.md),
-            Text(
-              _modeDesc(_mode),
-              style: const TextStyle(
-                color: LuminColors.textSecondary,
-                fontSize: 12,
+            // Inline pause banner — only shown when live is on and paused.
+            if (_liveEnabled && isPaused) ...[
+              const SizedBox(height: LuminSpacing.sm),
+              _PauseBanner(
+                reason: _settings?.pausedReason,
+                resuming: _resuming,
+                onResume: _resume,
               ),
+            ],
+            const SizedBox(height: LuminSpacing.md),
+            const Divider(color: LuminColors.cardBorder, height: 1),
+            const SizedBox(height: LuminSpacing.md),
+            // ── Paper toggle ─────────────────────────────────────────────
+            _ModeToggleRow(
+              icon: Icons.science_outlined,
+              iconColor: LuminColors.warn,
+              label: 'Paper Simulation',
+              description: 'Simulated fills — no real money, zero risk.',
+              enabled: _paperEnabled,
+              statusWidget: _paperStatusChip(),
+              onChanged: (v) => setState(() => _paperEnabled = v),
             ),
+            const SizedBox(height: LuminSpacing.sm),
+            // Active mode summary line
+            _modeSummary(),
           ],
         ),
       ),
     );
   }
 
-  Widget _modeBtn(int idx, String label, IconData icon, Color color) {
-    final selected = _mode == idx;
-    return Expanded(
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(LuminRadii.md),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(LuminRadii.md),
-          onTap: () => setState(() => _mode = idx),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            padding: const EdgeInsets.symmetric(vertical: LuminSpacing.md),
-            decoration: BoxDecoration(
-              color: selected ? color.withOpacity(0.15) : LuminColors.bgElevated,
-              borderRadius: BorderRadius.circular(LuminRadii.md),
-              border: Border.all(
-                color: selected ? color.withOpacity(0.50) : LuminColors.cardBorder,
-              ),
-            ),
-            child: Column(
-              children: [
-                Icon(icon, color: selected ? color : LuminColors.textSecondary, size: 22),
-                const SizedBox(height: LuminSpacing.xs),
-                Text(
-                  label,
-                  style: TextStyle(
-                    color: selected ? color : LuminColors.textSecondary,
-                    fontSize: 12,
-                    fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                    letterSpacing: 0.3,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
+  Widget _liveStatusChip(bool isPaused) {
+    if (!_liveEnabled) {
+      return _StatusChip(label: 'Off', color: LuminColors.textMuted);
+    }
+    if (isPaused) {
+      return _StatusChip(label: '⚠ Paused', color: LuminColors.warn, filled: true);
+    }
+    return _StatusChip(label: '● Armed', color: LuminColors.success, filled: true);
   }
 
-  String _modeDesc(int m) {
-    switch (m) {
-      case 0:
-        return 'Auto-trade disabled. Signals still publish to Telegram.';
-      case 1:
-        return 'Paper mode — fills are simulated, no real orders. Zero risk.';
-      case 2:
-        return 'Live — real orders on Binance Futures. Risk gates active.';
-      default:
-        return '';
+  Widget _paperStatusChip() {
+    if (!_paperEnabled) {
+      return _StatusChip(label: 'Off', color: LuminColors.textMuted);
     }
+    return _StatusChip(label: '● Active', color: LuminColors.accent, filled: true);
+  }
+
+  Widget _modeSummary() {
+    final parts = <String>[];
+    if (_liveEnabled) parts.add('Live');
+    if (_paperEnabled) parts.add('Paper');
+    final modeLabel = parts.isEmpty ? 'Off' : parts.join(' + ');
+    return Text(
+      'Mode: $modeLabel',
+      style: const TextStyle(
+        color: LuminColors.textSecondary,
+        fontSize: 11,
+        height: 1.4,
+      ),
+    );
   }
 
   Widget _sizingCard() {
@@ -522,27 +479,17 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
                 onChanged: (v) => setState(() => _maxConcurrent = v.round()),
               ),
             ),
-            // Per-user notional override (2026-05-20).  Lets small-
-            // wallet users (e.g. $20 Futures wallet at 20× leverage =
-            // $400 max position) lower the engine's default $500
-            // notional so Binance stops returning -2019 "Margin is
-            // insufficient".  Engine clamps to [$5, $2000].
             _slider(
-              label: 'Position notional (live mode)',
+              label: 'Position notional (live)',
               value: '\$${_notionalUsd.toStringAsFixed(0)}',
               slider: Slider(
                 value: _notionalUsd,
                 min: 5,
                 max: 2000,
-                // 1-USD steps would be 1995 divisions — too fine for a
-                // mobile slider.  Round to nearest $5 for the bottom
-                // end and nearest $25 for the upper end via 80 steps.
                 divisions: 80,
                 activeColor: LuminColors.accent,
                 inactiveColor: LuminColors.cardBorder,
                 onChanged: (v) => setState(() {
-                  // Round to nearest $5 so the displayed value matches
-                  // the slider's stepping behaviour.
                   _notionalUsd = (v / 5).round() * 5.0;
                 }),
               ),
@@ -553,7 +500,11 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
     );
   }
 
-  Widget _slider({required String label, required String value, required Widget slider}) {
+  Widget _slider({
+    required String label,
+    required String value,
+    required Widget slider,
+  }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: LuminSpacing.sm),
       child: Column(
@@ -604,8 +555,9 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
             SizedBox(width: LuminSpacing.sm),
             Expanded(
               child: Text(
-                'Live mode requires API keys + paper-mode validation. '
-                'B12 caps leverage at 30x.',
+                'Live mode requires API keys connected. '
+                'B12 caps leverage at 30×. '
+                'Set notional ≤ (Futures wallet ÷ leverage) to avoid -2019.',
                 style: TextStyle(
                   color: LuminColors.warn,
                   fontSize: 11,
@@ -615,6 +567,273 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Future<bool?> _confirmLiveFlip() {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: LuminColors.bgCard,
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: LuminColors.loss, size: 20),
+            SizedBox(width: LuminSpacing.sm),
+            Expanded(
+              child: Text(
+                'Enable LIVE auto-trade?',
+                style: TextStyle(
+                  color: LuminColors.textPrimary,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Lumin will place real Binance Futures orders on every signal '
+              'automatically — no per-signal confirmation.',
+              style: TextStyle(
+                color: LuminColors.textPrimary,
+                fontSize: 13,
+                height: 1.4,
+              ),
+            ),
+            SizedBox(height: LuminSpacing.sm),
+            Text(
+              '• Sized by your Position notional × leverage cap\n'
+              '• One order per signal (idempotent)\n'
+              '• Tap Save then come back to disable',
+              style: TextStyle(
+                color: LuminColors.textSecondary,
+                fontSize: 12,
+                height: 1.5,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: LuminColors.textSecondary),
+            ),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: LuminColors.loss,
+              foregroundColor: LuminColors.bgDeep,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text(
+              'Enable LIVE',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Sub-widgets
+// ---------------------------------------------------------------------------
+
+/// A toggle row for one execution mode (Live or Paper).
+class _ModeToggleRow extends StatelessWidget {
+  const _ModeToggleRow({
+    required this.icon,
+    required this.iconColor,
+    required this.label,
+    required this.description,
+    required this.enabled,
+    required this.statusWidget,
+    required this.onChanged,
+  });
+
+  final IconData icon;
+  final Color iconColor;
+  final String label;
+  final String description;
+  final bool enabled;
+  final Widget statusWidget;
+  final void Function(bool) onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(icon, color: enabled ? iconColor : LuminColors.textMuted, size: 20),
+            const SizedBox(width: LuminSpacing.sm),
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: enabled ? LuminColors.textPrimary : LuminColors.textSecondary,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            statusWidget,
+            const SizedBox(width: LuminSpacing.sm),
+            Switch(
+              value: enabled,
+              onChanged: onChanged,
+              activeColor: iconColor,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+          ],
+        ),
+        Padding(
+          padding: const EdgeInsets.only(left: 28),
+          child: Text(
+            description,
+            style: const TextStyle(
+              color: LuminColors.textSecondary,
+              fontSize: 11,
+              height: 1.4,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Compact status chip — coloured pill label.
+class _StatusChip extends StatelessWidget {
+  const _StatusChip({
+    required this.label,
+    required this.color,
+    this.filled = false,
+  });
+
+  final String label;
+  final Color color;
+  final bool filled;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: filled ? color.withOpacity(0.15) : Colors.transparent,
+        borderRadius: BorderRadius.circular(LuminRadii.pill),
+        border: Border.all(
+          color: filled ? color.withOpacity(0.50) : Colors.transparent,
+        ),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.3,
+        ),
+      ),
+    );
+  }
+}
+
+/// Inline pause-reason banner shown below the Live toggle when paused.
+class _PauseBanner extends StatelessWidget {
+  const _PauseBanner({
+    required this.reason,
+    required this.resuming,
+    required this.onResume,
+  });
+
+  final String? reason;
+  final bool resuming;
+  final VoidCallback onResume;
+
+  String get _bodyText {
+    if (reason == 'insufficient_margin') {
+      return 'Engine paused after 3+ rejected orders — Futures wallet was '
+          'empty. Top up your Futures wallet, then tap Resume.';
+    }
+    return 'Engine paused: ${reason ?? "unknown"}. Tap Resume once resolved.';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(LuminSpacing.md),
+      decoration: BoxDecoration(
+        color: LuminColors.warn.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(LuminRadii.sm),
+        border: Border.all(color: LuminColors.warn.withOpacity(0.40)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.pause_circle_outline, color: LuminColors.warn, size: 16),
+          const SizedBox(width: LuminSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Orders paused',
+                  style: TextStyle(
+                    color: LuminColors.warn,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  _bodyText,
+                  style: const TextStyle(
+                    color: LuminColors.textSecondary,
+                    fontSize: 11,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: LuminSpacing.sm),
+          resuming
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: LuminColors.warn,
+                  ),
+                )
+              : TextButton(
+                  onPressed: onResume,
+                  style: TextButton.styleFrom(
+                    foregroundColor: LuminColors.warn,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: LuminSpacing.sm, vertical: 4),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text(
+                    'Resume',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+        ],
       ),
     );
   }
