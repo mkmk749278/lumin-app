@@ -1048,24 +1048,6 @@ class _SignalDetailSheetState extends State<_SignalDetailSheet> {
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: LuminSpacing.lg),
-          Container(
-            height: 120,
-            decoration: BoxDecoration(
-              color: LuminColors.bgElevated,
-              borderRadius: BorderRadius.circular(LuminRadii.md),
-              border: Border.all(color: LuminColors.cardBorder),
-            ),
-            child: const Center(
-              child: Text(
-                'Chart preview — coming with v0.1.0',
-                style: TextStyle(
-                  color: LuminColors.textMuted,
-                  fontSize: 12,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: LuminSpacing.lg),
           if (sig.preTpTriggerPrice > 0) ...[
             _PreTpCard(sig: sig),
             const SizedBox(height: LuminSpacing.md),
