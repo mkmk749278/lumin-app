@@ -284,6 +284,9 @@ class _SignalsPageState extends State<SignalsPage> {
       // loads would be misleading.  Pull-to-refresh keeps data
       // visible (SWR stale-while-revalidate); filter-tap doesn't.
       _data = null;
+      // Clear price cache — stale symbols from the previous filter
+      // view would accumulate unboundedly otherwise.
+      _livePrices.clear();
     });
     _resubscribe();
   }
