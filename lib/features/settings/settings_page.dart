@@ -347,6 +347,7 @@ class _DeleteAccountDialogState extends State<_DeleteAccountDialog> {
   void initState() {
     super.initState();
     _controller.addListener(() {
+      if (!mounted) return;
       final ok = _controller.text.trim().toUpperCase() == 'DELETE';
       if (ok != _canDelete) setState(() => _canDelete = ok);
     });

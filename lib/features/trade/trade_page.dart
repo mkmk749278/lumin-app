@@ -200,6 +200,7 @@ class _TradePageState extends State<TradePage> {
   }
 
   void _resubscribe() {
+    if (!mounted) return;
     _engineSub?.cancel();
     _bundleController?.close();
     final repo = AppConfigScope.of(context).repo;
