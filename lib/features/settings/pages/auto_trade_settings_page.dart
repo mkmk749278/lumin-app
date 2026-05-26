@@ -43,12 +43,28 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
   String? _loadError;
   bool _usingDefaults = true;
 
+  // Controller for the notional text field — must be a single instance
+  // so it isn't leaked on every rebuild.
+  late final TextEditingController _notionalCtrl;
+
   /// Derive the mode string from the two independent flags.
   String get _computedMode {
     if (_liveEnabled && _paperEnabled) return 'both';
     if (_liveEnabled) return 'live';
     if (_paperEnabled) return 'paper';
     return 'off';
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _notionalCtrl = TextEditingController(text: _notionalUsd.toStringAsFixed(0));
+  }
+
+  @override
+  void dispose() {
+    _notionalCtrl.dispose();
+    super.dispose();
   }
 
   @override
@@ -71,6 +87,8 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
         _leverageCap = s.leverageCap ?? _leverageCap;
         _maxConcurrent = s.maxConcurrentPositions ?? _maxConcurrent;
         _notionalUsd = s.notionalUsd ?? _notionalUsd;
+        _notionalCtrl.text = _notionalUsd.toStringAsFixed(0);
+        _notionalCtrl.selection = TextSelection.collapsed(offset: _notionalCtrl.text.length);
         _usingDefaults = s.usingDefaults ?? true;
         _loaded = true;
         _loadError = null;
@@ -488,11 +506,6 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
 
   /// Notional slider with an inline text field for direct dollar-amount entry.
   Widget _notionalSliderWithInput() {
-    final controller = TextEditingController(
-      text: _notionalUsd.toStringAsFixed(0),
-    );
-    // Keep cursor at end after external setState rebuilds.
-    controller.selection = TextSelection.collapsed(offset: controller.text.length);
     return Padding(
       padding: const EdgeInsets.only(bottom: LuminSpacing.sm),
       child: Column(
@@ -514,7 +527,7 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
                 width: 80,
                 height: 32,
                 child: TextField(
-                  controller: controller,
+                  controller: _notionalCtrl,
                   keyboardType: TextInputType.number,
                   textAlign: TextAlign.right,
                   style: const TextStyle(
@@ -563,6 +576,8 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
             inactiveColor: LuminColors.cardBorder,
             onChanged: (v) => setState(() {
               _notionalUsd = (v / 5).round() * 5.0;
+              _notionalCtrl.text = _notionalUsd.toStringAsFixed(0);
+              _notionalCtrl.selection = TextSelection.collapsed(offset: _notionalCtrl.text.length);
             }),
           ),
         ],
