@@ -63,6 +63,7 @@ class MockSignal {
     required this.status,
     required this.pnlPct,
     required this.minutesAgo,
+    this.holdMins,
     this.currentPrice = 0.0,
     this.preTpTriggerPrice = 0.0,
     this.preTpThresholdPct = 0.0,
@@ -84,6 +85,11 @@ class MockSignal {
   final String status; // ACTIVE / TP1_HIT / TP2_HIT / TP3_HIT / SL_HIT / INVALIDATED
   final double pnlPct;
   final int minutesAgo;
+
+  /// Actual hold duration in minutes (dispatch → terminal for closed signals,
+  /// dispatch → now for active signals). Null when dispatch_timestamp is absent.
+  final int? holdMins;
+
   /// Last-known mark price.  Populated from the live engine snapshot —
   /// 0.0 when offline / mock data.
   final double currentPrice;

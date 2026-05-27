@@ -3127,6 +3127,7 @@ class HttpRepository implements LuminRepository {
         status: j['status'] as String? ?? 'ACTIVE',
         pnlPct: (j['pnl_pct'] as num?)?.toDouble() ?? 0.0,
         minutesAgo: (j['minutes_ago'] as num?)?.toInt() ?? 0,
+        holdMins: (j['hold_mins'] as num?)?.toInt(),
         currentPrice: (j['current_price'] as num?)?.toDouble() ?? 0.0,
         preTpTriggerPrice:
             (j['pre_tp_trigger_price'] as num?)?.toDouble() ?? 0.0,
