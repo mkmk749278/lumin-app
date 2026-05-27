@@ -882,13 +882,29 @@ class _SignalCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: LuminSpacing.sm),
-              Text(
-                '• ${formatAge(sig.minutesAgo)} ago',
-                style: const TextStyle(
-                  color: LuminColors.textMuted,
-                  fontSize: 11,
-                ),
-              ),
+              Builder(builder: (_) {
+                final isTerminal = const {
+                  'SL_HIT', 'BREAKEVEN_EXIT', 'PROFIT_LOCKED',
+                  'INVALIDATED', 'EXPIRED', 'CANCELLED',
+                  'FULL_TP_HIT', 'TP3_HIT', 'CLOSED',
+                }.contains(sig.status);
+                final holdMins = sig.holdMins;
+                final String timeLabel;
+                if (isTerminal && holdMins != null) {
+                  timeLabel = '• held ${formatAge(holdMins)} · ${formatAge(sig.minutesAgo)} ago';
+                } else if (!isTerminal && holdMins != null) {
+                  timeLabel = '• open ${formatAge(holdMins)}';
+                } else {
+                  timeLabel = '• ${formatAge(sig.minutesAgo)} ago';
+                }
+                return Text(
+                  timeLabel,
+                  style: const TextStyle(
+                    color: LuminColors.textMuted,
+                    fontSize: 11,
+                  ),
+                );
+              }),
               const Spacer(),
               if (_currentPrice > 0) ...[
                 Text(
@@ -1076,6 +1092,21 @@ class _SignalDetailSheetState extends State<_SignalDetailSheet> {
           _DetailRow('Confidence',
               '${sig.confidence.toStringAsFixed(1)} (${sig.tier})'),
           _DetailRow('Status', sig.status),
+          if (sig.holdMins != null) ...[
+            Builder(builder: (_) {
+              final isTerminal = const {
+                'SL_HIT', 'BREAKEVEN_EXIT', 'PROFIT_LOCKED',
+                'INVALIDATED', 'EXPIRED', 'CANCELLED',
+                'FULL_TP_HIT', 'TP3_HIT', 'CLOSED',
+              }.contains(sig.status);
+              return _DetailRow(
+                'Hold',
+                isTerminal
+                    ? '${formatAge(sig.holdMins!)} (closed ${formatAge(sig.minutesAgo)} ago)'
+                    : 'open ${formatAge(sig.holdMins!)}',
+              );
+            }),
+          ],
           if (sig.status == 'ACTIVE') ...[
             const SizedBox(height: LuminSpacing.lg),
             _TakeSignalAction(sig: sig),
