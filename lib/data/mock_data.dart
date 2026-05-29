@@ -100,6 +100,52 @@ class MockSignal {
   final double preTpTriggerPrice;
   final double preTpThresholdPct;
   final bool preTpHit;
+
+  Map<String, dynamic> toMap() => {
+    'id': id,
+    'symbol': symbol,
+    'direction': direction,
+    'setupName': setupName,
+    'agentName': agentName,
+    'entry': entry,
+    'sl': sl,
+    'tp1': tp1,
+    'tp2': tp2,
+    'tp3': tp3,
+    'confidence': confidence,
+    'tier': tier,
+    'status': status,
+    'pnlPct': pnlPct,
+    'minutesAgo': minutesAgo,
+    'holdMins': holdMins,
+    'currentPrice': currentPrice,
+    'preTpTriggerPrice': preTpTriggerPrice,
+    'preTpThresholdPct': preTpThresholdPct,
+    'preTpHit': preTpHit,
+  };
+
+  factory MockSignal.fromMap(Map<String, dynamic> m) => MockSignal(
+    id: m['id'] as String? ?? '',
+    symbol: m['symbol'] as String? ?? '',
+    direction: m['direction'] as String? ?? 'LONG',
+    setupName: m['setupName'] as String? ?? '',
+    agentName: m['agentName'] as String? ?? '',
+    entry: (m['entry'] as num?)?.toDouble() ?? 0.0,
+    sl: (m['sl'] as num?)?.toDouble() ?? 0.0,
+    tp1: (m['tp1'] as num?)?.toDouble() ?? 0.0,
+    tp2: (m['tp2'] as num?)?.toDouble() ?? 0.0,
+    tp3: (m['tp3'] as num?)?.toDouble() ?? 0.0,
+    confidence: (m['confidence'] as num?)?.toDouble() ?? 0.0,
+    tier: m['tier'] as String? ?? 'B',
+    status: m['status'] as String? ?? 'ACTIVE',
+    pnlPct: (m['pnlPct'] as num?)?.toDouble() ?? 0.0,
+    minutesAgo: (m['minutesAgo'] as num?)?.toInt() ?? 0,
+    holdMins: (m['holdMins'] as num?)?.toInt(),
+    currentPrice: (m['currentPrice'] as num?)?.toDouble() ?? 0.0,
+    preTpTriggerPrice: (m['preTpTriggerPrice'] as num?)?.toDouble() ?? 0.0,
+    preTpThresholdPct: (m['preTpThresholdPct'] as num?)?.toDouble() ?? 0.0,
+    preTpHit: m['preTpHit'] as bool? ?? false,
+  );
 }
 
 const List<MockSignal> mockSignals = [
