@@ -300,7 +300,25 @@ class _SignalsPageState extends State<SignalsPage> {
   Widget build(BuildContext context) {
     final isLive = AppConfigScope.of(context).repo.isLive;
     return Scaffold(
-      appBar: AppBar(title: const Text('Signals')),
+      appBar: AppBar(
+        title: const Text('Signals'),
+        // Engine-wide feed disclaimer — prevents subscribers from
+        // confusing "ACTIVE" engine signals with their personal open
+        // positions.  The Trade tab is the per-user execution view.
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(20),
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Text(
+              'Engine-wide feed  •  Your open positions → Trade tab',
+              style: const TextStyle(
+                color: LuminColors.textMuted,
+                fontSize: 11,
+              ),
+            ),
+          ),
+        ),
+      ),
       body: Column(
         children: [
           if (!isLive) const PreviewBadge(),
@@ -530,7 +548,7 @@ class _SignalsEmpty extends StatelessWidget {
         const SizedBox(height: LuminSpacing.xs),
         Text(
           isLive
-              ? 'Engine is scanning 75 pairs.\nNew paid signals appear here when they fire.'
+              ? 'Engine is scanning 75 pairs.\nNew paid signals appear here when they fire.\n\nThis is the engine-wide feed — open signals here are not\nnecessarily your open positions. Check the Trade tab for\nyour personal execution status.'
               : 'Pull down to refresh.',
           textAlign: TextAlign.center,
           style: const TextStyle(color: LuminColors.textMuted, fontSize: 11),
