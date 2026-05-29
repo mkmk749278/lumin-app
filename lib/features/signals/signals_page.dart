@@ -26,37 +26,39 @@ import 'take_signal_sheet.dart';
 /// failure is silently dropped so a single bad symbol can't block the
 /// rest.  Returns a map of symbol → mark price for every symbol that
 /// responded successfully.
-Future<Map<String, double>> _fetchMarkPrices(List<String> symbols) async {
+///
+/// [client] is a long-lived connection pool owned by the caller
+/// (_SignalsPageState) so TCP connections are reused across 5 s polls
+/// instead of being torn down and re-established every tick.
+Future<Map<String, double>> _fetchMarkPrices(
+  List<String> symbols,
+  http.Client client,
+) async {
   if (symbols.isEmpty) return const {};
-  final client = http.Client();
-  try {
-    final results = await Future.wait(
-      symbols.map((sym) async {
-        try {
-          final uri = Uri.parse(
-              'https://fapi.binance.com/fapi/v1/premiumIndex?symbol=$sym');
-          final resp = await client.get(uri).timeout(const Duration(seconds: 8));
-          if (resp.statusCode != 200) return MapEntry(sym, 0.0);
-          final j = jsonDecode(resp.body);
-          if (j is Map<String, dynamic> && j['markPrice'] != null) {
-            final price = double.tryParse(j['markPrice'].toString()) ?? 0.0;
-            return MapEntry(sym, price);
-          }
-          return MapEntry(sym, 0.0);
-        } catch (_) {
-          return MapEntry(sym, 0.0);
+  final results = await Future.wait(
+    symbols.map((sym) async {
+      try {
+        final uri = Uri.parse(
+            'https://fapi.binance.com/fapi/v1/premiumIndex?symbol=$sym');
+        final resp = await client.get(uri).timeout(const Duration(seconds: 8));
+        if (resp.statusCode != 200) return MapEntry(sym, 0.0);
+        final j = jsonDecode(resp.body);
+        if (j is Map<String, dynamic> && j['markPrice'] != null) {
+          final price = double.tryParse(j['markPrice'].toString()) ?? 0.0;
+          return MapEntry(sym, price);
         }
-      }),
-      eagerError: false,
-    );
-    final out = <String, double>{};
-    for (final e in results) {
-      if (e.value > 0) out[e.key] = e.value;
-    }
-    return out;
-  } finally {
-    client.close();
+        return MapEntry(sym, 0.0);
+      } catch (_) {
+        return MapEntry(sym, 0.0);
+      }
+    }),
+    eagerError: false,
+  );
+  final out = <String, double>{};
+  for (final e in results) {
+    if (e.value > 0) out[e.key] = e.value;
   }
+  return out;
 }
 
 enum _SignalFilter { all, open, closed }
@@ -163,6 +165,12 @@ class _SignalsPageState extends State<SignalsPage> {
   final Map<String, double> _livePrices = {};
   Timer? _priceTimer;
 
+  /// Persistent HTTP connection pool for Binance mark-price polls.
+  /// Reused across every 5 s tick so TCP connections are kept alive
+  /// instead of torn down and re-established on every poll.
+  /// Closed in [dispose] when the page leaves the tree.
+  final http.Client _markPriceClient = http.Client();
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -177,6 +185,7 @@ class _SignalsPageState extends State<SignalsPage> {
   void dispose() {
     _sub?.cancel();
     _priceTimer?.cancel();
+    _markPriceClient.close();
     super.dispose();
   }
 
@@ -217,7 +226,7 @@ class _SignalsPageState extends State<SignalsPage> {
       _priceTimer = null;
       return;
     }
-    final fresh = await _fetchMarkPrices(syms);
+    final fresh = await _fetchMarkPrices(syms, _markPriceClient);
     if (!mounted) return;
     if (fresh.isNotEmpty) {
       setState(() => _livePrices.addAll(fresh));
@@ -1017,6 +1026,7 @@ class _SignalDetailSheet extends StatefulWidget {
 class _SignalDetailSheetState extends State<_SignalDetailSheet> {
   late double _livePrice;
   Timer? _timer;
+  final http.Client _markPriceClient = http.Client();
 
   @override
   void initState() {
@@ -1034,12 +1044,13 @@ class _SignalDetailSheetState extends State<_SignalDetailSheet> {
   @override
   void dispose() {
     _timer?.cancel();
+    _markPriceClient.close();
     super.dispose();
   }
 
   Future<void> _fetch() async {
     try {
-      final prices = await _fetchMarkPrices([widget.sig.symbol]);
+      final prices = await _fetchMarkPrices([widget.sig.symbol], _markPriceClient);
       final price = prices[widget.sig.symbol];
       if (!mounted || price == null || price <= 0) return;
       setState(() => _livePrice = price);
