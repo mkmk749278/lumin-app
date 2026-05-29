@@ -44,6 +44,10 @@ class SwrCache {
   // while a fetch is pending, they share the same Future rather than
   // racing.  Cleared when the future completes (success or failure).
   final Map<String, Future<dynamic>> _inflight = {};
+  // Keys that were explicitly invalidated (via pull-to-refresh).  The
+  // next watch() call consumes the flag and skips the SharedPreferences
+  // warm-emit so the spinner only releases when real server data lands.
+  final Set<String> _bypassed = {};
 
   SharedPreferences? _prefs;
   bool _prefsLoaded = false;
@@ -79,10 +83,14 @@ class SwrCache {
     T? Function(String)? fromJson,
     Duration maxPersistAge = const Duration(hours: 4),
   }) async* {
-    final cached = _readFresh<T>(key, ttl);
+    // Consume the bypass flag — set by invalidate() on pull-to-refresh.
+    // When set, skip both in-memory and SharedPreferences so the spinner
+    // only releases when real server data arrives, not stale persisted data.
+    final skipCached = _bypassed.remove(key);
+    final cached = skipCached ? null : _readFresh<T>(key, ttl);
     if (cached != null) {
       yield cached;
-    } else if (persistKey != null && fromJson != null) {
+    } else if (!skipCached && persistKey != null && fromJson != null) {
       // Cold-start: no in-memory value — check SharedPreferences.
       final prefs = await _getPrefs();
       final raw = prefs?.getString(persistKey);
@@ -155,15 +163,19 @@ class SwrCache {
   /// previous one's cached responses.
   void clear() {
     _store.clear();
+    _bypassed.clear();
     // In-flight futures keep running but their results won't be cached
     // (they'd write into a fresh _store).  We accept that — they're
     // already in flight and cancelling http is non-trivial.
   }
 
-  /// Invalidate one key — e.g. after a settings PUT so the next read
-  /// re-fetches.  No-op when the key isn't cached.
+  /// Invalidate one key — forces the next watch() call to skip both
+  /// in-memory and SharedPreferences and go straight to a network fetch.
+  /// Used by pull-to-refresh so the spinner only releases when real
+  /// server data lands, not when stale persisted data is re-emitted.
   void invalidate(String key) {
     _store.remove(key);
+    _bypassed.add(key);
   }
 
   /// Bypass the in-memory layer entirely and return whatever's cached
