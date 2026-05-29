@@ -2443,11 +2443,20 @@ class HttpRepository implements LuminRepository {
     final key = _signalsKey(status: status, limit: limit, setupClass: setupClass);
     return _swr.watch<List<MockSignal>>(
       key,
-      fetch: () => fetchSignals(
-        status: status,
-        limit: limit,
-        setupClass: setupClass,
-      ),
+      fetch: () => fetchSignals(status: status, limit: limit, setupClass: setupClass),
+      ttl: const Duration(seconds: 30),
+      persistKey: 'swr_signals_${status}_$limit',
+      toJson: (items) => jsonEncode(items.map((s) => s.toMap()).toList()),
+      fromJson: (str) {
+        try {
+          final list = jsonDecode(str) as List;
+          return list
+              .map((j) => MockSignal.fromMap(j as Map<String, dynamic>))
+              .toList();
+        } catch (_) {
+          return null;
+        }
+      },
     );
   }
 
