@@ -25,7 +25,7 @@ class LuminApiClient {
   LuminApiClient({
     required this.baseUrl,
     required this.auth,
-    this.timeout = const Duration(seconds: 4),
+    this.timeout = const Duration(seconds: 8),
     this.maxRetries = 1,
     http.Client? httpClient,
   }) : _http = httpClient ?? http.Client();
