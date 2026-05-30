@@ -7,6 +7,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import 'auth_service.dart';
@@ -24,8 +25,8 @@ class LuminApiClient {
   LuminApiClient({
     required this.baseUrl,
     required this.auth,
-    this.timeout = const Duration(seconds: 8),
-    this.maxRetries = 2,
+    this.timeout = const Duration(seconds: 4),
+    this.maxRetries = 1,
     http.Client? httpClient,
   }) : _http = httpClient ?? http.Client();
 
@@ -141,7 +142,7 @@ class LuminApiClient {
           throw ApiError(resp.statusCode, _decodeError(resp.body));
         }
         if (resp.body.isEmpty) return null;
-        return jsonDecode(resp.body);
+        return await compute(jsonDecode, resp.body);
       } on TimeoutException catch (e) {
         lastError = e;
       } on SocketException catch (e) {

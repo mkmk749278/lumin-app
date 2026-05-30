@@ -157,12 +157,12 @@ class _SignalsPageState extends State<SignalsPage> {
   /// data lands.  Same pattern as PulsePage / TradePage.
   Completer<void>? _refreshDone;
 
-  /// Live Binance mark prices — polled every 5 s for ACTIVE signals.
-  /// Key = symbol (e.g. "CHZUSDT"), value = latest mark price.
+  /// Per-symbol live price notifiers — polled every 5 s for ACTIVE signals.
+  /// Each card subscribes to its own notifier so only price-bearing rows
+  /// rebuild on each tick, not the entire ListView.
   /// Only populated when ``isLive == true`` and at least one ACTIVE
-  /// signal is visible.  Empty in mock/preview mode — the card falls
-  /// back to the static ``MockSignal.currentPrice`` field.
-  final Map<String, double> _livePrices = {};
+  /// signal is visible.  Disposed in [dispose] + on filter change.
+  final Map<String, ValueNotifier<double>> _priceNotifiers = {};
   Timer? _priceTimer;
 
   /// Persistent HTTP connection pool for Binance mark-price polls.
@@ -186,6 +186,9 @@ class _SignalsPageState extends State<SignalsPage> {
     _sub?.cancel();
     _priceTimer?.cancel();
     _markPriceClient.close();
+    for (final n in _priceNotifiers.values) {
+      n.dispose();
+    }
     super.dispose();
   }
 
@@ -228,8 +231,10 @@ class _SignalsPageState extends State<SignalsPage> {
     }
     final fresh = await _fetchMarkPrices(syms, _markPriceClient);
     if (!mounted) return;
-    if (fresh.isNotEmpty) {
-      setState(() => _livePrices.addAll(fresh));
+    for (final entry in fresh.entries) {
+      _priceNotifiers
+          .putIfAbsent(entry.key, () => ValueNotifier<double>(0.0))
+          .value = entry.value;
     }
   }
 
@@ -293,9 +298,12 @@ class _SignalsPageState extends State<SignalsPage> {
       // loads would be misleading.  Pull-to-refresh keeps data
       // visible (SWR stale-while-revalidate); filter-tap doesn't.
       _data = null;
-      // Clear price cache — stale symbols from the previous filter
-      // view would accumulate unboundedly otherwise.
-      _livePrices.clear();
+      // Dispose and clear price notifiers — stale symbols from the
+      // previous filter view would accumulate unboundedly otherwise.
+      for (final n in _priceNotifiers.values) {
+        n.dispose();
+      }
+      _priceNotifiers.clear();
     });
     _resubscribe();
   }
@@ -392,7 +400,7 @@ class _SignalsPageState extends State<SignalsPage> {
       separatorBuilder: (_, __) => const SizedBox(height: LuminSpacing.md),
       itemBuilder: (_, i) => _SignalCard(
         sig: items[i],
-        livePrice: _livePrices[items[i].symbol],
+        priceNotifier: _priceNotifiers[items[i].symbol],
       ),
     );
   }
@@ -705,29 +713,17 @@ class _SignalsError extends StatelessWidget {
 }
 
 class _SignalCard extends StatelessWidget {
-  const _SignalCard({required this.sig, this.livePrice});
+  const _SignalCard({required this.sig, this.priceNotifier});
   final MockSignal sig;
-  /// Live mark price from the 5 s Binance poll.  When non-null and the
-  /// signal is still ACTIVE, overrides ``sig.currentPrice`` for display
-  /// and drives a fresh PnL % calculation.
-  final double? livePrice;
+  /// Per-symbol live-price notifier from the 5 s Binance poll.  When
+  /// non-null and the signal is ACTIVE, the bottom price+PnL row
+  /// rebuilds independently on each tick without rebuilding the rest of
+  /// the card or any sibling cards in the ListView.
+  final ValueNotifier<double>? priceNotifier;
 
-  /// Effective current price — live when available, API snapshot otherwise.
-  double get _currentPrice =>
-      (sig.status == 'ACTIVE' && (livePrice ?? 0) > 0)
-          ? livePrice!
-          : sig.currentPrice;
-
-  /// Effective PnL % — recomputed from live price for ACTIVE signals;
-  /// uses the finalised snapshot value for closed signals.
-  double get _pnlPct {
-    if (sig.status == 'ACTIVE' && (livePrice ?? 0) > 0 && sig.entry > 0) {
-      return sig.direction == 'LONG'
-          ? (livePrice! - sig.entry) / sig.entry * 100
-          : (sig.entry - livePrice!) / sig.entry * 100;
-    }
-    return sig.pnlPct;
-  }
+  /// Shared fallback for closed signals that have no live price — never
+  /// modified, never disposed, never triggers a rebuild.
+  static final ValueNotifier<double> _kZeroPrice = ValueNotifier(0.0);
 
   Color _statusColor() {
     switch (sig.status) {
@@ -747,11 +743,23 @@ class _SignalCard extends StatelessWidget {
     }
   }
 
+  /// Price helpers used inside [ValueListenableBuilder] — kept as
+  /// static helpers so they don't capture any stale widget state.
+  static double _effectivePrice(MockSignal sig, double live) =>
+      (sig.status == 'ACTIVE' && live > 0) ? live : sig.currentPrice;
+
+  static double _effectivePnl(MockSignal sig, double live) {
+    if (sig.status == 'ACTIVE' && live > 0 && sig.entry > 0) {
+      return sig.direction == 'LONG'
+          ? (live - sig.entry) / sig.entry * 100
+          : (sig.entry - live) / sig.entry * 100;
+    }
+    return sig.pnlPct;
+  }
+
   @override
   Widget build(BuildContext context) {
     final isLong = sig.direction == 'LONG';
-    final effectivePnl = _pnlPct;
-    final pnlPositive = effectivePnl >= 0;
     return LuminCard(
       onTap: () => _showDetail(context),
       child: Column(
@@ -888,72 +896,83 @@ class _SignalCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: LuminSpacing.md),
-          Row(
-            children: [
-              Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: _statusColor(),
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: LuminSpacing.xs),
-              Text(
-                sig.status,
-                style: TextStyle(
-                  color: _statusColor(),
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.3,
-                ),
-              ),
-              const SizedBox(width: LuminSpacing.sm),
-              Builder(builder: (_) {
-                final isTerminal = const {
-                  'SL_HIT', 'BREAKEVEN_EXIT', 'PROFIT_LOCKED',
-                  'INVALIDATED', 'EXPIRED', 'CANCELLED',
-                  'FULL_TP_HIT', 'TP3_HIT', 'CLOSED',
-                }.contains(sig.status);
-                final holdMins = sig.holdMins;
-                final String timeLabel;
-                if (isTerminal && holdMins != null) {
-                  timeLabel = '• held ${formatAge(holdMins)} · ${formatAge(sig.minutesAgo)} ago';
-                } else if (!isTerminal && holdMins != null) {
-                  timeLabel = '• open ${formatAge(holdMins)}';
-                } else {
-                  timeLabel = '• ${formatAge(sig.minutesAgo)} ago';
-                }
-                return Text(
-                  timeLabel,
-                  style: const TextStyle(
-                    color: LuminColors.textMuted,
-                    fontSize: 11,
+          // Only the price+PnL suffix rebuilds when the notifier ticks.
+          // Status dot, status text, and hold-time label are static for
+          // the signal's lifetime and stay outside the builder.
+          ValueListenableBuilder<double>(
+            valueListenable: priceNotifier ?? _kZeroPrice,
+            builder: (_, live, __) {
+              final currentPrice = _effectivePrice(sig, live);
+              final effectivePnl = _effectivePnl(sig, live);
+              final pnlPositive = effectivePnl >= 0;
+              return Row(
+                children: [
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: _statusColor(),
+                      shape: BoxShape.circle,
+                    ),
                   ),
-                );
-              }),
-              const Spacer(),
-              if (_currentPrice > 0) ...[
-                Text(
-                  formatPrice(_currentPrice),
-                  style: const TextStyle(
-                    color: LuminColors.textPrimary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                    letterSpacing: -0.3,
+                  const SizedBox(width: LuminSpacing.xs),
+                  Text(
+                    sig.status,
+                    style: TextStyle(
+                      color: _statusColor(),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.3,
+                    ),
                   ),
-                ),
-                const SizedBox(width: LuminSpacing.sm),
-              ],
-              Text(
-                formatPct(effectivePnl),
-                style: TextStyle(
-                  color: pnlPositive ? LuminColors.success : LuminColors.loss,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
+                  const SizedBox(width: LuminSpacing.sm),
+                  Builder(builder: (_) {
+                    final isTerminal = const {
+                      'SL_HIT', 'BREAKEVEN_EXIT', 'PROFIT_LOCKED',
+                      'INVALIDATED', 'EXPIRED', 'CANCELLED',
+                      'FULL_TP_HIT', 'TP3_HIT', 'CLOSED',
+                    }.contains(sig.status);
+                    final holdMins = sig.holdMins;
+                    final String timeLabel;
+                    if (isTerminal && holdMins != null) {
+                      timeLabel = '• held ${formatAge(holdMins)} · ${formatAge(sig.minutesAgo)} ago';
+                    } else if (!isTerminal && holdMins != null) {
+                      timeLabel = '• open ${formatAge(holdMins)}';
+                    } else {
+                      timeLabel = '• ${formatAge(sig.minutesAgo)} ago';
+                    }
+                    return Text(
+                      timeLabel,
+                      style: const TextStyle(
+                        color: LuminColors.textMuted,
+                        fontSize: 11,
+                      ),
+                    );
+                  }),
+                  const Spacer(),
+                  if (currentPrice > 0) ...[
+                    Text(
+                      formatPrice(currentPrice),
+                      style: const TextStyle(
+                        color: LuminColors.textPrimary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        letterSpacing: -0.3,
+                      ),
+                    ),
+                    const SizedBox(width: LuminSpacing.sm),
+                  ],
+                  Text(
+                    formatPct(effectivePnl),
+                    style: TextStyle(
+                      color: pnlPositive ? LuminColors.success : LuminColors.loss,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         ],
       ),
@@ -969,10 +988,14 @@ class _SignalCard extends StatelessWidget {
           top: Radius.circular(LuminRadii.lg),
         ),
       ),
-      builder: (_) => _SignalDetailSheet(
-        sig: sig,
-        initialLivePrice: _currentPrice > 0 ? _currentPrice : null,
-      ),
+      builder: (_) {
+        final live = priceNotifier?.value ?? 0.0;
+        final initialPrice = _effectivePrice(sig, live);
+        return _SignalDetailSheet(
+          sig: sig,
+          initialLivePrice: initialPrice > 0 ? initialPrice : null,
+        );
+      },
     );
   }
 }
