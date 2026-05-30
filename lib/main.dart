@@ -257,29 +257,31 @@ class _AuthGateState extends State<_AuthGate> {
           // as-different-user flow).
           _prewarmed = false;
           _verifiedUid = null;
+          _verifyingUid = null;
           return const PhoneSignInPage();
         }
-        if (_verifiedUid != user.uid) {
-          // Cached / restored user that hasn't been confirmed yet.
-          // Kick off the verification on the next frame so we don't
-          // setState during a build.  Renders a blank splash until
-          // [_verifyToken] resolves — typically 100-500ms for the
-          // forced-refresh round-trip.
+        // Optimistic launch (2026-05-30 perf push): a returning user
+        // routes straight to NavShell rendered against the SDK-cached ID
+        // token (``currentIdToken`` without forceRefresh resolves from the
+        // in-memory cache, so the API client has a bearer immediately).
+        // The forced-refresh verification runs in the BACKGROUND — on
+        // failure [_verifyToken] signs out, the stream re-emits null, and
+        // we land on PhoneSignInPage. This preserves the "no stuck shell
+        // without a path back" guard while dropping the 100-500ms blank
+        // splash every returning user used to sit through on cold open.
+        if (_verifiedUid != user.uid && _verifyingUid != user.uid) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             _verifyToken(scope.auth!, user);
           });
-          return _blankSplash();
         }
-        // One-shot SWR cache pre-warm on the first verified-signed-in
-        // observation.  Fire via post-frame callback so we don't call
-        // repo methods during a build; the SwrCache's in-flight dedup
-        // handles any rare race where the user taps a tab during the
-        // prewarm.
+        // One-shot SWR cache pre-warm on the first signed-in observation.
+        // Fire via post-frame callback so we don't call repo methods during
+        // a build; the SwrCache's in-flight dedup handles any race where the
+        // user taps a tab during the prewarm. If the background verify later
+        // fails, signOut clears the cache, so warming optimistically is safe.
         if (!_prewarmed) {
           _prewarmed = true;
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            // Fire-and-forget — prewarmCaches itself returns
-            // immediately; the actual fetches run in microtasks.
             scope.repo.prewarmCaches();
           });
         }

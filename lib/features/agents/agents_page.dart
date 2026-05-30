@@ -175,13 +175,20 @@ class _AgentDetailSheetState extends State<_AgentDetailSheet> {
 
   Future<_AgentDetailBundle> _load() async {
     final repo = AppConfigScope.of(context).repo;
+    // Route through the SWR-cached watches (first emission) rather than the
+    // raw fetch* methods. When warm — the agents list is prewarmed at
+    // sign-in, and re-opening the same agent hits the per-setupClass signals
+    // cache — this resolves synchronously, so the sheet renders instantly
+    // instead of showing a spinner on every open.
     final results = await Future.wait([
-      repo.fetchAgents(),
-      repo.fetchSignals(
-        status: 'all',
-        limit: 10,
-        setupClass: widget.agent.id,
-      ),
+      repo.watchAgents().first,
+      repo
+          .watchSignals(
+            status: 'all',
+            limit: 10,
+            setupClass: widget.agent.id,
+          )
+          .first,
     ]);
     final allAgents = results[0] as List<AgentStat>;
     final signals = (results[1] as List).cast<MockSignal>();
@@ -201,6 +208,15 @@ class _AgentDetailSheetState extends State<_AgentDetailSheet> {
   }
 
   Future<void> _refresh() async {
+    // Pull-to-refresh must bypass the cache — invalidate both keys so the
+    // next _load() goes straight to the network for genuinely fresh data.
+    final repo = AppConfigScope.of(context).repo;
+    repo.invalidateAgentsCache();
+    repo.invalidateSignalsCache(
+      status: 'all',
+      limit: 10,
+      setupClass: widget.agent.id,
+    );
     setState(() => _future = _load());
     await _future;
   }

@@ -1098,6 +1098,19 @@ abstract class LuminRepository {
   }
   void invalidateRecentDispatchEventsCache({int limit = 20}) {}
 
+  /// SWR-cached first page of the paper-trade ledger.  PaperTradesPage is
+  /// a pushed route with fresh State on every open, so without this it
+  /// showed a full-screen spinner on every visit.  Caching the first page
+  /// lets a re-open render the prior rows instantly while a background
+  /// refresh fires.  Pagination (offset > 0) stays a direct ``fetchTrades``
+  /// call — only the first page is cached.
+  Stream<TradeListResponse> watchPaperTradesFirstPage({int limit = 50}) async* {
+    yield await fetchTrades(
+      mode: 'paper', limit: limit, offset: 0, includeOpen: true,
+    );
+  }
+  void invalidatePaperTradesCache({int limit = 50}) {}
+
   /// Per-user daily-PnL snapshot — computed from the user's
   /// server-side execution positions (``/api/auto-trade/positions``).
   /// Replaces the pre-2026-05-22 Pulse card that surfaced
@@ -1423,6 +1436,16 @@ class MockRepository implements LuminRepository {
 
   @override
   void invalidateAgentsCache() {}
+
+  @override
+  Stream<TradeListResponse> watchPaperTradesFirstPage({int limit = 50}) async* {
+    yield await fetchTrades(
+      mode: 'paper', limit: limit, offset: 0, includeOpen: true,
+    );
+  }
+
+  @override
+  void invalidatePaperTradesCache({int limit = 50}) {}
 
   @override
   Stream<AutoTradeUserStatus> watchAutoTradeUserStatus() async* {
@@ -2480,6 +2503,8 @@ class HttpRepository implements LuminRepository {
   static const _kUserPnlSnapshotKey = 'user_pnl_snapshot';
   static String _recentDispatchEventsKey(int limit) =>
       'recent_dispatch_events:$limit';
+  static String _paperTradesFirstPageKey(int limit) =>
+      'paper_trades_first_page:$limit';
 
   /// SWR-cached bundle.  Single cache entry for the whole bundle —
   /// tab re-entry within TTL renders synchronously from cache while
@@ -2533,6 +2558,21 @@ class HttpRepository implements LuminRepository {
 
   @override
   void invalidateAgentsCache() => _swr.invalidate(_kAgentsKey);
+
+  @override
+  Stream<TradeListResponse> watchPaperTradesFirstPage({int limit = 50}) {
+    return _swr.watch<TradeListResponse>(
+      _paperTradesFirstPageKey(limit),
+      fetch: () => fetchTrades(
+        mode: 'paper', limit: limit, offset: 0, includeOpen: true,
+      ),
+      ttl: const Duration(seconds: 30),
+    );
+  }
+
+  @override
+  void invalidatePaperTradesCache({int limit = 50}) =>
+      _swr.invalidate(_paperTradesFirstPageKey(limit));
 
   @override
   Stream<AutoTradeUserStatus> watchAutoTradeUserStatus() {
