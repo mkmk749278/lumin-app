@@ -532,6 +532,15 @@ class PartialFill {
         ts: DateTime.tryParse(j['ts'] as String? ?? '')?.toUtc() ??
             DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
       );
+
+  Map<String, dynamic> toMap() => {
+        'tp_level': tpLevel,
+        'fraction': fraction,
+        'fill_price': fillPrice,
+        'pnl_usd': pnlUsd,
+        'fee_usd': feeUsd,
+        'ts': ts.toIso8601String(),
+      };
 }
 
 /// One paper-trade record — open or closed.
@@ -600,6 +609,27 @@ class TradeRecord {
 
   bool get isOpen => closedAt == null;
 
+  Map<String, dynamic> toMap() => {
+        'signal_id': signalId,
+        'symbol': symbol,
+        'side': side,
+        'entry': entry,
+        'qty': qty,
+        'leverage': leverage,
+        'position_size_pct': positionSizePct,
+        'notional_usd': notionalUsd,
+        'margin_usd': marginUsd,
+        'partial_fills': partialFills.map((f) => f.toMap()).toList(),
+        'close_reason': closeReason,
+        'close_price': closePrice,
+        'gross_pnl_usd': grossPnlUsd,
+        'fees_usd': feesUsd,
+        'net_pnl_usd': netPnlUsd,
+        'roi_pct_on_margin': roiPctOnMargin,
+        'created_at': createdAt.toIso8601String(),
+        'closed_at': closedAt?.toIso8601String(),
+      };
+
   factory TradeRecord.fromJson(Map<String, dynamic> j) => TradeRecord(
         signalId: j['signal_id'] as String? ?? '',
         symbol: j['symbol'] as String? ?? '',
@@ -648,6 +678,20 @@ class TradeListResponse {
             .toList(),
         total: (j['total'] as num?)?.toInt() ?? 0,
       );
+
+  String toJsonString() => jsonEncode({
+        'items': items.map((t) => t.toMap()).toList(),
+        'total': total,
+      });
+
+  static TradeListResponse? fromJsonString(String str) {
+    try {
+      final j = jsonDecode(str) as Map<String, dynamic>;
+      return TradeListResponse.fromJson(j);
+    } catch (_) {
+      return null;
+    }
+  }
 }
 
 /// Response from ``POST /api/auto-mode/paper/reset``.
@@ -2567,6 +2611,9 @@ class HttpRepository implements LuminRepository {
         mode: 'paper', limit: limit, offset: 0, includeOpen: true,
       ),
       ttl: const Duration(seconds: 30),
+      persistKey: 'swr_paper_trades_$limit',
+      toJson: (r) => r.toJsonString(),
+      fromJson: TradeListResponse.fromJsonString,
     );
   }
 
@@ -2739,6 +2786,14 @@ class HttpRepository implements LuminRepository {
     Future.microtask(() async {
       try {
         await watchUserPnlSnapshot().last;
+      } catch (_) {}
+    });
+
+    // Paper trades first page — Trade tab Paper section shows instantly
+    // on return visit instead of re-loading from the network.
+    Future.microtask(() async {
+      try {
+        await watchPaperTradesFirstPage(limit: 50).last;
       } catch (_) {}
     });
 
