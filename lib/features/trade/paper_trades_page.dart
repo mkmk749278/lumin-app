@@ -20,6 +20,8 @@
 ///     via ``POST /api/auto-mode/paper/close-all``. Owner-only because
 ///     it affects every user who has paper mode enabled, not just the
 ///     caller — the action mutates shared engine state.
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../data/app_config.dart';
@@ -48,6 +50,7 @@ class _PaperTradesPageState extends State<PaperTradesPage> {
   bool _resetting = false;
   String? _error;
   LuminRepository? _lastRepo;
+  StreamSubscription<TradeListResponse>? _firstPageSub;
 
   @override
   void initState() {
@@ -67,6 +70,7 @@ class _PaperTradesPageState extends State<PaperTradesPage> {
 
   @override
   void dispose() {
+    _firstPageSub?.cancel();
     _scroll.removeListener(_onScroll);
     _scroll.dispose();
     super.dispose();
@@ -81,37 +85,55 @@ class _PaperTradesPageState extends State<PaperTradesPage> {
     }
   }
 
-  Future<void> _refresh() async {
+  /// Load the first page via the SWR cache so a warm re-open renders the
+  /// prior rows instantly (no full-screen spinner). [bypassCache] forces a
+  /// fresh network read — used by pull-to-refresh, retry, and post-reset so
+  /// those gestures don't re-show stale cached rows.
+  ///
+  /// Owner 2026-05-17 — Paper tab must surface OPEN positions alongside
+  /// closed history (closed-only hid all current activity; the page appeared
+  /// "old" / empty during live paper runs), hence includeOpen on the watch.
+  Future<void> _refresh({bool bypassCache = false}) async {
     final repo = AppConfigScope.of(context).repo;
-    setState(() {
-      _initialLoading = true;
-      _error = null;
-      _items.clear();
-      _total = 0;
-    });
-    try {
-      final resp = await repo.fetchTrades(
-        mode: 'paper',
-        limit: _pageSize,
-        offset: 0,
-        // Owner 2026-05-17 — Paper tab must surface OPEN positions alongside
-        // closed history (the previous default of closed-only hid all current
-        // activity; the page appeared "old" / empty during live paper runs).
-        includeOpen: true,
-      );
-      if (!mounted) return;
-      setState(() {
-        _items.addAll(resp.items);
-        _total = resp.total;
-        _initialLoading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _initialLoading = false;
-      });
+    if (bypassCache) {
+      repo.invalidatePaperTradesCache(limit: _pageSize);
     }
+    setState(() {
+      _error = null;
+      // Only show the full-screen loader on a genuine cold load — keep
+      // existing rows on screen while SWR serves cached-then-fresh.
+      if (_items.isEmpty) _initialLoading = true;
+    });
+
+    final completer = Completer<void>();
+    await _firstPageSub?.cancel();
+    _firstPageSub =
+        repo.watchPaperTradesFirstPage(limit: _pageSize).listen(
+      (resp) {
+        if (!mounted) return;
+        setState(() {
+          _items
+            ..clear()
+            ..addAll(resp.items);
+          _total = resp.total;
+          _initialLoading = false;
+          _error = null;
+        });
+      },
+      onError: (Object e) {
+        if (!mounted) return;
+        setState(() {
+          // Keep any rows already shown; only surface the error view cold.
+          if (_items.isEmpty) _error = e.toString();
+          _initialLoading = false;
+        });
+        if (!completer.isCompleted) completer.complete();
+      },
+      onDone: () {
+        if (!completer.isCompleted) completer.complete();
+      },
+    );
+    return completer.future;
   }
 
   Future<void> _loadMore() async {
@@ -225,7 +247,7 @@ class _PaperTradesPageState extends State<PaperTradesPage> {
           backgroundColor: LuminColors.success,
         ),
       );
-      await _refresh();
+      await _refresh(bypassCache: true);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -317,7 +339,7 @@ class _PaperTradesPageState extends State<PaperTradesPage> {
           backgroundColor: LuminColors.success,
         ),
       );
-      await _refresh();
+      await _refresh(bypassCache: true);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -347,7 +369,7 @@ class _PaperTradesPageState extends State<PaperTradesPage> {
         actions: [
           IconButton(
             tooltip: 'Refresh',
-            onPressed: _initialLoading ? null : _refresh,
+            onPressed: _initialLoading ? null : () => _refresh(bypassCache: true),
             icon: const Icon(Icons.refresh),
           ),
           PopupMenuButton<String>(
@@ -386,7 +408,7 @@ class _PaperTradesPageState extends State<PaperTradesPage> {
       ),
       body: RefreshIndicator(
         color: LuminColors.accent,
-        onRefresh: _refresh,
+        onRefresh: () => _refresh(bypassCache: true),
         child: _buildBody(scope.repo.isLive),
       ),
     );
@@ -406,7 +428,7 @@ class _PaperTradesPageState extends State<PaperTradesPage> {
       );
     }
     if (_error != null) {
-      return _ErrorView(error: _error!, onRetry: _refresh);
+      return _ErrorView(error: _error!, onRetry: () => _refresh(bypassCache: true));
     }
     if (_items.isEmpty) {
       return ListView(
