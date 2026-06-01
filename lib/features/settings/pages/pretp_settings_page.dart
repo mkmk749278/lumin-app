@@ -4,9 +4,12 @@
 /// fraction of the path to TP1 (covers fees + safety margin).  This page
 /// loads the **current user's** overrides via ``GET /api/settings/user/pretp``
 /// (or the engine defaults if the user has none yet) and persists toggles
-/// via ``PUT``.  The engine itself doesn't yet consume per-user values —
-/// Phase 3 wires execution; until then this page is honest about storage-
-/// only behaviour via the banner at the top.
+/// via ``PUT``.  As of 2026-06-01 the engine **consumes** these per-user
+/// values for users with connected Binance keys: the server-side Position
+/// FSM rests a reduce-only pre-TP LIMIT at the user's ``threshold_pct`` for
+/// the user's ``grab_fraction`` of the position (resolve_pretp_threshold_uid
+/// + resolve_grab_fraction_uid in the engine).  Owner-account pre-TP still
+/// runs via the TradeMonitor backstop on the engine-wide defaults.
 ///
 /// The operator's engine-wide defaults live on a separate page (Settings →
 /// Engine defaults, owner-only entry), pointed at ``/api/settings/pretp``.
@@ -45,6 +48,13 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
   // backend clamps defensively too, so even an out-of-range PUT lands
   // safely, but enforcing in the slider gives immediate visual feedback.
   double _grabPct = 0.50;
+  // Pre-TP threshold (raw percent — 0.30 = 0.30%, NOT a fraction).  This is
+  // the move at which the pre-TP reduce-only LIMIT rests on Binance's book:
+  // the "close at 0.3% vs 0.5%" dial.  Engine default 0.35%.  Backend bounds
+  // are [0.05, 5.00]; the slider exposes the sensible scalp band 0.10–1.00%.
+  // 2026-06-01: the engine now READS this per-user value (resolve_pretp_
+  // threshold_uid) — it is no longer storage-only.
+  double _thresholdPct = 0.35;
   double _atrMult = 0.30;
   double _feeFloor = 0.12;
 
@@ -110,6 +120,11 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
         // clamp in `_coerce_pretp` should already guarantee this).
         if (s.grabFraction != null) {
           _grabPct = s.grabFraction!.clamp(0.30, 1.00);
+        }
+        // Raw-percent threshold.  Clamp to the slider's exposed band so an
+        // older server value outside 0.10–1.00 still renders on the track.
+        if (s.thresholdPct != null) {
+          _thresholdPct = s.thresholdPct!.clamp(0.10, 1.00);
         }
         if (s.protectManualEntries != null) {
           _protectManualEntries = s.protectManualEntries!;
@@ -177,6 +192,7 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
       atrMultiplier: _atrMult,
       feeFloorPct: _feeFloor,
       grabFraction: _grabPct,
+      thresholdPct: _thresholdPct,
       protectManualEntries: _protectManualEntries,
     );
     try {
@@ -359,9 +375,10 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
                   ),
                   const SizedBox(height: 2),
                   const Text(
-                    'Saved to your profile. Engine-side pre-TP fires a real '
-                    'partial close on the owner\'s auto-trade today; per-user '
-                    'execution ships when your Binance keys are wired (Phase 4).',
+                    'Saved to your profile. With your Binance keys connected, '
+                    'the engine rests a reduce-only pre-TP LIMIT at your '
+                    'threshold for your grab fraction on every signal — no '
+                    'slippage, fires even if the app is closed.',
                     style: TextStyle(
                       color: LuminColors.textSecondary,
                       fontSize: 11,
@@ -532,6 +549,40 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
               ),
             ),
             const SizedBox(height: LuminSpacing.md),
+            _slider(
+              label: 'Pre-TP threshold',
+              // Raw percent (0.30 = 0.30%).  This is the move at which the
+              // pre-TP reduce-only LIMIT rests on Binance — the headline
+              // "bank fast (0.3%) vs let it breathe (0.5%)" choice.  Band
+              // 0.10–1.00% in 0.05 steps (18 divisions).
+              value: '${_thresholdPct.toStringAsFixed(2)}%',
+              slider: Slider(
+                value: _thresholdPct,
+                min: 0.10,
+                max: 1.00,
+                divisions: 18,
+                activeColor: LuminColors.accent,
+                inactiveColor: LuminColors.cardBorder,
+                onChanged:
+                    _enabled ? (v) => setState(() => _thresholdPct = v) : null,
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(
+                left: LuminSpacing.sm,
+                bottom: LuminSpacing.md,
+              ),
+              child: Text(
+                'A reduce-only LIMIT rests +${_thresholdPct.toStringAsFixed(2)}% '
+                'from entry (no slippage). Lower = bank sooner, higher = let '
+                'the move breathe before taking profit.',
+                style: const TextStyle(
+                  color: LuminColors.textSecondary,
+                  fontSize: 11,
+                  height: 1.4,
+                ),
+              ),
+            ),
             _slider(
               label: 'Grab fraction',
               // OWNER_BRIEF B17: range [0.30, 1.00].  30% floor prevents
