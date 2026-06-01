@@ -148,8 +148,13 @@ class _SignalsPageState extends State<SignalsPage> {
   // drives the UI — matching the Trade tab's spinner-holds-until-done
   // pattern.
   StreamSubscription<List<MockSignal>>? _sub;
-  List<MockSignal>? _data;
-  Object? _streamError;
+  /// Per-filter data cache — retains the last-loaded list for each
+  /// filter so switching Active ↔ Closed ↔ All is instant: the cached
+  /// list is shown immediately while the background SWR refresh runs.
+  /// The skeleton only appears on the very first load of a given filter
+  /// within this page session.  Cleared on repo change (Live↔Mock).
+  final Map<_SignalFilter, List<MockSignal>?> _dataByFilter = {};
+  final Map<_SignalFilter, Object?> _errorByFilter = {};
   LuminRepository? _lastRepo;
 
   /// Completed by the stream listener on the post-invalidate emit so
@@ -177,6 +182,10 @@ class _SignalsPageState extends State<SignalsPage> {
     final repo = AppConfigScope.of(context).repo;
     if (repo != _lastRepo) {
       _lastRepo = repo;
+      // Repo switched (Live↔Mock toggle or sign-out) — stale data for
+      // the old identity must not bleed into the new session.
+      _dataByFilter.clear();
+      _errorByFilter.clear();
       _resubscribe();
     }
   }
@@ -195,7 +204,7 @@ class _SignalsPageState extends State<SignalsPage> {
   /// Returns the unique set of symbols for ACTIVE signals in the current
   /// list.  Used to decide which symbols need live price polling.
   List<String> _activeSymbols() {
-    final data = _data;
+    final data = _dataByFilter[_filter];
     if (data == null) return const [];
     final seen = <String>{};
     for (final s in data) {
@@ -241,16 +250,18 @@ class _SignalsPageState extends State<SignalsPage> {
   void _resubscribe() {
     _sub?.cancel();
     final repo = AppConfigScope.of(context).repo;
-    final stream = repo.watchSignals(status: _filter.apiValue, limit: 100);
-    setState(() {
-      _streamError = null;
-    });
+    // Capture the current filter so the listener closure always writes
+    // to the right bucket even if the user switches filters before the
+    // async fetch completes.
+    final filter = _filter;
+    final stream = repo.watchSignals(status: filter.apiValue, limit: 100);
+    setState(() => _errorByFilter.remove(filter));
     _sub = stream.listen(
       (items) {
         if (!mounted) return;
         setState(() {
-          _data = items;
-          _streamError = null;
+          _dataByFilter[filter] = items;
+          _errorByFilter.remove(filter);
         });
         _restartPricePolling();
         final done = _refreshDone;
@@ -258,7 +269,7 @@ class _SignalsPageState extends State<SignalsPage> {
       },
       onError: (Object e, StackTrace _) {
         if (!mounted) return;
-        setState(() => _streamError = e);
+        setState(() => _errorByFilter[filter] = e);
         final done = _refreshDone;
         if (done != null && !done.isCompleted) done.complete();
       },
@@ -293,13 +304,11 @@ class _SignalsPageState extends State<SignalsPage> {
       _filter = f;
       // Reset sub-filter when switching primary chip — hidden when not Closed.
       _subFilter = _ClosedSubFilter.all;
-      // Clear data on filter change — the existing list is for a
-      // different status projection so showing it while the new one
-      // loads would be misleading.  Pull-to-refresh keeps data
-      // visible (SWR stale-while-revalidate); filter-tap doesn't.
-      _data = null;
-      // Dispose and clear price notifiers — stale symbols from the
-      // previous filter view would accumulate unboundedly otherwise.
+      // Keep _dataByFilter[f]: if data was previously loaded for this
+      // filter it is shown immediately while the background SWR refresh
+      // runs, eliminating the skeleton flash on every tab switch.
+      // DO dispose price notifiers — they're keyed to the previous
+      // filter's ACTIVE symbols and must not accumulate across switches.
       for (final n in _priceNotifiers.values) {
         n.dispose();
       }
@@ -365,17 +374,19 @@ class _SignalsPageState extends State<SignalsPage> {
   }
 
   Widget _buildList({required bool isLive}) {
-    if (_data == null && _streamError == null) {
+    final data = _dataByFilter[_filter];
+    final error = _errorByFilter[_filter];
+    if (data == null && error == null) {
       return const _SignalsSkeleton(key: ValueKey('signals-skeleton'));
     }
-    if (_data == null && _streamError != null) {
+    if (data == null && error != null) {
       return _SignalsError(
         key: const ValueKey('signals-error'),
-        error: _streamError.toString(),
+        error: error.toString(),
         onRetry: _refresh,
       );
     }
-    var items = _data ?? const <MockSignal>[];
+    var items = data ?? const <MockSignal>[];
     if (_filter == _SignalFilter.closed &&
         _subFilter != _ClosedSubFilter.all) {
       items = items

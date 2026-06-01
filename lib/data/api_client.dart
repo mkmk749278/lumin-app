@@ -25,8 +25,17 @@ class LuminApiClient {
   LuminApiClient({
     required this.baseUrl,
     required this.auth,
-    this.timeout = const Duration(seconds: 8),
-    this.maxRetries = 1,
+    // 5 s timeout: enough for any healthy engine response; fails fast so
+    // the error state appears in 5 s instead of 16 s (the old 8 s × 2
+    // retry path).  Pull-to-refresh is the recovery UX — auto-retry on
+    // timeout just doubles the wait without helping the user.
+    this.timeout = const Duration(seconds: 5),
+    // 0 retries: no automatic retry on timeout or network error.
+    // The 401 auth-token refresh is still applied (it's a free retry
+    // outside this counter).  5xx transient server errors surface
+    // immediately so the user can pull-to-refresh rather than waiting
+    // an extra 5 s for a second attempt that almost never recovers.
+    this.maxRetries = 0,
     http.Client? httpClient,
   }) : _http = httpClient ?? http.Client();
 
