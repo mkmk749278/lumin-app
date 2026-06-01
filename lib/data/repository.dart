@@ -1728,6 +1728,9 @@ class MockRepository implements LuminRepository {
       thresholdPct: partial.thresholdPct ??
           _mockUserPretp.thresholdPct ??
           _mockPretp.thresholdPct,
+      grabFraction: partial.grabFraction ??
+          _mockUserPretp.grabFraction ??
+          _mockPretp.grabFraction,
       atrMultiplier: partial.atrMultiplier ??
           _mockUserPretp.atrMultiplier ??
           _mockPretp.atrMultiplier,
@@ -1738,6 +1741,9 @@ class MockRepository implements LuminRepository {
           partial.minAgeSec ?? _mockUserPretp.minAgeSec ?? _mockPretp.minAgeSec,
       maxAgeSec:
           partial.maxAgeSec ?? _mockUserPretp.maxAgeSec ?? _mockPretp.maxAgeSec,
+      protectManualEntries: partial.protectManualEntries ??
+          _mockUserPretp.protectManualEntries ??
+          _mockPretp.protectManualEntries,
       usingDefaults: false,
     );
     return _mockUserPretp;
