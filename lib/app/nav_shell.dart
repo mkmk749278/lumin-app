@@ -95,9 +95,12 @@ class _NavShellState extends State<NavShell> with WidgetsBindingObserver {
     _lastForegroundRefresh = now;
     // Refresh ONLY the visible tab — hidden-but-mounted tabs refresh when
     // next navigated to, keeping a resume to one tab's fetch, not five.
+    // Explicit cast (not `is`-promotion): `currentState` is typed `State?`
+    // and `ForegroundRefreshable` is an independent interface, not a subtype
+    // of `State`, so flow analysis won't promote — the cast is required.
     final tabState = _tabKeys[_index].currentState;
     if (tabState is ForegroundRefreshable) {
-      tabState.refreshFromForeground();
+      (tabState as ForegroundRefreshable).refreshFromForeground();
     }
   }
 
