@@ -11,6 +11,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import '../../app/foreground_refresh.dart';
 import '../../data/app_config.dart';
 import '../../data/mock_data.dart';
 import '../../data/repository.dart';
@@ -137,7 +138,8 @@ class SignalsPage extends StatefulWidget {
   State<SignalsPage> createState() => _SignalsPageState();
 }
 
-class _SignalsPageState extends State<SignalsPage> {
+class _SignalsPageState extends State<SignalsPage>
+    implements ForegroundRefreshable {
   _SignalFilter _filter = _SignalFilter.all;
   _ClosedSubFilter _subFilter = _ClosedSubFilter.all;
   // Stream-based load (Phase 2a perf push) — yields cached signals
@@ -274,6 +276,18 @@ class _SignalsPageState extends State<SignalsPage> {
         if (done != null && !done.isCompleted) done.complete();
       },
     );
+  }
+
+  @override
+  void refreshFromForeground() {
+    // App resumed on the Signals tab. Mirror pull-to-refresh's data path
+    // for the active filter (invalidate that filter's SWR key, resubscribe)
+    // without the spinner. Retained `_dataByFilter[_filter]` keeps the list
+    // on screen until fresh data lands.
+    if (!mounted) return;
+    final repo = AppConfigScope.of(context).repo;
+    repo.invalidateSignalsCache(status: _filter.apiValue, limit: 100);
+    _resubscribe();
   }
 
   Future<void> _refresh() async {

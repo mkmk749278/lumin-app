@@ -10,6 +10,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../app/foreground_refresh.dart';
 import '../../data/app_config.dart';
 import '../../data/mock_data.dart';
 import '../../data/repository.dart';
@@ -31,7 +32,8 @@ class PulsePage extends StatefulWidget {
   State<PulsePage> createState() => _PulsePageState();
 }
 
-class _PulsePageState extends State<PulsePage> {
+class _PulsePageState extends State<PulsePage>
+    implements ForegroundRefreshable {
   // Stream-based load (Phase 2b perf push) — yields the cached
   // PulseBundle synchronously on subscribe when HttpRepository has a
   // fresh SWR entry, then yields fresh data when the network
@@ -91,6 +93,18 @@ class _PulsePageState extends State<PulsePage> {
         if (done != null && !done.isCompleted) done.complete();
       },
     );
+  }
+
+  @override
+  void refreshFromForeground() {
+    // App returned to foreground on the Pulse tab. Mirror the pull-to-
+    // refresh data path (invalidate the bundle key, then resubscribe so the
+    // stream refetches) but without the RefreshIndicator spinner — the
+    // refresh is silent. `_data` is retained across `_resubscribe`, so the
+    // current bundle stays on screen until fresh data lands (no skeleton).
+    if (!mounted) return;
+    AppConfigScope.of(context).repo.invalidatePulseBundleCache();
+    _resubscribe();
   }
 
   Future<void> _refresh() async {
