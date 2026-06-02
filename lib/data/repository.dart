@@ -8,6 +8,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../shared/tokens.dart';
 import 'api_client.dart';
@@ -2988,11 +2989,49 @@ class HttpRepository implements LuminRepository {
     return PretpSettings.fromJson(j);
   }
 
+  /// Disk-cache key for the last successful auto-trade settings response.
+  /// Persisting the RAW server map (not a re-serialised model) lets us
+  /// replay it through [AutoTradeSettings.fromJson] on a network failure
+  /// without needing a full model `toJson` — the GET response IS the
+  /// canonical shape.
+  static const _kAutoTradeSettingsCacheKey = 'cache_user_auto_trade_settings';
+
   @override
   Future<AutoTradeSettings> fetchUserAutoTradeSettings() async {
-    final j = (await client.get('/api/settings/user/auto-trade'))
-        as Map<String, dynamic>;
-    return AutoTradeSettings.fromJson(j);
+    try {
+      final j = (await client.get('/api/settings/user/auto-trade'))
+          as Map<String, dynamic>;
+      // Persist the raw response so a later slow/deploy-window failure can
+      // render the user's real settings instead of a "Could not load
+      // settings" error screen (the Signals-tab treatment for the
+      // settings page, which previously had no cache at all).
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(_kAutoTradeSettingsCacheKey, jsonEncode(j));
+      } catch (_) {
+        // SharedPreferences unavailable — degrade silently; the live
+        // response is still returned below.
+      }
+      return AutoTradeSettings.fromJson(j);
+    } on ApiError catch (e) {
+      // Only fall back for transport-level failures (timeout / network =
+      // statusCode 0, or a 5xx engine blip mid-restart).  A real 4xx
+      // (e.g. 404 for an anonymous device JWT) still propagates so the
+      // page renders its genuine empty/anon state, not stale data.
+      if (e.statusCode == 0 || e.statusCode >= 500) {
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          final raw = prefs.getString(_kAutoTradeSettingsCacheKey);
+          if (raw != null) {
+            final j = jsonDecode(raw) as Map<String, dynamic>;
+            return AutoTradeSettings.fromJson(j);
+          }
+        } catch (_) {
+          // Fall through to rethrow when no usable cached copy exists.
+        }
+      }
+      rethrow;
+    }
   }
 
   @override
