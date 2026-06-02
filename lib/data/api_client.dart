@@ -25,17 +25,21 @@ class LuminApiClient {
   LuminApiClient({
     required this.baseUrl,
     required this.auth,
-    // 5 s timeout: enough for any healthy engine response; fails fast so
-    // the error state appears in 5 s instead of 16 s (the old 8 s × 2
-    // retry path).  Pull-to-refresh is the recovery UX — auto-retry on
-    // timeout just doubles the wait without helping the user.
-    this.timeout = const Duration(seconds: 5),
-    // 0 retries: no automatic retry on timeout or network error.
-    // The 401 auth-token refresh is still applied (it's a free retry
-    // outside this counter).  5xx transient server errors surface
-    // immediately so the user can pull-to-refresh rather than waiting
-    // an extra 5 s for a second attempt that almost never recovers.
-    this.maxRetries = 0,
+    // 10 s timeout: authenticated engine endpoints (auto-trade runtime
+    // status, settings, positions) do several sequential GCP Firestore
+    // round-trips per request, which legitimately take 5-9 s on a cold
+    // cache or right after a deploy restart.  The previous 5 s was tuned
+    // to "fail fast", but that converted slow-but-working responses into
+    // an instant error screen — the user wants the data, not a faster
+    // error.  10 s clears the real p99 while still bounding the wait.
+    this.timeout = const Duration(seconds: 10),
+    // 1 retry: a single retry with back-off recovers the common transient
+    // — a 5xx / dropped connection from the engine mid-restart (the
+    // ~45 s deploy window) or a one-off Firestore latency spike.  The 401
+    // auth-token refresh is still a separate "free" retry outside this
+    // counter.  Capped at 1 so a hard outage surfaces in bounded time
+    // rather than hanging the UI through many attempts.
+    this.maxRetries = 1,
     http.Client? httpClient,
   }) : _http = httpClient ?? http.Client();
 
