@@ -5,6 +5,7 @@ import '../features/settings/settings_page.dart';
 import '../features/signals/signals_page.dart';
 import '../features/trade/trade_page.dart';
 import '../features/update/update_banner.dart';
+import 'foreground_refresh.dart';
 
 class NavShell extends StatefulWidget {
   const NavShell({super.key});
@@ -13,8 +14,22 @@ class NavShell extends StatefulWidget {
   State<NavShell> createState() => _NavShellState();
 }
 
-class _NavShellState extends State<NavShell> {
+class _NavShellState extends State<NavShell> with WidgetsBindingObserver {
   int _index = 0;
+
+  /// One stable key per tab so [didChangeAppLifecycleState] can reach the
+  /// live `State` of the visible tab and call its foreground-refresh hook.
+  /// Stable across rebuilds (final), so the GlobalKey preserves each tab's
+  /// element + state — same identity guarantee `IndexedStack` already
+  /// relies on for lazy-mount state preservation.
+  final List<GlobalKey> _tabKeys = List.generate(5, (_) => GlobalKey());
+
+  /// Throttle so a quick background→foreground bounce (notification shade,
+  /// biometric/OS permission prompt, share sheet) doesn't trigger a
+  /// re-fetch. 30s is far below any staleness a user would notice yet kills
+  /// thrash from rapid app-switching.
+  DateTime? _lastForegroundRefresh;
+  static const _foregroundThrottle = Duration(seconds: 30);
 
   /// Lazy mount — IndexedStack mounts every child on first build, so a
   /// vanilla list of 5 tabs fires `initState` + `didChangeDependencies`
@@ -47,20 +62,61 @@ class _NavShellState extends State<NavShell> {
   // transitions.  The sticky AUTO banner is also gone (engine status is
   // surfaced on the Trade tab via AutoTradeUserStatus + on the Server-side
   // execution settings page).
+  //
+  // 2026-06-02: a narrower lifecycle hook is back — see
+  // [didChangeAppLifecycleState].  Not a poll loop; it refreshes only the
+  // visible tab's data once per foreground so a backgrounded-then-reopened
+  // app shows current state instead of a stale IndexedStack-retained view.
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state != AppLifecycleState.resumed) return;
+    final now = DateTime.now();
+    if (!shouldRefreshOnForeground(
+      lastRefresh: _lastForegroundRefresh,
+      now: now,
+      throttle: _foregroundThrottle,
+    )) {
+      return;
+    }
+    _lastForegroundRefresh = now;
+    // Refresh ONLY the visible tab — hidden-but-mounted tabs refresh when
+    // next navigated to, keeping a resume to one tab's fetch, not five.
+    // Explicit cast (not `is`-promotion): `currentState` is typed `State?`
+    // and `ForegroundRefreshable` is an independent interface, not a subtype
+    // of `State`, so flow analysis won't promote — the cast is required.
+    final tabState = _tabKeys[_index].currentState;
+    if (tabState is ForegroundRefreshable) {
+      (tabState as ForegroundRefreshable).refreshFromForeground();
+    }
+  }
 
   Widget _tabAt(int i) {
     if (!_visited[i]) return const SizedBox.shrink();
     switch (i) {
       case 0:
-        return const PulsePage();
+        return PulsePage(key: _tabKeys[0]);
       case 1:
-        return const SignalsPage();
+        return SignalsPage(key: _tabKeys[1]);
       case 2:
-        return const AgentsPage();
+        return AgentsPage(key: _tabKeys[2]);
       case 3:
-        return const TradePage();
+        return TradePage(key: _tabKeys[3]);
       case 4:
-        return const SettingsPage();
+        return SettingsPage(key: _tabKeys[4]);
     }
     return const SizedBox.shrink();
   }

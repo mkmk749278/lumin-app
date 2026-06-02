@@ -30,6 +30,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../app/foreground_refresh.dart';
 import '../../data/app_config.dart';
 import '../../data/mock_data.dart';
 import '../../data/repository.dart';
@@ -77,7 +78,8 @@ class TradePage extends StatefulWidget {
   State<TradePage> createState() => _TradePageState();
 }
 
-class _TradePageState extends State<TradePage> {
+class _TradePageState extends State<TradePage>
+    implements ForegroundRefreshable {
   _TradeView _view = _TradeView.live;
   // Phase 2c — engine slice as a SWR stream + Binance slice as a
   // parallel future; combined into a single Stream<_TradeBundle> via
@@ -257,6 +259,25 @@ class _TradePageState extends State<TradePage> {
   // real Binance positions, so the OLD ``BinanceKeysService``-driven
   // fetch is no longer needed.  Server-side execution surfaces
   // positions via Firestore listeners in a follow-up PR.
+
+  @override
+  void refreshFromForeground() {
+    // App resumed on the Trade tab — the trust surface for auto-trade.
+    // Mirror pull-to-refresh's invalidate set (engine snapshot + the four
+    // per-user aux streams) so a backgrounded view doesn't show stale
+    // positions/activity — the exact "old binance activity not updating"
+    // class the aux invalidation fixed for the gesture path. No spinner;
+    // retained data stays on screen until fresh values arrive.
+    if (!mounted) return;
+    final repo = AppConfigScope.of(context).repo;
+    repo.invalidateTradeEngineSnapshotCache();
+    repo.invalidateAutoTradeUserStatusCache();
+    repo.invalidateAutoTradeRuntimeStatusCache();
+    repo.invalidateAutoTradePositionsCache();
+    repo.invalidateRecentDispatchEventsCache(limit: 20);
+    _resubscribe();
+    _resubscribeAuxStreams();
+  }
 
   Future<void> _refresh() async {
     // Pull-to-refresh: invalidate every SWR key this page consumes,
