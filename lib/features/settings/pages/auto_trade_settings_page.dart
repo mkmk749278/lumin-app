@@ -110,12 +110,39 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
 
   /// Toggle the live switch.  Fires a real-money confirmation dialog before
   /// enabling.  Paper toggle bypasses the dialog.
+  /// Saves the mode immediately (matching Trade-tab behaviour) so the
+  /// engine picks up the change on the next signal without the user also
+  /// having to tap the Save ✓ button.
   Future<void> _toggleLive(bool newValue) async {
     if (newValue) {
       final ok = await _confirmLiveFlip();
       if (ok != true) return;
     }
     setState(() => _liveEnabled = newValue);
+    await _saveModeOnly();
+  }
+
+  /// Save only the execution mode, leaving sizing fields untouched.
+  /// Called on every live/paper toggle so the engine sees the change
+  /// immediately.  The Save ✓ button still persists all fields together.
+  Future<void> _saveModeOnly() async {
+    if (!mounted) return;
+    final repo = AppConfigScope.of(context).repo;
+    try {
+      final saved = await repo.updateUserAutoTradeSettings(
+        AutoTradeSettings(mode: _computedMode),
+      );
+      if (!mounted) return;
+      setState(() => _settings = saved);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Mode save failed: $e'),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
   }
 
   Future<void> _save() async {
@@ -235,7 +262,13 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
     if (!_loaded) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (_loadError != null) {
+    // When a load error occurred but we have previously-loaded data
+    // (_settings is not null), render the settings in a stale state so
+    // the user can still see and toggle their mode.  A warning banner
+    // makes clear the data may be out of date.  If we have no data at
+    // all (first open, no disk cache, engine unreachable) fall through
+    // to the full-page error.
+    if (_loadError != null && _settings == null) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(LuminSpacing.lg),
@@ -281,6 +314,14 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
       physics: const BouncingScrollPhysics(),
       children: [
         if (!isLive) const PreviewBadge(),
+        if (_loadError != null)
+          _StaleDataBanner(onRetry: () {
+            setState(() {
+              _loaded = false;
+              _loadError = null;
+            });
+            _load();
+          }),
         _scopeBanner(),
         _modeCard(),
         const SizedBox(height: LuminSpacing.md),
@@ -398,7 +439,10 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
               description: 'Simulated fills — no real money, zero risk.',
               enabled: _paperEnabled,
               statusWidget: _paperStatusChip(),
-              onChanged: (v) => setState(() => _paperEnabled = v),
+              onChanged: (v) async {
+                setState(() => _paperEnabled = v);
+                await _saveModeOnly();
+              },
             ),
             const SizedBox(height: LuminSpacing.sm),
             // Active mode summary line
@@ -793,6 +837,62 @@ class _ModeToggleRow extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Banner shown when the last settings fetch failed but previously-loaded
+/// data is being displayed.  Gives context that the values may be stale
+/// and offers an inline retry button.
+class _StaleDataBanner extends StatelessWidget {
+  const _StaleDataBanner({required this.onRetry});
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        LuminSpacing.lg, LuminSpacing.md, LuminSpacing.lg, 0,
+      ),
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: LuminSpacing.md,
+          vertical: LuminSpacing.sm,
+        ),
+        decoration: BoxDecoration(
+          color: LuminColors.warn.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(LuminRadii.sm),
+          border: Border.all(color: LuminColors.warn.withOpacity(0.35)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.cloud_off, color: LuminColors.warn, size: 14),
+            const SizedBox(width: LuminSpacing.sm),
+            const Expanded(
+              child: Text(
+                'Showing last saved state — could not reach engine.',
+                style: TextStyle(
+                  color: LuminColors.warn,
+                  fontSize: 11,
+                  height: 1.4,
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: onRetry,
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text(
+                'Retry',
+                style: TextStyle(color: LuminColors.warn, fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -510,6 +510,11 @@ class _TradePageState extends State<TradePage> {
     final runtime = _runtimeStatus;
     final serverPositions = _serverPositions;
     final recentEvents = _recentDispatchEvents;
+    // usingDefaults is true when fetchUserAutoTradeSettings failed AND no
+    // disk cache exists — the engine couldn't be reached and we have no
+    // prior data.  In that case mode is null and we must NOT render both
+    // toggles as "Off" (that would falsely imply the engine is idle).
+    final settingsUnknown = data.userSettings.usingDefaults ?? false;
     final activeMode = data.userSettings.mode ?? 'off';
     final liveActive = activeMode == 'live' || activeMode == 'both';
     final paperActive = activeMode == 'paper' || activeMode == 'both';
@@ -529,6 +534,12 @@ class _TradePageState extends State<TradePage> {
       ),
       children: [
         if (!scope.repo.isLive) const PreviewBadge(),
+        // When the settings fetch failed and no disk cache exists, we
+        // genuinely don't know the user's mode — show a banner rather
+        // than rendering both toggles Off (which reads as "trading is
+        // stopped" when it might not be).
+        if (settingsUnknown)
+          _SettingsUnknownBanner(onRetry: _refresh),
         // Live-mode toggle — same pattern as the Paper tab.  Preserves
         // paper mode when toggling live: enabling live while paper is on
         // sends 'both'; disabling live while paper is on keeps 'paper'.
@@ -1775,6 +1786,64 @@ class _OffStateNotice extends StatelessWidget {
                 color: LuminColors.textSecondary,
                 fontSize: 11,
                 height: 1.4,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Banner shown when the engine couldn't be reached and no disk cache
+/// exists — we genuinely don't know the user's current mode.  Prevents
+/// the UI from rendering both toggles as "Off" (which falsely implies
+/// trading is stopped) when the engine might still be executing.
+class _SettingsUnknownBanner extends StatelessWidget {
+  const _SettingsUnknownBanner({required this.onRetry});
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        LuminSpacing.lg, LuminSpacing.md, LuminSpacing.lg, 0,
+      ),
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: LuminSpacing.md,
+          vertical: LuminSpacing.sm,
+        ),
+        decoration: BoxDecoration(
+          color: LuminColors.warn.withOpacity(0.10),
+          borderRadius: BorderRadius.circular(LuminRadii.sm),
+          border: Border.all(color: LuminColors.warn.withOpacity(0.35)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.cloud_off, color: LuminColors.warn, size: 16),
+            const SizedBox(width: LuminSpacing.sm),
+            const Expanded(
+              child: Text(
+                'Status unknown — could not reach engine. '
+                'Toggles below may not reflect actual state.',
+                style: TextStyle(
+                  color: LuminColors.warn,
+                  fontSize: 11,
+                  height: 1.4,
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: onRetry,
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text(
+                'Retry',
+                style: TextStyle(color: LuminColors.warn, fontSize: 12),
               ),
             ),
           ],
