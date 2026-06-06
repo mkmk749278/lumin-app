@@ -5,6 +5,7 @@ import '../features/settings/settings_page.dart';
 import '../features/signals/signals_page.dart';
 import '../features/trade/trade_page.dart';
 import '../features/update/update_banner.dart';
+import 'distribution.dart';
 import 'foreground_refresh.dart';
 
 class NavShell extends StatefulWidget {
@@ -135,8 +136,10 @@ class _NavShellState extends State<NavShell> with WidgetsBindingObserver {
       body: Column(
         children: [
           // Update banner sits above all tabs — sticky-on-top, ignored
-          // when no newer GitHub Release is available.
-          const UpdateBanner(),
+          // when no newer GitHub Release is available. Omitted entirely on
+          // Play builds: Play forbids self-updating outside its own store,
+          // so the GitHub-Releases APK updater must not exist there.
+          if (kSelfUpdateEnabled) const UpdateBanner(),
           Expanded(
             child: IndexedStack(
               index: _index,
