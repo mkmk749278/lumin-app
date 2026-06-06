@@ -12,41 +12,47 @@ Play. The sideload self-updater (`UpdateBanner` + `UpdateService`, which
 downloads an APK and installs it via `REQUEST_INSTALL_PACKAGES`) must be
 **absent** from a Play build, both in code and in the manifest.
 
-## Building the Play AAB
+## The AAB is already built by CI
+
+`build-apk.yml` produces **both** artifacts on every push to `main` (and on
+`workflow_dispatch`):
+
+- `lumin-apk-{run}` — the **sideload** APK (keeps the self-updater +
+  `REQUEST_INSTALL_PACKAGES`).
+- `lumin-aab-{run}` — the **Play** App Bundle. Before this build the workflow:
+  - strips `REQUEST_INSTALL_PACKAGES` and the transitive media permissions
+    (`READ/WRITE_EXTERNAL_STORAGE`, `READ_MEDIA_*`) from the manifest, and
+  - builds with `--dart-define=LUMIN_DISTRIBUTION=play`, which flips
+    `kSelfUpdateEnabled` to false (`lib/app/distribution.dart`) so the
+    `UpdateBanner` is omitted and `UpdateService.check()` hard-stops to null.
+
+So the Play bundle has the self-updater inert **in code and in the manifest**.
+To submit: download the `lumin-aab-{run}` artifact from the workflow run and
+upload it in the Play Console.
+
+### Local build (alternative)
 
 ```bash
 flutter build appbundle --release --dart-define=LUMIN_DISTRIBUTION=play
 ```
 
-`--dart-define=LUMIN_DISTRIBUTION=play` flips `kSelfUpdateEnabled` to false
-(`lib/app/distribution.dart`), which:
+The default (no `--dart-define`) stays **sideload**, so a plain
+`flutter build apk` / the existing GitHub-Releases pipeline is unchanged.
 
-- omits the `UpdateBanner` from the nav shell, and
-- hard-stops `UpdateService.check()` so the updater is inert even if wired.
+### Confirm before submitting
 
-The default (no `--dart-define`) stays **sideload**, so the existing
-`build-apk.yml` GitHub-Releases pipeline is unchanged.
-
-## Manifest: do NOT inject `REQUEST_INSTALL_PACKAGES`
-
-`build-apk.yml` injects `REQUEST_INSTALL_PACKAGES` for the sideload APK (the
-self-installer needs it). A Play build must **not** declare it — Play flags
-the permission as a self-update signal and will reject. When you wire the AAB
-build (a separate workflow or local build), do **not** run the
-`REQUEST_INSTALL_PACKAGES` injection step. `INTERNET` is the only runtime
-permission the app actually needs.
-
-After building, confirm the merged manifest in the AAB declares only:
+The merged manifest in the AAB should declare only:
 
 - `android.permission.INTERNET`
 
-and **not** `REQUEST_INSTALL_PACKAGES` (nor any storage/SMS/location/contacts
-permission the app doesn't use).
+and **not** `REQUEST_INSTALL_PACKAGES` (nor any storage/media/SMS/location/
+contacts permission the app doesn't use).
 
 ## Pre-submission checklist
 
 - [x] **Self-update disabled** on Play builds — `LUMIN_DISTRIBUTION=play`
-      gate (this is enforced in code).
+      gate enforced in code, and the CI AAB build passes that define +
+      strips `REQUEST_INSTALL_PACKAGES`/media permissions from the manifest.
 - [x] **Account deletion in-app** — Settings → Delete account
       (`settings_page.dart::_deleteAccount` → `DELETE /api/account`). Play
       requires an in-app deletion path for apps with accounts.
