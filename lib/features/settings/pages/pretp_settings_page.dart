@@ -91,6 +91,12 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
 
   bool _loaded = false;
   bool _saving = false;
+  bool _resetting = false;
+  // Collapsed by default — the headline view is master + threshold + grab.
+  // Everything fine-grained (manual-entry protection, ATR/fee floors, regime
+  // + setup allowlists) lives behind this so the page reads minimal at a
+  // glance and power users can still expand.
+  bool _advancedExpanded = false;
   String? _loadError;
 
   /// True when the server reports the user has no overrides yet — every
@@ -230,15 +236,93 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
     }
   }
 
+  /// Confirm + reset the user's pre-TP overrides back to engine defaults.
+  /// Clears the override row server-side (DELETE) so the page returns to the
+  /// "Using engine defaults" state — the clean exit from any customisation.
+  Future<void> _confirmReset() async {
+    if (_resetting || _saving) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: LuminColors.bgCard,
+        title: const Text(
+          'Reset to engine defaults?',
+          style: TextStyle(
+            color: LuminColors.textPrimary,
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        content: const Text(
+          'Discards your custom pre-TP settings and restores the engine '
+          'defaults the team tunes for everyone. You can customise again '
+          'anytime.',
+          style: TextStyle(
+            color: LuminColors.textSecondary,
+            fontSize: 13,
+            height: 1.4,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel',
+                style: TextStyle(color: LuminColors.textSecondary)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: LuminColors.accent,
+              foregroundColor: LuminColors.bgDeep,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Reset',
+                style: TextStyle(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() => _resetting = true);
+    final repo = AppConfigScope.of(context).repo;
+    try {
+      await repo.resetUserPretpSettings();
+      if (!mounted) return;
+      // Re-hydrate every field from the now-default server view.
+      setState(() {
+        _loaded = false;
+        _loadError = null;
+      });
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Reset to engine defaults'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Reset failed: $e'),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _resetting = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final scope = AppConfigScope.of(context);
     final isLive = scope.repo.isLive;
+    final busy = _saving || _resetting;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Pre-TP grab'),
         actions: [
-          if (_saving)
+          if (busy)
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 14),
               child: SizedBox(
@@ -247,12 +331,21 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
                 child: CircularProgressIndicator(strokeWidth: 2),
               ),
             )
-          else
+          else ...[
+            // Reset to engine defaults — only meaningful once the user has
+            // overrides; hidden while already on defaults to keep the bar clean.
+            if (!_usingDefaults && _loaded && _loadError == null)
+              IconButton(
+                icon: const Icon(Icons.restart_alt),
+                onPressed: _confirmReset,
+                tooltip: 'Reset to engine defaults',
+              ),
             IconButton(
               icon: const Icon(Icons.check),
               onPressed: _loaded && _loadError == null ? _save : null,
               tooltip: 'Save',
             ),
+          ],
         ],
       ),
       body: _bodyFor(isLive),
@@ -312,13 +405,11 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
         _scopeBanner(),
         _masterCard(),
         const SizedBox(height: LuminSpacing.md),
-        _manualEntryProtectionCard(),
+        // Headline controls — the two dials that matter for most users.
+        _primaryThresholdsCard(),
         const SizedBox(height: LuminSpacing.md),
-        _thresholdsCard(),
-        const SizedBox(height: LuminSpacing.md),
-        _regimeCard(),
-        const SizedBox(height: LuminSpacing.md),
-        _setupsCard(),
+        // Everything else folded away for a minimal default view.
+        _advancedCard(),
         const SizedBox(height: LuminSpacing.xl),
       ],
     );
@@ -450,105 +541,70 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
   ///
   /// Disabled (greyed) when the master Pre-TP toggle is off — there's
   /// no pre-TP behaviour to extend if the master switch is off.
-  Widget _manualEntryProtectionCard() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
-      child: LuminCard(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _manualEntryProtectionRow() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
           children: [
-            Row(
-              children: [
-                Icon(
-                  Icons.security_outlined,
-                  color: _enabled
-                      ? LuminColors.accent
-                      : LuminColors.textMuted,
-                  size: 18,
-                ),
-                const SizedBox(width: LuminSpacing.md),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Protect manual entries',
-                        style: TextStyle(
-                          color: _enabled
-                              ? LuminColors.textPrimary
-                              : LuminColors.textMuted,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        _protectManualEntries
-                            ? 'Pre-TP partials apply to Take-Signal entries '
-                                'even when Auto-trade is off.'
-                            : 'Manual entries get entry + SL + TP1 only — '
-                                'no pre-TP partial close.',
-                        style: const TextStyle(
-                          color: LuminColors.textSecondary,
-                          fontSize: 11,
-                          height: 1.3,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Switch(
-                  value: _protectManualEntries,
-                  activeColor: LuminColors.accent,
-                  onChanged: _enabled
-                      ? (v) => setState(() => _protectManualEntries = v)
-                      : null,
-                ),
-              ],
+            Icon(
+              Icons.security_outlined,
+              color: _enabled ? LuminColors.accent : LuminColors.textMuted,
+              size: 18,
             ),
-            // Subscriber-facing explanation of the asymmetry.  Same math
-            // doctrine as the grab-fraction preview: be transparent about
-            // why this default is ON.
-            const SizedBox(height: LuminSpacing.sm),
-            Padding(
-              padding: const EdgeInsets.only(left: LuminSpacing.lg + 8),
-              child: Text(
-                _protectManualEntries
-                    ? 'Watcher stays running in protect-only mode; one '
-                        'broker call when a pre-TP threshold fires. No '
-                        'new entries are opened.'
-                    : 'No background broker activity. Manual entries '
-                        'run their original SL/TP only.',
-                style: const TextStyle(
-                  color: LuminColors.textMuted,
-                  fontSize: 11,
-                  height: 1.4,
-                ),
+            const SizedBox(width: LuminSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Protect manual entries',
+                    style: TextStyle(
+                      color: _enabled
+                          ? LuminColors.textPrimary
+                          : LuminColors.textMuted,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    _protectManualEntries
+                        ? 'Pre-TP partials apply to Take-Signal entries '
+                            'even when Auto-trade is off.'
+                        : 'Manual entries get entry + SL + TP1 only — '
+                            'no pre-TP partial close.',
+                    style: const TextStyle(
+                      color: LuminColors.textSecondary,
+                      fontSize: 11,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
               ),
+            ),
+            Switch(
+              value: _protectManualEntries,
+              activeColor: LuminColors.accent,
+              onChanged: _enabled
+                  ? (v) => setState(() => _protectManualEntries = v)
+                  : null,
             ),
           ],
         ),
-      ),
+      ],
     );
   }
 
-  Widget _thresholdsCard() {
+  /// Headline dials — the two choices that matter for most users: how far
+  /// the move must run before banking (threshold) and how much to bank (grab).
+  Widget _primaryThresholdsCard() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
       child: LuminCard(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'THRESHOLDS',
-              style: TextStyle(
-                color: LuminColors.textMuted,
-                fontSize: 10,
-                letterSpacing: 1.2,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: LuminSpacing.md),
             _slider(
               label: 'Pre-TP threshold',
               // Raw percent (0.30 = 0.30%).  This is the move at which the
@@ -604,10 +660,7 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
             // close, not just a SL-to-BE move.  Showing the math here so
             // subscribers can pick a fraction with eyes open.
             Padding(
-              padding: const EdgeInsets.only(
-                left: LuminSpacing.sm,
-                bottom: LuminSpacing.md,
-              ),
+              padding: const EdgeInsets.only(left: LuminSpacing.sm),
               child: Text(
                 'At pre-TP: ${(_grabPct * 100).toStringAsFixed(0)}% closed at market, '
                 '${((1.0 - _grabPct) * 100).toStringAsFixed(0)}% rides to TP1 '
@@ -619,64 +672,115 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
                 ),
               ),
             ),
-            _slider(
-              label: 'ATR floor multiplier',
-              value: '${_atrMult.toStringAsFixed(2)}x',
-              slider: Slider(
-                value: _atrMult,
-                min: 0.10,
-                max: 1.00,
-                divisions: 18,
-                activeColor: LuminColors.accent,
-                inactiveColor: LuminColors.cardBorder,
-                onChanged: _enabled ? (v) => setState(() => _atrMult = v) : null,
-              ),
-            ),
-            _slider(
-              label: 'Fee floor (min profit before BE)',
-              value: '${_feeFloor.toStringAsFixed(2)}%',
-              slider: Slider(
-                value: _feeFloor,
-                min: 0.05,
-                max: 0.50,
-                divisions: 9,
-                activeColor: LuminColors.accent,
-                inactiveColor: LuminColors.cardBorder,
-                onChanged: _enabled ? (v) => setState(() => _feeFloor = v) : null,
-              ),
-            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _regimeCard() {
+  /// Collapsible Advanced section — everything beyond the two headline dials:
+  /// manual-entry protection, ATR/fee floors, and the regime + setup
+  /// allowlists.  Collapsed by default so the page reads minimal.
+  Widget _advancedCard() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
       child: LuminCard(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'REGIME ALLOWLIST',
-              style: TextStyle(
-                color: LuminColors.textMuted,
-                fontSize: 10,
-                letterSpacing: 1.2,
-                fontWeight: FontWeight.w600,
+            InkWell(
+              onTap: () =>
+                  setState(() => _advancedExpanded = !_advancedExpanded),
+              child: Row(
+                children: [
+                  const Icon(Icons.tune, color: LuminColors.textMuted, size: 16),
+                  const SizedBox(width: LuminSpacing.md),
+                  const Expanded(
+                    child: Text(
+                      'ADVANCED',
+                      style: TextStyle(
+                        color: LuminColors.textMuted,
+                        fontSize: 10,
+                        letterSpacing: 1.2,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  Icon(
+                    _advancedExpanded ? Icons.expand_less : Icons.expand_more,
+                    color: LuminColors.textMuted,
+                    size: 18,
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: LuminSpacing.sm),
-            _regimeRow('Trending', _regimeTrending,
-                (v) => setState(() => _regimeTrending = v)),
-            _regimeRow('Ranging', _regimeRanging,
-                (v) => setState(() => _regimeRanging = v)),
-            _regimeRow('Choppy', _regimeChoppy,
-                (v) => setState(() => _regimeChoppy = v)),
+            if (_advancedExpanded) ...[
+              const SizedBox(height: LuminSpacing.md),
+              _manualEntryProtectionRow(),
+              const Divider(
+                  color: LuminColors.cardBorder, height: LuminSpacing.lg),
+              _slider(
+                label: 'ATR floor multiplier',
+                value: '${_atrMult.toStringAsFixed(2)}x',
+                slider: Slider(
+                  value: _atrMult,
+                  min: 0.10,
+                  max: 1.00,
+                  divisions: 18,
+                  activeColor: LuminColors.accent,
+                  inactiveColor: LuminColors.cardBorder,
+                  onChanged:
+                      _enabled ? (v) => setState(() => _atrMult = v) : null,
+                ),
+              ),
+              _slider(
+                label: 'Fee floor (min profit before BE)',
+                value: '${_feeFloor.toStringAsFixed(2)}%',
+                slider: Slider(
+                  value: _feeFloor,
+                  min: 0.05,
+                  max: 0.50,
+                  divisions: 9,
+                  activeColor: LuminColors.accent,
+                  inactiveColor: LuminColors.cardBorder,
+                  onChanged:
+                      _enabled ? (v) => setState(() => _feeFloor = v) : null,
+                ),
+              ),
+              const Divider(
+                  color: LuminColors.cardBorder, height: LuminSpacing.lg),
+              _regimeInline(),
+              const Divider(
+                  color: LuminColors.cardBorder, height: LuminSpacing.lg),
+              _setupsInline(),
+            ],
           ],
         ),
       ),
+    );
+  }
+
+  Widget _regimeInline() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'REGIME ALLOWLIST',
+          style: TextStyle(
+            color: LuminColors.textMuted,
+            fontSize: 10,
+            letterSpacing: 1.2,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: LuminSpacing.sm),
+        _regimeRow('Trending', _regimeTrending,
+            (v) => setState(() => _regimeTrending = v)),
+        _regimeRow('Ranging', _regimeRanging,
+            (v) => setState(() => _regimeRanging = v)),
+        _regimeRow('Choppy', _regimeChoppy,
+            (v) => setState(() => _regimeChoppy = v)),
+      ],
     );
   }
 
@@ -704,50 +808,45 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
     );
   }
 
-  Widget _setupsCard() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
-      child: LuminCard(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'SETUP ALLOWLIST',
-              style: TextStyle(
-                color: LuminColors.textMuted,
-                fontSize: 10,
-                letterSpacing: 1.2,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: LuminSpacing.sm),
-            for (final entry in _setups.entries)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 2),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        entry.key,
-                        style: const TextStyle(
-                          color: LuminColors.textPrimary,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                    Switch(
-                      value: entry.value,
-                      activeColor: LuminColors.accent,
-                      onChanged: _enabled
-                          ? (v) => setState(() => _setups[entry.key] = v)
-                          : null,
-                    ),
-                  ],
-                ),
-              ),
-          ],
+  Widget _setupsInline() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'SETUP ALLOWLIST',
+          style: TextStyle(
+            color: LuminColors.textMuted,
+            fontSize: 10,
+            letterSpacing: 1.2,
+            fontWeight: FontWeight.w600,
+          ),
         ),
-      ),
+        const SizedBox(height: LuminSpacing.sm),
+        for (final entry in _setups.entries)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 2),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    entry.key,
+                    style: const TextStyle(
+                      color: LuminColors.textPrimary,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+                Switch(
+                  value: entry.value,
+                  activeColor: LuminColors.accent,
+                  onChanged: _enabled
+                      ? (v) => setState(() => _setups[entry.key] = v)
+                      : null,
+                ),
+              ],
+            ),
+          ),
+      ],
     );
   }
 
