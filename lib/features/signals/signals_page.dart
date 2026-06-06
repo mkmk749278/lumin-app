@@ -590,7 +590,7 @@ class _SignalsEmpty extends StatelessWidget {
         const SizedBox(height: LuminSpacing.xs),
         Text(
           isLive
-              ? 'Engine is scanning 75 pairs.\nNew paid signals appear here when they fire.\n\nThis is the engine-wide feed — open signals here are not\nnecessarily your open positions. Check the Trade tab for\nyour personal execution status.'
+              ? 'New signals appear here when they fire.\nCheck the Trade tab to see your open positions.'
               : 'Pull down to refresh.',
           textAlign: TextAlign.center,
           style: const TextStyle(color: LuminColors.textMuted, fontSize: 11),

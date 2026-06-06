@@ -4,6 +4,7 @@
 /// Google Play Billing.  Subscriptions are managed via the @LuminProBot
 /// Telegram bot — tap "Upgrade" → opens t.me/LuminProBot.
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../shared/tokens.dart';
 import '../../../shared/widgets/lumin_card.dart';
@@ -387,14 +388,21 @@ class SubscriptionPage extends StatelessWidget {
                   foregroundColor: LuminColors.bgDeep,
                   padding: const EdgeInsets.symmetric(vertical: LuminSpacing.md),
                 ),
-                onPressed: () {
+                onPressed: () async {
                   Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Telegram deep link wires up with backend launch'),
-                      duration: Duration(seconds: 2),
-                    ),
-                  );
+                  final uri = Uri.parse('https://t.me/LuminProBot');
+                  if (!await launchUrl(uri,
+                      mode: LaunchMode.externalApplication)) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                              'Could not open Telegram — install it first.'),
+                          duration: Duration(seconds: 3),
+                        ),
+                      );
+                    }
+                  }
                 },
                 child: const Text(
                   'Open @LuminProBot',

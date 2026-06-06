@@ -99,18 +99,18 @@ class WelcomePage extends StatelessWidget {
               // Three-bullet feature snapshot — what the user gets.
               _featureRow(
                 Icons.bolt_outlined,
-                'Real-time signals',
-                '24/7 scanning of 75 Binance USDT-M futures pairs',
+                'Paper trade first, subscribe when ready',
+                'Try every signal risk-free in paper mode. Upgrade to live when you\'re confident.',
               ),
               _featureRow(
                 Icons.auto_mode_outlined,
-                'Optional auto-trade',
-                'Server-side execution on your Binance account',
+                'Auto-execute on your Binance account',
+                'Server-side execution — signals place real orders automatically.',
               ),
               _featureRow(
                 Icons.shield_outlined,
                 'Non-custodial',
-                'Trade-only key. Your funds stay on Binance.',
+                'Trade-only API key. Your funds always stay on Binance.',
               ),
 
               const Spacer(flex: 3),

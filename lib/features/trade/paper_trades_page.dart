@@ -179,11 +179,11 @@ class _PaperTradesPageState extends State<PaperTradesPage> {
         backgroundColor: LuminColors.bgCard,
         title: const Row(
           children: [
-            Icon(Icons.refresh, color: LuminColors.warn, size: 20),
+            Icon(Icons.restart_alt, color: LuminColors.warn, size: 20),
             SizedBox(width: LuminSpacing.sm),
             Expanded(
               child: Text(
-                'Clear my paper history?',
+                'Reset paper history?',
                 style: TextStyle(
                   color: LuminColors.textPrimary,
                   fontSize: 16,
@@ -194,9 +194,10 @@ class _PaperTradesPageState extends State<PaperTradesPage> {
           ],
         ),
         content: const Text(
-          'Your paper trade list will start fresh from now. '
-          'Prior trades stay in the engine for the audit ledger '
-          'but disappear from your view. This cannot be undone.',
+          'Your paper trade list starts fresh from now — '
+          'useful for a clean evaluation of current signal quality. '
+          'Prior trades stay in the engine audit ledger but disappear '
+          'from your view. This cannot be undone.',
           style: TextStyle(
             color: LuminColors.textPrimary,
             fontSize: 13,
@@ -218,7 +219,7 @@ class _PaperTradesPageState extends State<PaperTradesPage> {
             ),
             onPressed: () => Navigator.of(ctx).pop(true),
             child: const Text(
-              'Clear',
+              'Reset',
               style: TextStyle(fontWeight: FontWeight.w700),
             ),
           ),
@@ -372,14 +373,27 @@ class _PaperTradesPageState extends State<PaperTradesPage> {
             onPressed: _initialLoading ? null : () => _refresh(bypassCache: true),
             icon: const Icon(Icons.refresh),
           ),
-          PopupMenuButton<String>(
-            tooltip: 'More',
-            onSelected: (v) {
-              if (v == 'close_all') _confirmCloseAll();
-              if (v == 'reset') _confirmReset();
-            },
-            itemBuilder: (_) => [
-              if (isOwner)
+          IconButton(
+            tooltip: 'Reset paper history',
+            onPressed: _initialLoading || _resetting ? null : _confirmReset,
+            icon: _resetting
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: LuminColors.accent,
+                    ),
+                  )
+                : const Icon(Icons.restart_alt),
+          ),
+          if (isOwner)
+            PopupMenuButton<String>(
+              tooltip: 'More',
+              onSelected: (v) {
+                if (v == 'close_all') _confirmCloseAll();
+              },
+              itemBuilder: (_) => [
                 const PopupMenuItem<String>(
                   value: 'close_all',
                   child: Row(
@@ -391,19 +405,8 @@ class _PaperTradesPageState extends State<PaperTradesPage> {
                     ],
                   ),
                 ),
-              const PopupMenuItem<String>(
-                value: 'reset',
-                child: Row(
-                  children: [
-                    Icon(Icons.restart_alt,
-                        color: LuminColors.warn, size: 18),
-                    SizedBox(width: LuminSpacing.sm),
-                    Text('Clear my history'),
-                  ],
-                ),
-              ),
-            ],
-          ),
+              ],
+            ),
         ],
       ),
       body: RefreshIndicator(
@@ -912,24 +915,42 @@ class _EmptyState extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.xl),
       child: Column(
         children: [
-          const Icon(Icons.inbox_outlined,
-              color: LuminColors.textMuted, size: 48),
+          Container(
+            width: 64,
+            height: 64,
+            decoration: BoxDecoration(
+              color: LuminColors.accent.withOpacity(0.12),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.show_chart,
+                color: LuminColors.accent, size: 32),
+          ),
           const SizedBox(height: LuminSpacing.md),
           const Text(
             'No paper trades yet',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: LuminColors.textPrimary,
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
             ),
           ),
           const SizedBox(height: LuminSpacing.sm),
           const Text(
-            "Once the engine fires its first signal, you'll see it here.",
+            'Enable Paper mode in the Trade tab — every signal the engine fires will paper-trade automatically. No real funds, no risk.',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: LuminColors.textSecondary,
+              fontSize: 13,
+              height: 1.45,
+            ),
+          ),
+          const SizedBox(height: LuminSpacing.md),
+          const Text(
+            'Watch the results build up here, then subscribe when you\'re confident in the signal quality.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: LuminColors.textMuted,
               fontSize: 12,
               height: 1.4,
             ),
