@@ -19,6 +19,8 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 
+import '../app/distribution.dart';
+
 /// Where the service polls.  The repo is owner-fixed; if this ever
 /// forks, swap the constant here.  No env var — bakes into the binary
 /// so a tampered runtime config can't redirect updates to a malicious
@@ -65,6 +67,10 @@ class UpdateService {
   /// otherwise.  Silent on any error (offline, GitHub down, rate-limited)
   /// — banner just won't appear.
   Future<UpdateAvailable?> check() async {
+    // Play builds never self-update (Play policy). Hard-stop here so the
+    // updater is inert regardless of UI wiring — defense in depth behind
+    // the nav-shell gate that already omits the banner.
+    if (!kSelfUpdateEnabled) return null;
     if (DateTime.now().difference(_cachedAt) < _kCacheTtl) {
       return _cached;
     }
