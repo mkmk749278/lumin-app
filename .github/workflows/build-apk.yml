@@ -425,6 +425,7 @@ jobs:
       - name: Build release AAB
         run: |
           flutter build appbundle --release \
+            --dart-define=LUMIN_DISTRIBUTION=play \
             --build-name=${{ github.ref_name }} \
             --build-number=${{ github.run_number }}
 
