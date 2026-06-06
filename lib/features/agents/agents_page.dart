@@ -72,13 +72,11 @@ class AgentsPage extends StatelessWidget {
         backgroundColor: LuminColors.bgCard,
         title: Text("Lumin's ${kAgents.length} AI agents"),
         content: const Text(
-          "Each agent corresponds to one of the engine's evaluator paths. "
-          'They scan 75 USDT-M futures pairs continuously, looking for their '
-          "specific setup type. When an agent's confidence clears the paid "
-          'threshold (65+), the signal is dispatched.\n\n'
-          'Per-agent toggles and custom thresholds coming with a future '
-          'subscription tier. Live stats are populated as soon as that '
-          'evaluator emits a signal.',
+          'Each agent specialises in one type of market setup — '
+          'breakouts, SR flips, momentum, divergence, and more. '
+          "When an agent's confidence clears the threshold, the signal fires.\n\n"
+          'Per-agent toggles and custom thresholds are coming in a future '
+          'subscription tier. Stats populate as soon as that agent emits a signal.',
         ),
         actions: [
           TextButton(

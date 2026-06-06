@@ -247,7 +247,7 @@ class _EngineStatusCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    'Up ${engine.uptime} • scanning 75 pairs',
+                    'Up ${engine.uptime} • signals live',
                     style: const TextStyle(
                       color: LuminColors.textSecondary,
                       fontSize: 12,
