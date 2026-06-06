@@ -1199,6 +1199,11 @@ abstract class LuminRepository {
   /// ``using_defaults`` flag so the page can render a "Custom" badge.
   Future<PretpSettings> fetchUserPretpSettings();
   Future<PretpSettings> updateUserPretpSettings(PretpSettings partial);
+
+  /// Reset the user's pre-TP overrides to engine defaults
+  /// (``DELETE /api/settings/user/pretp``).  Returns the rebuilt view with
+  /// ``usingDefaults == true``.  Idempotent.
+  Future<PretpSettings> resetUserPretpSettings();
   /// Per-user auto-trade overrides (Phase 2).
   Future<AutoTradeSettings> fetchUserAutoTradeSettings();
   Future<AutoTradeSettings> updateUserAutoTradeSettings(
@@ -1213,6 +1218,11 @@ abstract class LuminRepository {
   Future<InvalidationSettings> updateUserInvalidationSettings(
     InvalidationSettings partial,
   );
+
+  /// Reset the user's invalidation overrides to engine defaults
+  /// (``DELETE /api/settings/user/invalidation``).  Returns the rebuilt view
+  /// with ``usingDefaults == true``.  Idempotent.
+  Future<InvalidationSettings> resetUserInvalidationSettings();
   /// User profile (Phase 3) — drives SignupPage + Settings → Profile.
   Future<Profile> fetchProfile();
   Future<Profile> updateProfile(Profile partial, {bool acceptTerms = false});
@@ -1751,6 +1761,12 @@ class MockRepository implements LuminRepository {
   }
 
   @override
+  Future<PretpSettings> resetUserPretpSettings() async {
+    _mockUserPretp = const PretpSettings(usingDefaults: true);
+    return _mockUserPretp;
+  }
+
+  @override
   Future<AutoTradeSettings> fetchUserAutoTradeSettings() async =>
       _mockUserAutoTrade;
 
@@ -1827,6 +1843,12 @@ class MockRepository implements LuminRepository {
           _mockInvalidationDefaults.trailingRetracePct,
       usingDefaults: false,
     );
+    return _mockUserInvalidation;
+  }
+
+  @override
+  Future<InvalidationSettings> resetUserInvalidationSettings() async {
+    _mockUserInvalidation = const InvalidationSettings(usingDefaults: true);
     return _mockUserInvalidation;
   }
 
@@ -2989,6 +3011,13 @@ class HttpRepository implements LuminRepository {
     return PretpSettings.fromJson(j);
   }
 
+  @override
+  Future<PretpSettings> resetUserPretpSettings() async {
+    final j = (await client.delete('/api/settings/user/pretp'))
+        as Map<String, dynamic>;
+    return PretpSettings.fromJson(j);
+  }
+
   /// Disk-cache key for the last successful auto-trade settings response.
   /// Persisting the RAW server map (not a re-serialised model) lets us
   /// replay it through [AutoTradeSettings.fromJson] on a network failure
@@ -3060,6 +3089,13 @@ class HttpRepository implements LuminRepository {
       '/api/settings/user/invalidation',
       body: partial.toJsonPartial(),
     )) as Map<String, dynamic>;
+    return InvalidationSettings.fromJson(j);
+  }
+
+  @override
+  Future<InvalidationSettings> resetUserInvalidationSettings() async {
+    final j = (await client.delete('/api/settings/user/invalidation'))
+        as Map<String, dynamic>;
     return InvalidationSettings.fromJson(j);
   }
 

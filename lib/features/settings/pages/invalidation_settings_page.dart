@@ -49,6 +49,7 @@ class _InvalidationSettingsPageState extends State<InvalidationSettingsPage> {
   bool _advancedExpanded = false;
   bool _loaded = false;
   bool _saving = false;
+  bool _resetting = false;
   String? _loadError;
 
   /// True when the server reports the user has no overrides yet.
@@ -168,15 +169,91 @@ class _InvalidationSettingsPageState extends State<InvalidationSettingsPage> {
     }
   }
 
+  /// Confirm + reset the user's invalidation overrides to engine defaults.
+  /// Clears the override row server-side (DELETE) so the page returns to the
+  /// "Using engine defaults" state.
+  Future<void> _confirmReset() async {
+    if (_resetting || _saving) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: LuminColors.bgCard,
+        title: const Text(
+          'Reset to engine defaults?',
+          style: TextStyle(
+            color: LuminColors.textPrimary,
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        content: const Text(
+          'Discards your custom invalidation settings and restores the '
+          'engine defaults (Standard mode). You can customise again anytime.',
+          style: TextStyle(
+            color: LuminColors.textSecondary,
+            fontSize: 13,
+            height: 1.4,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel',
+                style: TextStyle(color: LuminColors.textSecondary)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: LuminColors.accent,
+              foregroundColor: LuminColors.bgDeep,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Reset',
+                style: TextStyle(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() => _resetting = true);
+    final repo = AppConfigScope.of(context).repo;
+    try {
+      await repo.resetUserInvalidationSettings();
+      if (!mounted) return;
+      setState(() {
+        _loaded = false;
+        _loadError = null;
+      });
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Reset to engine defaults'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Reset failed: $e'),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _resetting = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final scope = AppConfigScope.of(context);
     final isLive = scope.repo.isLive;
+    final busy = _saving || _resetting;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Invalidation'),
         actions: [
-          if (_saving)
+          if (busy)
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 14),
               child: SizedBox(
@@ -185,12 +262,19 @@ class _InvalidationSettingsPageState extends State<InvalidationSettingsPage> {
                 child: CircularProgressIndicator(strokeWidth: 2),
               ),
             )
-          else
+          else ...[
+            if (!_usingDefaults && _loaded && _loadError == null)
+              IconButton(
+                icon: const Icon(Icons.restart_alt),
+                onPressed: _confirmReset,
+                tooltip: 'Reset to engine defaults',
+              ),
             IconButton(
               icon: const Icon(Icons.check),
               onPressed: _loaded && _loadError == null ? _save : null,
               tooltip: 'Save',
             ),
+          ],
         ],
       ),
       body: _bodyFor(isLive),
