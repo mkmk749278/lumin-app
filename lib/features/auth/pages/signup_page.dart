@@ -151,6 +151,7 @@ class _SignupPageState extends State<SignupPage> {
       );
       await repo.updateProfile(partial, acceptTerms: true);
       await scope.auth?.markOnboarded();
+      scope.auth?.cacheDisplayName(_nameCtl.text.trim());
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const NavShell()),

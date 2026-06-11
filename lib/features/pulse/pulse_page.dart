@@ -132,20 +132,21 @@ class _PulsePageState extends State<PulsePage>
 
   @override
   Widget build(BuildContext context) {
-    final isLive = AppConfigScope.of(context).repo.isLive;
+    final scope = AppConfigScope.of(context);
+    final displayName = scope.auth?.currentDisplayName();
     return Scaffold(
-      appBar: AppBar(title: const Text('Pulse')),
+      appBar: AppBar(
+        title: _GreetingTitle(displayName: displayName),
+        titleSpacing: LuminSpacing.lg,
+      ),
       body: RefreshIndicator(
         color: LuminColors.accent,
         onRefresh: _refresh,
         child: AnimatedSwitcher(
-          // 200ms cross-fade between skeleton ↔ data so the layout
-          // doesn't snap.  Matches the Binance / Robinhood feel where
-          // skeletons gently dissolve into populated cards.
           duration: const Duration(milliseconds: 200),
           switchInCurve: Curves.easeOut,
           switchOutCurve: Curves.easeIn,
-          child: _buildBody(isLive: isLive),
+          child: _buildBody(isLive: scope.repo.isLive),
         ),
       ),
     );
@@ -164,9 +165,6 @@ class _PulsePageState extends State<PulsePage>
       }
       return const _PulseSkeleton(key: ValueKey('pulse-skeleton'));
     }
-    // Past this point `data` is promoted to non-null PulseBundle for
-    // the remainder of the method — every child below reads through
-    // a single local without inline `!` operators.
     return ListView(
       key: const ValueKey('pulse-data'),
       physics: const AlwaysScrollableScrollPhysics(
@@ -174,16 +172,10 @@ class _PulsePageState extends State<PulsePage>
       ),
       children: [
         if (!isLive) const PreviewBadge(),
-        _EngineStatusCard(engine: data.engine),
-        const SizedBox(height: LuminSpacing.md),
         _RegimeBar(engine: data.engine),
         const SizedBox(height: LuminSpacing.md),
         _TodayPnlCard(userPnl: data.userPnl),
         const SizedBox(height: LuminSpacing.md),
-        // 30-day chart is engine-global PnL (per OWNER_BRIEF §3.8
-        // single paper book).  Only render to users who're actually
-        // trading on the engine — otherwise it's misleading.  Engine-
-        // health overview is the EngineStatusCard above.
         if (data.userPnl.hasAnyTrading) ...[
           _PnlChartCard(history: data.pnlHistory),
           const SizedBox(height: LuminSpacing.md),
@@ -202,67 +194,48 @@ class _PulsePageState extends State<PulsePage>
 }
 
 // ---------------------------------------------------------------------------
-// Cards (data-driven via constructor)
+// AppBar greeting title
 // ---------------------------------------------------------------------------
 
-class _EngineStatusCard extends StatelessWidget {
-  const _EngineStatusCard({required this.engine});
-  final MockEngineSnapshot engine;
+/// Greeting shown in the AppBar on every open.
+/// Extracts the user's first name (first whitespace-delimited word) and
+/// picks morning / afternoon / evening based on device time.
+class _GreetingTitle extends StatelessWidget {
+  const _GreetingTitle({this.displayName});
+  final String? displayName;
+
+  static String _prefix() {
+    final h = DateTime.now().hour;
+    if (h < 12) return 'Good morning';
+    if (h < 17) return 'Good afternoon';
+    return 'Good evening';
+  }
+
+  static String? _firstName(String? name) {
+    if (name == null || name.trim().isEmpty) return null;
+    final first = name.trim().split(RegExp(r'\s+')).first;
+    // If the first token itself is long (> 12 chars), truncate to 12.
+    return first.length > 12 ? '${first.substring(0, 12)}…' : first;
+  }
 
   @override
   Widget build(BuildContext context) {
-    final isHealthy = engine.status == 'Healthy';
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
-      child: LuminCard(
-        child: Row(
-          children: [
-            Container(
-              width: 12,
-              height: 12,
-              decoration: BoxDecoration(
-                color: isHealthy ? LuminColors.success : LuminColors.warn,
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: (isHealthy ? LuminColors.success : LuminColors.warn)
-                        .withOpacity(0.4),
-                    blurRadius: 8,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: LuminSpacing.md),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Engine ${engine.status.toLowerCase()}',
-                    style: const TextStyle(
-                      color: LuminColors.textPrimary,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Up ${engine.uptime} • signals live',
-                    style: const TextStyle(
-                      color: LuminColors.textSecondary,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const Icon(Icons.flash_on, color: LuminColors.accent, size: 18),
-          ],
-        ),
+    final first = _firstName(displayName);
+    final text = first != null ? '${_prefix()}, $first' : _prefix();
+    return Text(
+      text,
+      style: const TextStyle(
+        color: LuminColors.textPrimary,
+        fontSize: 18,
+        fontWeight: FontWeight.w700,
       ),
     );
   }
 }
+
+// ---------------------------------------------------------------------------
+// Cards (data-driven via constructor)
+// ---------------------------------------------------------------------------
 
 /// Horizontal regime bar — five segments (one per regime), the active one
 /// glows in its semantic accent.  Drops the previous "X% trending" subtitle
