@@ -80,6 +80,7 @@ class AuthService {
   String? _cachedTier;
   String? _cachedPaidUntil;
   bool _cachedNeedsOnboarding = false;
+  String? _cachedDisplayName;
 
   // ---- Firebase session surface ----------------------------------------
 
@@ -243,6 +244,7 @@ class AuthService {
     _cachedTier = null;
     _cachedPaidUntil = null;
     _cachedNeedsOnboarding = false;
+    _cachedDisplayName = null;
     await _auth.signOut();
   }
 
@@ -299,12 +301,28 @@ class AuthService {
     String? tier,
     String? paidUntil,
     required bool needsOnboarding,
+    String? displayName,
   }) {
     _cachedUserId = userId;
     _cachedTier = tier;
     _cachedPaidUntil = paidUntil;
     _cachedNeedsOnboarding = needsOnboarding;
+    if (displayName != null && displayName.isNotEmpty) {
+      _cachedDisplayName = displayName;
+    }
   }
+
+  /// Cache the user's display name independently — called after signup
+  /// completes so the greeting on Pulse renders immediately without a
+  /// follow-up profile fetch.
+  void cacheDisplayName(String name) {
+    if (name.isNotEmpty) _cachedDisplayName = name;
+  }
+
+  /// Display name from the most recent profile fetch or signup, or null
+  /// when not yet known.  Widgets should render a fallback (empty / "you")
+  /// when null rather than blocking on a network call.
+  String? currentDisplayName() => _cachedDisplayName;
 
   /// Quick boot-time check: is a Firebase user currently signed in?
   /// Retained for back-compat with the splash-page gate; new code

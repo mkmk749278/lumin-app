@@ -184,6 +184,7 @@ class _OtpEntryPageState extends State<OtpEntryPage> {
             tier: profile.tier,
             paidUntil: profile.paidUntil,
             needsOnboarding: profile.needsOnboarding,
+            displayName: profile.displayName,
           );
         } catch (_) {
           // Swallow — needsOnboarding stays at its default (false for
