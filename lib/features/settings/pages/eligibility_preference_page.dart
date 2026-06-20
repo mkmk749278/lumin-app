@@ -17,10 +17,12 @@
 /// ``path_preference`` / ``regime_preference`` field populated (list),
 /// emptied (``[]`` = block all) or nulled (reset to all).
 ///
-/// Scope note (2026-06-20): the engine consumes these at LIVE dispatch
-/// today.  Per-mode (paper vs live) individual selection lands with the
-/// per-user paper-engine increment; until then a single selection is the
-/// live eligibility filter.
+/// Scope (2026-06-20): each dimension has an independent LIVE and PAPER
+/// selection.  The LIVE triple (``path_preference`` / ``regime_preference``)
+/// filters real-order dispatch; the PAPER triple
+/// (``paper_path_preference`` / ``paper_regime_preference``) filters the
+/// per-user paper-book simulation.  ``EligibilityScope`` picks which set a
+/// picker instance edits — same widget, different wire fields.
 library;
 
 import 'package:flutter/material.dart';
@@ -35,30 +37,60 @@ import '../../../shared/widgets/lumin_card.dart';
 /// Which eligibility dimension a picker instance edits.
 enum EligibilityDimension { path, regime }
 
+/// Whether a picker edits the LIVE or PAPER eligibility set.
+enum EligibilityScope { live, paper }
+
 enum _Preset { all, custom, blockAll }
 
-/// Picker for the evaluator-path eligibility list.
+/// Picker for the evaluator-path eligibility list (LIVE dispatch).
 class PathPreferencePage extends StatelessWidget {
   const PathPreferencePage({super.key});
 
   @override
-  Widget build(BuildContext context) =>
-      const _EligibilityPickerPage(dimension: EligibilityDimension.path);
+  Widget build(BuildContext context) => const _EligibilityPickerPage(
+        dimension: EligibilityDimension.path,
+        scope: EligibilityScope.live,
+      );
 }
 
-/// Picker for the entry-regime eligibility list.
+/// Picker for the entry-regime eligibility list (LIVE dispatch).
 class RegimePreferencePage extends StatelessWidget {
   const RegimePreferencePage({super.key});
 
   @override
-  Widget build(BuildContext context) =>
-      const _EligibilityPickerPage(dimension: EligibilityDimension.regime);
+  Widget build(BuildContext context) => const _EligibilityPickerPage(
+        dimension: EligibilityDimension.regime,
+        scope: EligibilityScope.live,
+      );
+}
+
+/// Picker for the evaluator-path eligibility list (PAPER simulation).
+class PaperPathPreferencePage extends StatelessWidget {
+  const PaperPathPreferencePage({super.key});
+
+  @override
+  Widget build(BuildContext context) => const _EligibilityPickerPage(
+        dimension: EligibilityDimension.path,
+        scope: EligibilityScope.paper,
+      );
+}
+
+/// Picker for the entry-regime eligibility list (PAPER simulation).
+class PaperRegimePreferencePage extends StatelessWidget {
+  const PaperRegimePreferencePage({super.key});
+
+  @override
+  Widget build(BuildContext context) => const _EligibilityPickerPage(
+        dimension: EligibilityDimension.regime,
+        scope: EligibilityScope.paper,
+      );
 }
 
 class _EligibilityPickerPage extends StatefulWidget {
-  const _EligibilityPickerPage({required this.dimension});
+  const _EligibilityPickerPage({required this.dimension, required this.scope});
 
   final EligibilityDimension dimension;
+  final EligibilityScope scope;
 
   @override
   State<_EligibilityPickerPage> createState() => _EligibilityPickerPageState();
@@ -75,7 +107,12 @@ class _EligibilityPickerPageState extends State<_EligibilityPickerPage> {
 
   bool get _isPath => widget.dimension == EligibilityDimension.path;
 
-  String get _title => _isPath ? 'Path preference' : 'Regime preference';
+  bool get _isPaper => widget.scope == EligibilityScope.paper;
+
+  String get _title {
+    final dim = _isPath ? 'Path preference' : 'Regime preference';
+    return _isPaper ? 'Paper $dim' : dim;
+  }
 
   @override
   void didChangeDependencies() {
@@ -99,7 +136,11 @@ class _EligibilityPickerPageState extends State<_EligibilityPickerPage> {
         _isPath ? runtime.allowedPaths : runtime.regimeOptions,
       );
       universe.sort();
-      final stored = _isPath ? settings.pathPreference : settings.regimePreference;
+      final stored = _isPaper
+          ? (_isPath
+              ? settings.paperPathPreference
+              : settings.paperRegimePreference)
+          : (_isPath ? settings.pathPreference : settings.regimePreference);
       setState(() {
         _universe = universe;
         if (stored == null) {
@@ -162,9 +203,16 @@ class _EligibilityPickerPageState extends State<_EligibilityPickerPage> {
             ? const <String>[]
             : (_selected.toList()..sort());
 
-    final partial = _isPath
-        ? AutoTradeSettings(pathPreference: value, pathPreferenceSet: true)
-        : AutoTradeSettings(regimePreference: value, regimePreferenceSet: true);
+    final partial = _isPaper
+        ? (_isPath
+            ? AutoTradeSettings(
+                paperPathPreference: value, paperPathPreferenceSet: true)
+            : AutoTradeSettings(
+                paperRegimePreference: value, paperRegimePreferenceSet: true))
+        : (_isPath
+            ? AutoTradeSettings(pathPreference: value, pathPreferenceSet: true)
+            : AutoTradeSettings(
+                regimePreference: value, regimePreferenceSet: true));
 
     try {
       await repo.updateUserAutoTradeSettings(partial);
@@ -313,12 +361,13 @@ class _EligibilityPickerPageState extends State<_EligibilityPickerPage> {
   }
 
   Widget _doctrineNote() {
+    final act = _isPaper ? 'paper-trade in simulation' : 'place live orders';
     final body = _isPath
-        ? 'Choose which signal setups (evaluator paths) may place live '
-            'orders for you — the path version of the symbol picker.  The '
-            'engine offers ${_universe.length} active paths.  Leaving this on '
-            '"All" means every live-tier signal is eligible.'
-        : 'Choose which market regimes may place live orders for you.  '
+        ? 'Choose which signal setups (evaluator paths) may $act for you — '
+            'the path version of the symbol picker.  The engine offers '
+            '${_universe.length} active paths.  Leaving this on "All" means '
+            'every eligible signal is included.'
+        : 'Choose which market regimes may $act for you.  '
             'Trending = momentum continuation; Ranging = rotation between '
             'levels; Choppy = volatile/quiet.  "All" means every regime is '
             'eligible.';
