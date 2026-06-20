@@ -43,6 +43,7 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
   bool _saving = false;
   bool _resuming = false;
   bool _resetting = false;
+  bool _resettingPaper = false;
   String? _loadError;
   bool _usingDefaults = true;
 
@@ -331,6 +332,10 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
         _sizingCard(),
         const SizedBox(height: LuminSpacing.md),
         _eligibilityCard(),
+        if (_paperEnabled) ...[
+          const SizedBox(height: LuminSpacing.md),
+          _paperEligibilityCard(),
+        ],
         const SizedBox(height: LuminSpacing.md),
         _safetyNote(),
         const SizedBox(height: LuminSpacing.xl),
@@ -502,10 +507,12 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
           children: [
             Row(
               children: [
-                const Expanded(
+                Expanded(
                   child: Text(
-                    'WHAT AUTO-TRADES FOR ME',
-                    style: TextStyle(
+                    _paperEnabled
+                        ? 'WHAT LIVE-TRADES FOR ME'
+                        : 'WHAT AUTO-TRADES FOR ME',
+                    style: const TextStyle(
                       color: LuminColors.textMuted,
                       fontSize: 10,
                       letterSpacing: 1.2,
@@ -566,6 +573,90 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
               subtitle: _eligibilitySummary(
                 _settings?.regimePreference, 'regimes'),
               onTap: () => _openPicker(const RegimePreferencePage()),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// PAPER counterpart of ``_eligibilityCard`` — only shown when paper (or
+  /// both) mode is on.  Edits the independent ``paper_*_preference`` triple
+  /// consumed by the per-user paper-book simulation, so a user can paper-
+  /// test a different symbol/path/regime set than they live-trade.
+  Widget _paperEligibilityCard() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
+      child: LuminCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'WHAT PAPER-TRADES FOR ME',
+                    style: TextStyle(
+                      color: LuminColors.textMuted,
+                      fontSize: 10,
+                      letterSpacing: 1.2,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                _resettingPaper
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : TextButton(
+                        onPressed: _resetPaperEligibility,
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        child: const Text(
+                          'Reset to default',
+                          style: TextStyle(fontSize: 11),
+                        ),
+                      ),
+              ],
+            ),
+            const SizedBox(height: LuminSpacing.xs),
+            const Text(
+              'Narrow which signals the engine simulates in your paper book. '
+              'Separate from your live filters above.',
+              style: TextStyle(
+                color: LuminColors.textSecondary,
+                fontSize: 11,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: LuminSpacing.sm),
+            _eligibilityRow(
+              icon: Icons.filter_list_alt,
+              label: 'Symbols',
+              subtitle: _eligibilitySummary(
+                _settings?.paperSymbolPreference, 'pairs'),
+              onTap: () => _openPicker(const PaperSymbolPreferencePage()),
+            ),
+            const Divider(color: LuminColors.cardBorder, height: 1),
+            _eligibilityRow(
+              icon: Icons.account_tree_outlined,
+              label: 'Paths',
+              subtitle: _eligibilitySummary(
+                _settings?.paperPathPreference, 'setups'),
+              onTap: () => _openPicker(const PaperPathPreferencePage()),
+            ),
+            const Divider(color: LuminColors.cardBorder, height: 1),
+            _eligibilityRow(
+              icon: Icons.show_chart,
+              label: 'Regimes',
+              subtitle: _eligibilitySummary(
+                _settings?.paperRegimePreference, 'regimes'),
+              onTap: () => _openPicker(const PaperRegimePreferencePage()),
             ),
           ],
         ),
@@ -675,6 +766,45 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
       );
     } finally {
       if (mounted) setState(() => _resetting = false);
+    }
+  }
+
+  /// Reset the PAPER eligibility triple to engine defaults (all eligible)
+  /// by clearing the ``paper_*_preference`` rows.  Independent of the live
+  /// reset above.
+  Future<void> _resetPaperEligibility() async {
+    if (_resettingPaper) return;
+    setState(() => _resettingPaper = true);
+    final repo = AppConfigScope.of(context).repo;
+    try {
+      final saved = await repo.updateUserAutoTradeSettings(
+        const AutoTradeSettings(
+          paperSymbolPreference: null,
+          paperSymbolPreferenceSet: true,
+          paperPathPreference: null,
+          paperPathPreferenceSet: true,
+          paperRegimePreference: null,
+          paperRegimePreferenceSet: true,
+        ),
+      );
+      if (!mounted) return;
+      setState(() => _settings = saved);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Paper eligibility reset — all signals simulate'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Reset failed: $e'),
+          backgroundColor: LuminColors.loss,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _resettingPaper = false);
     }
   }
 

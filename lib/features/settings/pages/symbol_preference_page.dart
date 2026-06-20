@@ -28,16 +28,43 @@ import '../../../data/server_side_execution_models.dart';
 import '../../../shared/tokens.dart';
 import '../../../shared/widgets/lumin_card.dart';
 
+import 'eligibility_preference_page.dart' show EligibilityScope;
+
 enum _Preset { all, custom, blockAll }
 
-class SymbolPreferencePage extends StatefulWidget {
+/// Symbol picker for LIVE-dispatch eligibility (``symbol_preference``).
+class SymbolPreferencePage extends StatelessWidget {
   const SymbolPreferencePage({super.key});
 
   @override
-  State<SymbolPreferencePage> createState() => _SymbolPreferencePageState();
+  Widget build(BuildContext context) =>
+      const _SymbolPreferenceBody(scope: EligibilityScope.live);
 }
 
-class _SymbolPreferencePageState extends State<SymbolPreferencePage> {
+/// Symbol picker for PAPER-simulation eligibility
+/// (``paper_symbol_preference``) — independent of the live list.
+class PaperSymbolPreferencePage extends StatelessWidget {
+  const PaperSymbolPreferencePage({super.key});
+
+  @override
+  Widget build(BuildContext context) =>
+      const _SymbolPreferenceBody(scope: EligibilityScope.paper);
+}
+
+class _SymbolPreferenceBody extends StatefulWidget {
+  const _SymbolPreferenceBody({required this.scope});
+
+  final EligibilityScope scope;
+
+  @override
+  State<_SymbolPreferenceBody> createState() => _SymbolPreferenceBodyState();
+}
+
+class _SymbolPreferenceBodyState extends State<_SymbolPreferenceBody> {
+  bool get _isPaper => widget.scope == EligibilityScope.paper;
+
+  String get _title =>
+      _isPaper ? 'Paper symbol preference' : 'Symbol preference';
   bool _loaded = false;
   bool _saving = false;
   String? _loadError;
@@ -64,7 +91,8 @@ class _SymbolPreferencePageState extends State<SymbolPreferencePage> {
       final settings = results[1] as AutoTradeSettings;
       final allowed = List<String>.from(runtime.allowedSymbols);
       allowed.sort();
-      final stored = settings.symbolPreference;
+      final stored =
+          _isPaper ? settings.paperSymbolPreference : settings.symbolPreference;
       setState(() {
         _engineAllowed = allowed;
         if (stored == null) {
@@ -102,24 +130,24 @@ class _SymbolPreferencePageState extends State<SymbolPreferencePage> {
     //   stay stuck at today's snapshot).
     // * "Custom" → send the explicit selected list.
     // * "Block all" → send the explicit empty list.
-    final partial = _preset == _Preset.all
-        ? const AutoTradeSettings(
-            symbolPreference: null, symbolPreferenceSet: true)
+    final List<String>? value = _preset == _Preset.all
+        ? null
         : _preset == _Preset.blockAll
-            ? const AutoTradeSettings(
-                symbolPreference: [], symbolPreferenceSet: true)
-            : AutoTradeSettings(
-                symbolPreference: _selected.toList()..sort(),
-                symbolPreferenceSet: true,
-              );
+            ? const <String>[]
+            : (_selected.toList()..sort());
+    final partial = _isPaper
+        ? AutoTradeSettings(
+            paperSymbolPreference: value, paperSymbolPreferenceSet: true)
+        : AutoTradeSettings(
+            symbolPreference: value, symbolPreferenceSet: true);
 
     try {
       await repo.updateUserAutoTradeSettings(partial);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Symbol preference saved'),
-          duration: Duration(seconds: 2),
+        SnackBar(
+          content: Text('$_title saved'),
+          duration: const Duration(seconds: 2),
         ),
       );
       Navigator.of(context).pop();
@@ -148,7 +176,7 @@ class _SymbolPreferencePageState extends State<SymbolPreferencePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Symbol preference'),
+        title: Text(_title),
         actions: [
           if (_saving)
             const Padding(
@@ -238,13 +266,15 @@ class _SymbolPreferencePageState extends State<SymbolPreferencePage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
-              children: const [
-                Icon(Icons.shield_outlined,
+              children: [
+                const Icon(Icons.shield_outlined,
                     size: 16, color: LuminColors.textSecondary),
-                SizedBox(width: LuminSpacing.sm),
+                const SizedBox(width: LuminSpacing.sm),
                 Text(
-                  'WHICH PAIRS AUTO-TRADE FOR YOU',
-                  style: TextStyle(
+                  _isPaper
+                      ? 'WHICH PAIRS PAPER-TRADE FOR YOU'
+                      : 'WHICH PAIRS AUTO-TRADE FOR YOU',
+                  style: const TextStyle(
                     color: LuminColors.textMuted,
                     fontSize: 10,
                     letterSpacing: 1.2,
@@ -255,11 +285,17 @@ class _SymbolPreferencePageState extends State<SymbolPreferencePage> {
             ),
             const SizedBox(height: LuminSpacing.sm),
             Text(
-              'Lumin executes server-side from the engine VPS.  The engine '
-              'maintains an allowlist of ${_engineAllowed.length} pairs '
-              '(blast-radius cap).  You can narrow that list — pick which '
-              'pairs trigger orders for your account.  You cannot widen '
-              'it; that needs an operator change for everyone.',
+              _isPaper
+                  ? 'Which pairs the engine simulates in your paper book.  '
+                      'The engine allowlist holds ${_engineAllowed.length} '
+                      'pairs (blast-radius cap); narrow it to focus your '
+                      'paper testing.  Independent of your live symbol list.'
+                  : 'Lumin executes server-side from the engine VPS.  The '
+                      'engine maintains an allowlist of '
+                      '${_engineAllowed.length} pairs (blast-radius cap).  '
+                      'You can narrow that list — pick which pairs trigger '
+                      'orders for your account.  You cannot widen it; that '
+                      'needs an operator change for everyone.',
               style: const TextStyle(
                 color: LuminColors.textSecondary,
                 fontSize: 12,

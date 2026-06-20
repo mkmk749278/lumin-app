@@ -343,6 +343,12 @@ class AutoTradeSettings {
     this.pathPreferenceSet = false,
     this.regimePreference,
     this.regimePreferenceSet = false,
+    this.paperSymbolPreference,
+    this.paperSymbolPreferenceSet = false,
+    this.paperPathPreference,
+    this.paperPathPreferenceSet = false,
+    this.paperRegimePreference,
+    this.paperRegimePreferenceSet = false,
     this.notionalUsd,
     this.usingDefaults,
     this.pausedReason,
@@ -384,6 +390,20 @@ class AutoTradeSettings {
   /// Tri-state identical to ``pathPreference``.
   final List<String>? regimePreference;
   final bool regimePreferenceSet;
+
+  /// PAPER eligibility triple — the paper-simulation counterparts of
+  /// ``symbolPreference`` / ``pathPreference`` / ``regimePreference``
+  /// (engine columns ``paper_*_preference``, 2026-06-20).  Independent of
+  /// the live triple, so a user can paper-test one symbol/path/regime set
+  /// while live-trading another.  Same tri-state + ``…Set`` contract as
+  /// the live fields.  Consumed by the per-user paper book fan-out on the
+  /// engine when ``PAPER_PER_USER_BOOKS`` is enabled.
+  final List<String>? paperSymbolPreference;
+  final bool paperSymbolPreferenceSet;
+  final List<String>? paperPathPreference;
+  final bool paperPathPreferenceSet;
+  final List<String>? paperRegimePreference;
+  final bool paperRegimePreferenceSet;
 
   /// Per-user notional override (2026-05-20).  USD value the engine
   /// uses when sizing each live Binance order for THIS user.  ``null``
@@ -430,6 +450,18 @@ class AutoTradeSettings {
     final regimesParsed = regimesRaw is List
         ? regimesRaw.map((s) => s.toString()).toList(growable: false)
         : null;
+    final pSymsRaw = j['paper_symbol_preference'];
+    final pSymsParsed = pSymsRaw is List
+        ? pSymsRaw.map((s) => s.toString()).toList(growable: false)
+        : null;
+    final pPathsRaw = j['paper_path_preference'];
+    final pPathsParsed = pPathsRaw is List
+        ? pPathsRaw.map((s) => s.toString()).toList(growable: false)
+        : null;
+    final pRegimesRaw = j['paper_regime_preference'];
+    final pRegimesParsed = pRegimesRaw is List
+        ? pRegimesRaw.map((s) => s.toString()).toList(growable: false)
+        : null;
     return AutoTradeSettings(
       mode: j['mode'] as String?,
       positionSizePct: (j['position_size_pct'] as num?)?.toDouble(),
@@ -445,6 +477,12 @@ class AutoTradeSettings {
       pathPreferenceSet: pathsRaw is List || pathsRaw == null && j.containsKey('path_preference'),
       regimePreference: regimesParsed,
       regimePreferenceSet: regimesRaw is List || regimesRaw == null && j.containsKey('regime_preference'),
+      paperSymbolPreference: pSymsParsed,
+      paperSymbolPreferenceSet: pSymsRaw is List || pSymsRaw == null && j.containsKey('paper_symbol_preference'),
+      paperPathPreference: pPathsParsed,
+      paperPathPreferenceSet: pPathsRaw is List || pPathsRaw == null && j.containsKey('paper_path_preference'),
+      paperRegimePreference: pRegimesParsed,
+      paperRegimePreferenceSet: pRegimesRaw is List || pRegimesRaw == null && j.containsKey('paper_regime_preference'),
       notionalUsd: (j['notional_usd'] as num?)?.toDouble(),
       usingDefaults: j['using_defaults'] as bool?,
       pausedReason: j['paused_reason'] as String?,
@@ -468,6 +506,15 @@ class AutoTradeSettings {
     }
     if (regimePreferenceSet) {
       out['regime_preference'] = regimePreference;
+    }
+    if (paperSymbolPreferenceSet) {
+      out['paper_symbol_preference'] = paperSymbolPreference;
+    }
+    if (paperPathPreferenceSet) {
+      out['paper_path_preference'] = paperPathPreference;
+    }
+    if (paperRegimePreferenceSet) {
+      out['paper_regime_preference'] = paperRegimePreference;
     }
     if (notionalUsd != null) out['notional_usd'] = notionalUsd;
     return out;
