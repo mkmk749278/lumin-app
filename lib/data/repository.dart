@@ -1358,6 +1358,19 @@ abstract class LuminRepository {
   /// "not configured" guidance rather than 5xx).
   Future<AutoTradeRuntimeStatus> getAutoTradeRuntimeStatus();
 
+  /// Per-(user, symbol) management mode for the Signals-tab full/entry
+  /// choice (``GET /api/settings/user/symbol-management``).  Returns a
+  /// ``{SYMBOL: mode}`` map; any symbol NOT in the map is full-managed
+  /// (the default) — so an empty map means "everything full".
+  Future<Map<String, String>> fetchSymbolManagement();
+
+  /// Set one symbol's management mode (``PUT …/symbol-management``).
+  /// ``full`` = engine manages entry + SL + pre-TP + TP + invalidation;
+  /// ``entry`` = engine places entry + protective SL only, user manages
+  /// the rest.  Returns the rebuilt map.  Takes effect on the next signal
+  /// dispatch for that symbol.
+  Future<Map<String, String>> setSymbolManagement(String symbol, String mode);
+
   /// Fetch the user's open server-side positions
   /// (``GET /api/auto-trade/positions``).  The engine reads
   /// Firestore at ``users/{firebase_uid}/positions/`` and returns
@@ -2474,6 +2487,26 @@ class MockRepository implements LuminRepository {
     );
   }
 
+  // In-memory per-symbol management map for offline/preview mode.
+  final Map<String, String> _mockSymbolManagement = <String, String>{};
+
+  @override
+  Future<Map<String, String>> fetchSymbolManagement() async =>
+      Map<String, String>.from(_mockSymbolManagement);
+
+  @override
+  Future<Map<String, String>> setSymbolManagement(
+    String symbol, String mode,
+  ) async {
+    final sym = symbol.toUpperCase();
+    if (mode == 'full') {
+      _mockSymbolManagement.remove(sym);
+    } else {
+      _mockSymbolManagement[sym] = mode;
+    }
+    return Map<String, String>.from(_mockSymbolManagement);
+  }
+
   @override
   Future<List<ServerSidePosition>> getAutoTradePositions() async {
     // Mock: no open positions.  UI renders the empty-state copy
@@ -3298,6 +3331,32 @@ class HttpRepository implements LuminRepository {
     final j = (await client.get('/api/auto-trade/runtime-status'))
         as Map<String, dynamic>;
     return AutoTradeRuntimeStatus.fromJson(j);
+  }
+
+  Map<String, String> _coerceManagementMap(Object? raw) {
+    if (raw is! Map) return <String, String>{};
+    final out = <String, String>{};
+    raw.forEach((k, v) {
+      if (k is String && v is String) out[k.toUpperCase()] = v;
+    });
+    return out;
+  }
+
+  @override
+  Future<Map<String, String>> fetchSymbolManagement() async {
+    final j = await client.get('/api/settings/user/symbol-management');
+    return _coerceManagementMap(j);
+  }
+
+  @override
+  Future<Map<String, String>> setSymbolManagement(
+    String symbol, String mode,
+  ) async {
+    final j = await client.put(
+      '/api/settings/user/symbol-management',
+      body: {'symbol': symbol, 'mode': mode},
+    );
+    return _coerceManagementMap(j);
   }
 
   @override
