@@ -2488,7 +2488,9 @@ class MockRepository implements LuminRepository {
   }
 
   // In-memory per-symbol management map for offline/preview mode.
-  final Map<String, String> _mockSymbolManagement = <String, String>{};
+  // ``static`` so it can hold mutable state in the const MockRepository
+  // (mirrors ``_mockUserPretp``).
+  static final Map<String, String> _mockSymbolManagement = <String, String>{};
 
   @override
   Future<Map<String, String>> fetchSymbolManagement() async =>
