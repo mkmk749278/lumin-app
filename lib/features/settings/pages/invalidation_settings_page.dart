@@ -263,7 +263,9 @@ class _InvalidationSettingsPageState extends State<InvalidationSettingsPage> {
               ),
             )
           else ...[
-            if (!_usingDefaults && _loaded && _loadError == null)
+            // Reset to engine defaults — always visible once loaded so it is
+            // discoverable even when currently on defaults (idempotent no-op).
+            if (_loaded && _loadError == null)
               IconButton(
                 icon: const Icon(Icons.restart_alt),
                 onPressed: _confirmReset,

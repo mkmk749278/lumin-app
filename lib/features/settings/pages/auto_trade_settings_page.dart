@@ -16,6 +16,8 @@ import '../../../shared/tokens.dart';
 import '../../../shared/widgets/lumin_card.dart';
 import '../../../shared/widgets/preview_badge.dart';
 import '../../launch/region_gate.dart';
+import 'eligibility_preference_page.dart';
+import 'symbol_preference_page.dart';
 
 class AutoTradeSettingsPage extends StatefulWidget {
   const AutoTradeSettingsPage({super.key});
@@ -40,6 +42,7 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
   bool _loaded = false;
   bool _saving = false;
   bool _resuming = false;
+  bool _resetting = false;
   String? _loadError;
   bool _usingDefaults = true;
 
@@ -327,6 +330,8 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
         const SizedBox(height: LuminSpacing.md),
         _sizingCard(),
         const SizedBox(height: LuminSpacing.md),
+        _eligibilityCard(),
+        const SizedBox(height: LuminSpacing.md),
         _safetyNote(),
         const SizedBox(height: LuminSpacing.xl),
       ],
@@ -483,6 +488,194 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
         height: 1.4,
       ),
     );
+  }
+
+  /// "What auto-trades for me" — the eligibility filters (symbols,
+  /// paths, regimes).  Each row opens its own picker; a single Reset
+  /// action clears all three back to engine defaults (all eligible).
+  Widget _eligibilityCard() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
+      child: LuminCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'WHAT AUTO-TRADES FOR ME',
+                    style: TextStyle(
+                      color: LuminColors.textMuted,
+                      fontSize: 10,
+                      letterSpacing: 1.2,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                _resetting
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : TextButton(
+                        onPressed: _resetEligibility,
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        child: const Text(
+                          'Reset to default',
+                          style: TextStyle(fontSize: 11),
+                        ),
+                      ),
+              ],
+            ),
+            const SizedBox(height: LuminSpacing.xs),
+            const Text(
+              'Narrow which signals place live orders for you. '
+              'Defaults to everything eligible.',
+              style: TextStyle(
+                color: LuminColors.textSecondary,
+                fontSize: 11,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: LuminSpacing.sm),
+            _eligibilityRow(
+              icon: Icons.filter_list_alt,
+              label: 'Symbols',
+              subtitle: _eligibilitySummary(
+                _settings?.symbolPreference, 'pairs'),
+              onTap: () => _openPicker(const SymbolPreferencePage()),
+            ),
+            const Divider(color: LuminColors.cardBorder, height: 1),
+            _eligibilityRow(
+              icon: Icons.account_tree_outlined,
+              label: 'Paths',
+              subtitle: _eligibilitySummary(
+                _settings?.pathPreference, 'setups'),
+              onTap: () => _openPicker(const PathPreferencePage()),
+            ),
+            const Divider(color: LuminColors.cardBorder, height: 1),
+            _eligibilityRow(
+              icon: Icons.show_chart,
+              label: 'Regimes',
+              subtitle: _eligibilitySummary(
+                _settings?.regimePreference, 'regimes'),
+              onTap: () => _openPicker(const RegimePreferencePage()),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// One-line summary of a preference list for the eligibility rows.
+  String _eligibilitySummary(List<String>? pref, String noun) {
+    if (pref == null) return 'All $noun (default)';
+    if (pref.isEmpty) return 'Blocked — none';
+    return '${pref.length} selected';
+  }
+
+  Widget _eligibilityRow({
+    required IconData icon,
+    required String label,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: LuminSpacing.sm),
+        child: Row(
+          children: [
+            Icon(icon, color: LuminColors.accent, size: 18),
+            const SizedBox(width: LuminSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      color: LuminColors.textPrimary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      color: LuminColors.textSecondary,
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right,
+                color: LuminColors.textMuted, size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Push a picker and refresh the summaries when it returns.
+  Future<void> _openPicker(Widget page) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => page),
+    );
+    if (!mounted) return;
+    // Re-pull so the row summaries reflect the just-saved selection.
+    setState(() {
+      _loaded = false;
+      _loadError = null;
+    });
+    await _load();
+  }
+
+  /// Reset all three eligibility filters to engine defaults (all
+  /// eligible) by clearing the stored rows.  Sends explicit nulls so the
+  /// engine drops the columns — the symbol/path/regime analogue of the
+  /// Pre-TP / Invalidation "Reset to engine defaults" action.
+  Future<void> _resetEligibility() async {
+    if (_resetting) return;
+    setState(() => _resetting = true);
+    final repo = AppConfigScope.of(context).repo;
+    try {
+      final saved = await repo.updateUserAutoTradeSettings(
+        const AutoTradeSettings(
+          symbolPreference: null,
+          symbolPreferenceSet: true,
+          pathPreference: null,
+          pathPreferenceSet: true,
+          regimePreference: null,
+          regimePreferenceSet: true,
+        ),
+      );
+      if (!mounted) return;
+      setState(() => _settings = saved);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Eligibility reset — all signals can auto-trade'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Reset failed: $e'),
+          backgroundColor: LuminColors.loss,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _resetting = false);
+    }
   }
 
   Widget _sizingCard() {

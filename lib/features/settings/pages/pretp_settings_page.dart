@@ -332,9 +332,10 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
               ),
             )
           else ...[
-            // Reset to engine defaults — only meaningful once the user has
-            // overrides; hidden while already on defaults to keep the bar clean.
-            if (!_usingDefaults && _loaded && _loadError == null)
+            // Reset to engine defaults — always visible once loaded so it is
+            // discoverable even when currently on defaults (the DELETE
+            // endpoint is idempotent, so a reset-on-defaults is a no-op).
+            if (_loaded && _loadError == null)
               IconButton(
                 icon: const Icon(Icons.restart_alt),
                 onPressed: _confirmReset,

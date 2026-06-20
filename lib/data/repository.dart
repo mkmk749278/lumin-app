@@ -339,6 +339,10 @@ class AutoTradeSettings {
     this.maxConcurrentPositions,
     this.symbolPreference,
     this.symbolPreferenceSet = false,
+    this.pathPreference,
+    this.pathPreferenceSet = false,
+    this.regimePreference,
+    this.regimePreferenceSet = false,
     this.notionalUsd,
     this.usingDefaults,
     this.pausedReason,
@@ -365,6 +369,21 @@ class AutoTradeSettings {
   ///   sends the list (may be empty == "explicit block all").
   final List<String>? symbolPreference;
   final bool symbolPreferenceSet;
+
+  /// Per-user PATH picker (which evaluator paths / setup classes may
+  /// auto-trade live for me — 2026-06-20).  Same tri-state contract as
+  /// ``symbolPreference``: ``null`` = all paths, non-empty list = only
+  /// these, empty list = block all.  The ``…Set`` flag controls whether
+  /// the field is included in the PUT payload.
+  final List<String>? pathPreference;
+  final bool pathPreferenceSet;
+
+  /// Per-user REGIME picker (which entry regimes may auto-trade live for
+  /// me — 2026-06-20).  Values are the UI tokens TRENDING / RANGING /
+  /// CHOPPY; the server normalises them onto backend regime labels.
+  /// Tri-state identical to ``pathPreference``.
+  final List<String>? regimePreference;
+  final bool regimePreferenceSet;
 
   /// Per-user notional override (2026-05-20).  USD value the engine
   /// uses when sizing each live Binance order for THIS user.  ``null``
@@ -403,6 +422,14 @@ class AutoTradeSettings {
     final symsParsed = symsRaw is List
         ? symsRaw.map((s) => s.toString()).toList(growable: false)
         : null;
+    final pathsRaw = j['path_preference'];
+    final pathsParsed = pathsRaw is List
+        ? pathsRaw.map((s) => s.toString()).toList(growable: false)
+        : null;
+    final regimesRaw = j['regime_preference'];
+    final regimesParsed = regimesRaw is List
+        ? regimesRaw.map((s) => s.toString()).toList(growable: false)
+        : null;
     return AutoTradeSettings(
       mode: j['mode'] as String?,
       positionSizePct: (j['position_size_pct'] as num?)?.toDouble(),
@@ -414,6 +441,10 @@ class AutoTradeSettings {
       // "we know what the server has" so subsequent PUTs that copy
       // this model don't strip the field by accident.
       symbolPreferenceSet: symsRaw is List || symsRaw == null && j.containsKey('symbol_preference'),
+      pathPreference: pathsParsed,
+      pathPreferenceSet: pathsRaw is List || pathsRaw == null && j.containsKey('path_preference'),
+      regimePreference: regimesParsed,
+      regimePreferenceSet: regimesRaw is List || regimesRaw == null && j.containsKey('regime_preference'),
       notionalUsd: (j['notional_usd'] as num?)?.toDouble(),
       usingDefaults: j['using_defaults'] as bool?,
       pausedReason: j['paused_reason'] as String?,
@@ -431,6 +462,12 @@ class AutoTradeSettings {
     }
     if (symbolPreferenceSet) {
       out['symbol_preference'] = symbolPreference;
+    }
+    if (pathPreferenceSet) {
+      out['path_preference'] = pathPreference;
+    }
+    if (regimePreferenceSet) {
+      out['regime_preference'] = regimePreference;
     }
     if (notionalUsd != null) out['notional_usd'] = notionalUsd;
     return out;
@@ -2423,6 +2460,16 @@ class MockRepository implements LuminRepository {
       effectiveAllowedSymbols: [
         'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'BNBUSDT',
       ],
+      allowedPaths: [
+        'SR_FLIP_RETEST',
+        'LIQUIDITY_SWEEP_REVERSAL',
+        'DIVERGENCE_CONTINUATION',
+        'FAILED_AUCTION_RECLAIM',
+        'VOLUME_SURGE_BREAKOUT',
+        'BREAKDOWN_SHORT',
+        'MOVER_TREND_PULLBACK',
+      ],
+      regimeOptions: ['TRENDING', 'RANGING', 'CHOPPY'],
       armed: true,
     );
   }
