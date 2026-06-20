@@ -129,6 +129,8 @@ class AutoTradeRuntimeStatus {
     required this.userMode,
     required this.allowedSymbols,
     required this.effectiveAllowedSymbols,
+    this.allowedPaths = const <String>[],
+    this.regimeOptions = const <String>[],
     required this.armed,
   });
 
@@ -146,6 +148,16 @@ class AutoTradeRuntimeStatus {
   /// Drives the Live-tab footnote so it shows what will actually
   /// trade for this user (not just the engine cap).
   final List<String> effectiveAllowedSymbols;
+
+  /// Canonical list of selectable evaluator paths (setup classes) the
+  /// engine actually emits — source of truth for the Path picker so the
+  /// app never drifts from the engine's SetupClass enum.  Empty when an
+  /// older engine doesn't yet send the field.
+  final List<String> allowedPaths;
+
+  /// Regime buckets offered by the Regime picker (TRENDING / RANGING /
+  /// CHOPPY).  Server maps these onto backend regime labels.
+  final List<String> regimeOptions;
 
   final bool armed;
 
@@ -166,6 +178,8 @@ class AutoTradeRuntimeStatus {
       userMode: mode is String && mode.isNotEmpty ? mode : null,
       allowedSymbols: allowed,
       effectiveAllowedSymbols: effective,
+      allowedPaths: parseList(j['allowed_paths']),
+      regimeOptions: parseList(j['regime_options']),
       armed: j['armed'] as bool? ?? false,
     );
   }

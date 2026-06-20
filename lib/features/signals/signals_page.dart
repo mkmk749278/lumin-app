@@ -1076,6 +1076,11 @@ class _SignalDetailSheetState extends State<_SignalDetailSheet> {
   Timer? _timer;
   final http.Client _markPriceClient = http.Client();
 
+  // Per-symbol auto-trade management mode ('full' | 'entry').
+  String _mgmtMode = 'full';
+  bool _mgmtLoaded = false;
+  bool _mgmtSaving = false;
+
   @override
   void initState() {
     super.initState();
@@ -1086,6 +1091,60 @@ class _SignalDetailSheetState extends State<_SignalDetailSheet> {
       // Fetch immediately so we show a fresh price on sheet open without
       // waiting the full 5 s interval.
       _fetch();
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_mgmtLoaded) _loadMgmt();
+  }
+
+  Future<void> _loadMgmt() async {
+    final repo = AppConfigScope.of(context).repo;
+    try {
+      final map = await repo.fetchSymbolManagement();
+      if (!mounted) return;
+      setState(() {
+        _mgmtMode = map[widget.sig.symbol.toUpperCase()] ?? 'full';
+        _mgmtLoaded = true;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _mgmtLoaded = true); // fall back to 'full'
+    }
+  }
+
+  Future<void> _setMgmt(String mode) async {
+    if (_mgmtSaving || mode == _mgmtMode) return;
+    setState(() => _mgmtSaving = true);
+    final repo = AppConfigScope.of(context).repo;
+    try {
+      final map = await repo.setSymbolManagement(widget.sig.symbol, mode);
+      if (!mounted) return;
+      setState(() {
+        _mgmtMode = map[widget.sig.symbol.toUpperCase()] ?? 'full';
+        _mgmtSaving = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            mode == 'entry'
+                ? '${widget.sig.symbol}: entry-only — engine places entry + SL, you manage the rest'
+                : '${widget.sig.symbol}: full — engine manages the whole trade',
+          ),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _mgmtSaving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not save: $e'),
+          backgroundColor: LuminColors.loss,
+        ),
+      );
     }
   }
 
@@ -1184,11 +1243,134 @@ class _SignalDetailSheetState extends State<_SignalDetailSheet> {
               );
             }),
           ],
+          const SizedBox(height: LuminSpacing.lg),
+          _managementSection(),
           if (sig.status == 'ACTIVE') ...[
             const SizedBox(height: LuminSpacing.lg),
             _TakeSignalAction(sig: sig),
           ],
         ],
+      ),
+    );
+  }
+
+  /// Per-symbol auto-trade management chooser — the two modes the owner
+  /// asked to surface on tapping a symbol:
+  ///   • Full      — engine manages entry + exit + pre-TP + invalidation.
+  ///   • Entry-only — engine places the entry + protective SL only; you
+  ///     manage the exit.
+  /// Applies to every auto-trade on ``sig.symbol`` (not just this signal)
+  /// and takes effect on the next dispatch for that symbol.
+  Widget _managementSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(
+              'AUTO-TRADE ${widget.sig.symbol}',
+              style: const TextStyle(
+                color: LuminColors.textMuted,
+                fontSize: 10,
+                letterSpacing: 1.2,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(width: LuminSpacing.sm),
+            if (_mgmtSaving || !_mgmtLoaded)
+              const SizedBox(
+                width: 12,
+                height: 12,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+          ],
+        ),
+        const SizedBox(height: LuminSpacing.sm),
+        _ManagementOption(
+          title: 'Take full',
+          subtitle: 'Engine manages entry, exit, pre-TP and invalidation.',
+          selected: _mgmtMode == 'full',
+          onTap: () => _setMgmt('full'),
+        ),
+        const SizedBox(height: LuminSpacing.sm),
+        _ManagementOption(
+          title: 'Entry only',
+          subtitle: 'Engine places the entry + a protective SL, then you '
+              'manage the exit. No pre-TP, no TP ladder, no auto-invalidation.',
+          selected: _mgmtMode == 'entry',
+          onTap: () => _setMgmt('entry'),
+        ),
+      ],
+    );
+  }
+}
+
+/// One selectable management-mode tile (Full / Entry-only).  Highlights
+/// when selected — the "highlight two things" the owner asked for.
+class _ManagementOption extends StatelessWidget {
+  const _ManagementOption({
+    required this.title,
+    required this.subtitle,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String title;
+  final String subtitle;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = LuminColors.accent;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(LuminRadii.md),
+      child: Container(
+        padding: const EdgeInsets.all(LuminSpacing.md),
+        decoration: BoxDecoration(
+          color: selected ? accent.withOpacity(0.12) : LuminColors.bgDeep,
+          borderRadius: BorderRadius.circular(LuminRadii.md),
+          border: Border.all(
+            color: selected ? accent.withOpacity(0.6) : LuminColors.cardBorder,
+            width: selected ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              selected ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+              color: selected ? accent : LuminColors.textMuted,
+              size: 18,
+            ),
+            const SizedBox(width: LuminSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      color: selected ? accent : LuminColors.textPrimary,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      color: LuminColors.textSecondary,
+                      fontSize: 11,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
