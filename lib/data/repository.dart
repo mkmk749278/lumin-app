@@ -1130,6 +1130,36 @@ Future<PulseBundle> assemblePulseBundle(LuminRepository repo) async {
   );
 }
 
+/// Result of verifying a Google Play purchase with the engine (B16).
+class PlayVerifyResult {
+  const PlayVerifyResult({
+    required this.ok,
+    required this.tier,
+    required this.subscriptionState,
+    this.paidUntil,
+  });
+
+  final bool ok;
+
+  /// Entitlement tier the engine persisted (``paid`` on success).
+  final String tier;
+
+  /// ISO-8601 UTC subscription expiry, or null when not entitled.
+  final String? paidUntil;
+
+  /// Raw Play ``subscriptionState`` (diagnostics).
+  final String subscriptionState;
+
+  bool get isPaid => tier == 'paid' || tier == 'all-access';
+
+  factory PlayVerifyResult.fromJson(Map<String, dynamic> j) => PlayVerifyResult(
+        ok: j['ok'] == true,
+        tier: (j['tier'] as String?) ?? 'free',
+        paidUntil: j['paid_until'] as String?,
+        subscriptionState: (j['subscription_state'] as String?) ?? '',
+      );
+}
+
 abstract class LuminRepository {
   /// True when the underlying source is the live engine (vs. mocks).
   bool get isLive;
@@ -1417,6 +1447,19 @@ abstract class LuminRepository {
   /// the rest.  Returns the rebuilt map.  Takes effect on the next signal
   /// dispatch for that symbol.
   Future<Map<String, String>> setSymbolManagement(String symbol, String mode);
+
+  /// Verify a Google Play subscription purchase server-side (B16 —
+  /// ``POST /api/billing/play/verify``).  The app sends the opaque
+  /// ``purchaseToken`` + ``productId`` after Play Billing confirms a
+  /// purchase; the engine validates it against the Play Developer API
+  /// and persists the entitlement (the engine is the source of truth —
+  /// nothing here is client-trusted).  Returns the resulting tier +
+  /// expiry so the UI can unlock immediately.  Raises on network / 4xx
+  /// (caller surfaces a retry).
+  Future<PlayVerifyResult> verifyPlayPurchase({
+    required String productId,
+    required String purchaseToken,
+  });
 
   /// Fetch the user's open server-side positions
   /// (``GET /api/auto-trade/positions``).  The engine reads
@@ -2557,6 +2600,23 @@ class MockRepository implements LuminRepository {
   }
 
   @override
+  Future<PlayVerifyResult> verifyPlayPurchase({
+    required String productId,
+    required String purchaseToken,
+  }) async {
+    // Mock/preview: pretend the purchase verified and granted paid.
+    return PlayVerifyResult(
+      ok: true,
+      tier: 'paid',
+      paidUntil: DateTime.now()
+          .toUtc()
+          .add(const Duration(days: 30))
+          .toIso8601String(),
+      subscriptionState: 'SUBSCRIPTION_STATE_ACTIVE',
+    );
+  }
+
+  @override
   Future<List<ServerSidePosition>> getAutoTradePositions() async {
     // Mock: no open positions.  UI renders the empty-state copy
     // ("Auto-trade armed — waiting for the next whitelisted signal").
@@ -3406,6 +3466,18 @@ class HttpRepository implements LuminRepository {
       body: {'symbol': symbol, 'mode': mode},
     );
     return _coerceManagementMap(j);
+  }
+
+  @override
+  Future<PlayVerifyResult> verifyPlayPurchase({
+    required String productId,
+    required String purchaseToken,
+  }) async {
+    final j = (await client.post(
+      '/api/billing/play/verify',
+      body: {'product_id': productId, 'purchase_token': purchaseToken},
+    )) as Map<String, dynamic>;
+    return PlayVerifyResult.fromJson(j);
   }
 
   @override

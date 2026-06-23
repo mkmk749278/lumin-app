@@ -312,6 +312,16 @@ class AuthService {
     }
   }
 
+  /// Apply a fresh entitlement after a Google Play purchase verifies
+  /// (B16).  The engine already persisted the tier server-side (it is
+  /// the source of truth); this just refreshes the locally-cached tier
+  /// so the free-tier gate unlocks immediately without a profile
+  /// round-trip.
+  void applyEntitlement({required String tier, String? paidUntil}) {
+    _cachedTier = tier;
+    _cachedPaidUntil = paidUntil;
+  }
+
   /// Cache the user's display name independently — called after signup
   /// completes so the greeting on Pulse renders immediately without a
   /// follow-up profile fetch.
