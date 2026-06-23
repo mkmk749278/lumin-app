@@ -9,9 +9,9 @@
 /// The upgrade sheet is a lightweight inline version of the full
 /// SubscriptionPage so the user can act immediately without navigating away.
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../data/app_config.dart';
+import '../../features/settings/pages/subscription_page.dart';
 import '../tokens.dart';
 
 /// Returns true when the tier claim indicates an active paid subscription.
@@ -178,7 +178,7 @@ class UpgradeSheet extends StatelessWidget {
 
   static const _features = [
     (Icons.price_check_rounded, 'Entry, SL & TP levels on every signal'),
-    (Icons.notifications_active_rounded, 'Real-time Telegram signal alerts'),
+    (Icons.notifications_active_rounded, 'Real-time in-app signal alerts'),
     (Icons.smart_toy_rounded, 'Full 15-evaluator AI analysis'),
     (Icons.trending_up_rounded, 'Auto-trade & pre-TP lock-in'),
     (Icons.bar_chart_rounded, 'Per-agent & per-setup performance deep-dive'),
@@ -286,7 +286,7 @@ class UpgradeSheet extends StatelessWidget {
               child: const Row(
                 children: [
                   Text(
-                    'From \$30/mo · \$300/yr · \$999 lifetime',
+                    'Monthly or yearly · cancel anytime',
                     style: TextStyle(
                       color: LuminColors.textSecondary,
                       fontSize: 12,
@@ -294,7 +294,7 @@ class UpgradeSheet extends StatelessWidget {
                   ),
                   Spacer(),
                   Text(
-                    '17% off yearly',
+                    'Best value yearly',
                     style: TextStyle(
                       color: LuminColors.success,
                       fontSize: 11,
@@ -307,7 +307,7 @@ class UpgradeSheet extends StatelessWidget {
 
             const SizedBox(height: LuminSpacing.lg),
 
-            // Telegram CTA
+            // Play Billing CTA → full subscription page (B16)
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
@@ -321,18 +321,21 @@ class UpgradeSheet extends StatelessWidget {
                     borderRadius: BorderRadius.circular(LuminRadii.md),
                   ),
                 ),
-                icon: const Icon(Icons.send_rounded, size: 18),
+                icon: const Icon(Icons.workspace_premium_rounded, size: 18),
                 label: const Text(
-                  'Upgrade via Telegram  @LuminProBot',
+                  'See plans',
                   style: TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 14,
                   ),
                 ),
-                onPressed: () async {
+                onPressed: () {
                   Navigator.pop(context);
-                  final uri = Uri.parse('https://t.me/LuminProBot');
-                  await launchUrl(uri, mode: LaunchMode.externalApplication);
+                  Navigator.of(context).push(
+                    MaterialPageRoute<bool>(
+                      builder: (_) => const SubscriptionPage(),
+                    ),
+                  );
                 },
               ),
             ),
@@ -340,7 +343,7 @@ class UpgradeSheet extends StatelessWidget {
             const SizedBox(height: LuminSpacing.sm),
             const Center(
               child: Text(
-                'Payment & activation handled by @LuminProBot',
+                'Billed securely through Google Play',
                 style: TextStyle(
                   color: LuminColors.textMuted,
                   fontSize: 11,

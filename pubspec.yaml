@@ -29,6 +29,12 @@ dependencies:
   # Play Store launch (A5, 2026-05-20) — Settings → Legal links open
   # the privacy / terms / risk URLs in the device browser.
   url_launcher: ^6.3.0
+  # B16 — Google Play Billing.  Subscriptions are purchased via Play
+  # Billing; the resulting purchaseToken is verified server-side by the
+  # engine (POST /api/billing/play/verify), which is the entitlement
+  # source of truth.  Telegram-bot payment retired (Telegram banned
+  # in-region).
+  in_app_purchase: ^3.2.0
 
 dev_dependencies:
   flutter_test:
