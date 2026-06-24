@@ -10,38 +10,38 @@
 /// SubscriptionPage so the user can act immediately without navigating away.
 import 'package:flutter/material.dart';
 
-import '../../data/app_config.dart';
 import '../../features/settings/pages/subscription_page.dart';
 import '../tokens.dart';
 
-/// Returns true when the tier claim indicates an active paid subscription.
-/// [null] is treated as "not yet determined" — the engine will 403 if the
-/// user genuinely isn't paid, so we don't block the UI on a missing claim.
-bool isPaidTier(String? tier) {
-  if (tier == null) return true; // err open — backend is the authoritative gate
-  final t = tier.toLowerCase();
-  return t == 'pro' || t == 'paid' || t == 'premium' || t == 'a+' ||
-      t == 'b' || t == 'beta' || t == 'admin';
-}
-
-/// Reads the tier from [AppConfigScope] and calls [builder] with the result.
-/// Avoids duplicating the context lookup at every call site.
-class TierGate extends StatelessWidget {
-  const TierGate({
-    super.key,
-    required this.paidBuilder,
-    required this.freeBuilder,
-  });
-
-  final WidgetBuilder paidBuilder;
-  final WidgetBuilder freeBuilder;
-
-  @override
-  Widget build(BuildContext context) {
-    final tier = AppConfigScope.of(context).tier;
-    return isPaidTier(tier) ? paidBuilder(context) : freeBuilder(context);
+/// Subscription tier rank for the B16 two-tier auto-trade model.
+///
+/// `free(0) < assist(1) < auto(2)`; legacy `paid` maps to auto, and
+/// `all-access` / `owner` sit above.  Signals + levels are FREE — the
+/// paywall is on trade automation only.
+///
+/// Null / unknown → 0 (free).  We err **closed** on the paid actions: the
+/// Assist (one-tap) path places orders **client-side**, so the app is the
+/// only gate — there's no server 403 to fall back on.
+int tierRank(String? tier) {
+  switch ((tier ?? '').toLowerCase()) {
+    case 'owner':
+    case 'all-access':
+      return 3;
+    case 'auto':
+    case 'paid': // legacy single paid tier == full automation
+      return 2;
+    case 'assist':
+      return 1;
+    default:
+      return 0;
   }
 }
+
+/// May place one-tap (assisted) live trades — Assist tier or higher.
+bool canAssist(String? tier) => tierRank(tier) >= 1;
+
+/// May enable hands-off auto-execution — Auto tier (or higher).
+bool canAuto(String? tier) => tierRank(tier) >= 2;
 
 /// A price column replacement for free-tier users.
 ///
@@ -177,11 +177,11 @@ class UpgradeSheet extends StatelessWidget {
   const UpgradeSheet({super.key});
 
   static const _features = [
-    (Icons.price_check_rounded, 'Entry, SL & TP levels on every signal'),
-    (Icons.notifications_active_rounded, 'Real-time in-app signal alerts'),
-    (Icons.smart_toy_rounded, 'Full 15-evaluator AI analysis'),
-    (Icons.trending_up_rounded, 'Auto-trade & pre-TP lock-in'),
-    (Icons.bar_chart_rounded, 'Per-agent & per-setup performance deep-dive'),
+    (Icons.bolt_rounded, 'Assist — take any signal in one tap'),
+    (Icons.smart_toy_rounded, 'Auto — hands-off, every eligible signal'),
+    (Icons.vpn_key_rounded, 'Runs on your own exchange keys'),
+    (Icons.trending_up_rounded, 'Pre-TP lock-in & auto-breakeven'),
+    (Icons.tune_rounded, 'Per-agent & risk controls (Auto)'),
   ];
 
   @override
@@ -236,7 +236,7 @@ class UpgradeSheet extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        'Unlock entry, SL & TP on every signal',
+                        'Automate the trades — one-tap or hands-off',
                         style: TextStyle(
                           color: LuminColors.textSecondary,
                           fontSize: 12,
@@ -286,7 +286,7 @@ class UpgradeSheet extends StatelessWidget {
               child: const Row(
                 children: [
                   Text(
-                    'Monthly or yearly · cancel anytime',
+                    'Assist or Auto · monthly · cancel anytime',
                     style: TextStyle(
                       color: LuminColors.textSecondary,
                       fontSize: 12,
@@ -294,7 +294,7 @@ class UpgradeSheet extends StatelessWidget {
                   ),
                   Spacer(),
                   Text(
-                    'Best value yearly',
+                    'See plans',
                     style: TextStyle(
                       color: LuminColors.success,
                       fontSize: 11,

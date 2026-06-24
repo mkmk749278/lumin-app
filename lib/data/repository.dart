@@ -1150,7 +1150,12 @@ class PlayVerifyResult {
   /// Raw Play ``subscriptionState`` (diagnostics).
   final String subscriptionState;
 
-  bool get isPaid => tier == 'paid' || tier == 'all-access';
+  /// Any paid entitlement — assist, auto, legacy paid, or all-access.
+  bool get isPaid =>
+      tier == 'assist' ||
+      tier == 'auto' ||
+      tier == 'paid' ||
+      tier == 'all-access';
 
   factory PlayVerifyResult.fromJson(Map<String, dynamic> j) => PlayVerifyResult(
         ok: j['ok'] == true,

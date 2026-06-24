@@ -17,6 +17,7 @@ import '../../data/mock_data.dart';
 import '../../data/repository.dart';
 import '../../shared/format.dart';
 import '../../shared/tokens.dart';
+import '../../shared/widgets/free_tier_gate.dart';
 import '../../shared/widgets/lumin_card.dart';
 import '../../shared/widgets/preview_badge.dart';
 import '../../shared/widgets/shimmer.dart';
@@ -1043,9 +1044,16 @@ class _TakeSignalAction extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: LuminSpacing.md),
         ),
         onPressed: () async {
-          // Close the detail sheet first so the take sheet stacks
-          // cleanly without an awkward double-modal.
+          // One-tap "take trade" is the Assist tier (B16). Free users see
+          // the full signal + levels and can trade it manually on their own
+          // exchange; the in-app one-tap placement is the paid feature.
+          final tier = AppConfigScope.of(context).tier;
+          // Close the detail sheet first so the next sheet stacks cleanly.
           Navigator.of(context).pop();
+          if (!canAssist(tier)) {
+            showUpgradeSheet(context);
+            return;
+          }
           await showTakeSignalSheet(context, signal: sig);
         },
         icon: const Icon(Icons.bolt, size: 18),
