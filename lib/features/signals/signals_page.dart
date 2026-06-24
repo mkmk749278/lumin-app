@@ -1260,16 +1260,17 @@ class _SignalDetailSheetState extends State<_SignalDetailSheet> {
             _PreTpCard(sig: sig),
             const SizedBox(height: LuminSpacing.md),
           ],
-          // Entry / SL / TP / meta collapsed into one bordered box (owner
-          // brief 2026-06-24) — matches the outcome card's framing.  PnL is
-          // omitted here; the outcome card above already carries it.
-          _TradeDetailsCard(sig: sig, livePrice: _livePrice),
-          const SizedBox(height: LuminSpacing.lg),
+          // Auto-trade controls first (owner brief 2026-06-24: auto-trade
+          // card above, trade details below), then the take CTA, then the
+          // details box as reference at the bottom.
           _managementSection(),
           const SizedBox(height: LuminSpacing.lg),
           // Take-signal bar stays visible after close (owner brief) but faded
           // + disabled — a closed signal can't be taken.
           _TakeSignalAction(sig: sig, enabled: sig.status == 'ACTIVE'),
+          const SizedBox(height: LuminSpacing.lg),
+          // Entry / SL / TP / meta in one bordered two-column box.
+          _TradeDetailsCard(sig: sig, livePrice: _livePrice),
         ],
         ),
       ),
@@ -1610,11 +1611,47 @@ class _TradeDetailsCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final holdMins = sig.holdMins;
     final closed = _terminal.contains(sig.status);
+    // Flat cell list (Current/Hold are conditional), laid out two-per-row so
+    // the box fills the full width instead of leaving the right half empty.
+    final cells = <Widget>[
+      _cell('Entry', formatPrice(sig.entry)),
+      if (livePrice > 0)
+        _cell('Current', formatPrice(livePrice),
+            color: sig.status == 'ACTIVE' ? LuminColors.accent : null),
+      _cell('SL', _isBreakeven(sig) ? 'BE (banked)' : formatPrice(sig.sl)),
+      _cell('TP1', formatPrice(sig.tp1)),
+      _cell('TP2', formatPrice(sig.tp2)),
+      _cell('Confidence', '${sig.confidence.toStringAsFixed(1)} (${sig.tier})'),
+      _cell('Status', sig.status),
+      if (holdMins != null)
+        _cell(
+          'Hold',
+          closed
+              ? '${formatAge(holdMins)} (closed ${formatAge(sig.minutesAgo)} ago)'
+              : 'open ${formatAge(holdMins)}',
+        ),
+    ];
+    final rows = <Widget>[];
+    for (var i = 0; i < cells.length; i += 2) {
+      rows.add(Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: cells[i]),
+            const SizedBox(width: LuminSpacing.md),
+            Expanded(
+              child: i + 1 < cells.length ? cells[i + 1] : const SizedBox(),
+            ),
+          ],
+        ),
+      ));
+    }
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(
         horizontal: LuminSpacing.md,
-        vertical: LuminSpacing.sm,
+        vertical: LuminSpacing.md,
       ),
       decoration: BoxDecoration(
         color: LuminColors.bgDeep,
@@ -1636,68 +1673,37 @@ class _TradeDetailsCard extends StatelessWidget {
               ),
             ),
           ),
-          _DetailRow('Entry', formatPrice(sig.entry)),
-          if (livePrice > 0)
-            _DetailRow(
-              'Current',
-              formatPrice(livePrice),
-              valueColor: sig.status == 'ACTIVE' ? LuminColors.accent : null,
-            ),
-          _DetailRow(
-            'SL',
-            _isBreakeven(sig) ? 'BE (banked)' : formatPrice(sig.sl),
-          ),
-          _DetailRow('TP1', formatPrice(sig.tp1)),
-          _DetailRow('TP2', formatPrice(sig.tp2)),
-          _DetailRow('Confidence',
-              '${sig.confidence.toStringAsFixed(1)} (${sig.tier})'),
-          _DetailRow('Status', sig.status),
-          if (holdMins != null)
-            _DetailRow(
-              'Hold',
-              closed
-                  ? '${formatAge(holdMins)} (closed ${formatAge(sig.minutesAgo)} ago)'
-                  : 'open ${formatAge(holdMins)}',
-            ),
+          ...rows,
         ],
       ),
     );
   }
-}
 
-class _DetailRow extends StatelessWidget {
-  const _DetailRow(this.label, this.value, {this.valueColor});
-  final String label;
-  final String value;
-  final Color? valueColor;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: LuminSpacing.xs),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 100,
-            child: Text(
-              label,
-              style: const TextStyle(
-                color: LuminColors.textMuted,
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
+  /// One label/value cell in the two-column grid.
+  Widget _cell(String label, String value, {Color? color}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: LuminColors.textMuted,
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
           ),
-          Text(
-            value,
-            style: TextStyle(
-              color: valueColor ?? LuminColors.textPrimary,
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
-            ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          style: TextStyle(
+            color: color ?? LuminColors.textPrimary,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            letterSpacing: -0.2,
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
+
