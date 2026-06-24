@@ -68,6 +68,7 @@ class MockSignal {
     this.preTpTriggerPrice = 0.0,
     this.preTpThresholdPct = 0.0,
     this.preTpHit = false,
+    this.maxFavorableExcursionPct = 0.0,
   });
 
   final String id;
@@ -101,6 +102,12 @@ class MockSignal {
   final double preTpThresholdPct;
   final bool preTpHit;
 
+  /// Peak unrealised profit % from entry the signal ever reached (max
+  /// favorable excursion).  For closed signals this is the best the trade
+  /// showed *before* it hit SL / closed — the "Max profit reached before SL"
+  /// the outcome summary highlights.  0.0 when offline / mock data.
+  final double maxFavorableExcursionPct;
+
   Map<String, dynamic> toMap() => {
     'id': id,
     'symbol': symbol,
@@ -122,6 +129,7 @@ class MockSignal {
     'preTpTriggerPrice': preTpTriggerPrice,
     'preTpThresholdPct': preTpThresholdPct,
     'preTpHit': preTpHit,
+    'maxFavorableExcursionPct': maxFavorableExcursionPct,
   };
 
   factory MockSignal.fromMap(Map<String, dynamic> m) => MockSignal(
@@ -145,6 +153,8 @@ class MockSignal {
     preTpTriggerPrice: (m['preTpTriggerPrice'] as num?)?.toDouble() ?? 0.0,
     preTpThresholdPct: (m['preTpThresholdPct'] as num?)?.toDouble() ?? 0.0,
     preTpHit: m['preTpHit'] as bool? ?? false,
+    maxFavorableExcursionPct:
+        (m['maxFavorableExcursionPct'] as num?)?.toDouble() ?? 0.0,
   );
 }
 

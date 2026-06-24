@@ -783,10 +783,16 @@ class _SignalCard extends StatelessWidget {
     return sig.pnlPct;
   }
 
+  static const _terminalStatuses = {
+    'SL_HIT', 'BREAKEVEN_EXIT', 'PROFIT_LOCKED',
+    'INVALIDATED', 'EXPIRED', 'CANCELLED',
+    'FULL_TP_HIT', 'TP3_HIT', 'TP2_HIT', 'TP1_HIT', 'CLOSED',
+  };
+
   @override
   Widget build(BuildContext context) {
     final isLong = sig.direction == 'LONG';
-    return LuminCard(
+    final card = LuminCard(
       onTap: () => _showDetail(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1003,6 +1009,11 @@ class _SignalCard extends StatelessWidget {
         ],
       ),
     );
+    // Closed signals stay visible in the feed but faded out (owner brief
+    // 2026-06-24) — the story stays, the eye goes to live signals.
+    return _terminalStatuses.contains(sig.status)
+        ? Opacity(opacity: 0.55, child: card)
+        : card;
   }
 
   void _showDetail(BuildContext context) {
@@ -1030,11 +1041,36 @@ class _SignalCard extends StatelessWidget {
 /// (sized to wallet equity + per-user settings) on tap; the user
 /// confirms there before any Binance call fires.
 class _TakeSignalAction extends StatelessWidget {
-  const _TakeSignalAction({required this.sig});
+  const _TakeSignalAction({required this.sig, this.enabled = true});
   final MockSignal sig;
+
+  /// When false the bar is still shown (owner brief: visible after close) but
+  /// faded and non-interactive — a closed signal can't be taken.
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
+    if (!enabled) {
+      return Opacity(
+        opacity: 0.45,
+        child: SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: LuminColors.textMuted,
+              foregroundColor: LuminColors.bgDeep,
+              padding: const EdgeInsets.symmetric(vertical: LuminSpacing.md),
+            ),
+            onPressed: null, // disabled — signal closed
+            icon: const Icon(Icons.lock_outline, size: 18),
+            label: const Text(
+              'Signal closed',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+            ),
+          ),
+        ),
+      );
+    }
     return SizedBox(
       width: double.infinity,
       child: FilledButton.icon(
@@ -1186,7 +1222,8 @@ class _SignalDetailSheetState extends State<_SignalDetailSheet> {
     final sig = widget.sig;
     return Padding(
       padding: const EdgeInsets.all(LuminSpacing.xl),
-      child: Column(
+      child: SingleChildScrollView(
+        child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1211,7 +1248,15 @@ class _SignalDetailSheetState extends State<_SignalDetailSheet> {
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: LuminSpacing.lg),
-          if (sig.preTpTriggerPrice > 0) ...[
+          // Outcome summary — the centerpiece (owner brief 2026-06-24):
+          // highlight the positive result and the MAX PROFIT the trade
+          // reached before SL.  Default exit is TP1-full + fixed SL, so this
+          // replaces the old pre-TP/BE card as the headline.
+          _OutcomeSummaryCard(sig: sig, pnlPct: _pnlPct),
+          const SizedBox(height: LuminSpacing.md),
+          // Pre-TP card only when banking actually fired (opt-in users) — the
+          // engine default no longer banks, so don't imply it did.
+          if (sig.preTpHit) ...[
             _PreTpCard(sig: sig),
             const SizedBox(height: LuminSpacing.md),
           ],
@@ -1253,18 +1298,20 @@ class _SignalDetailSheetState extends State<_SignalDetailSheet> {
           ],
           const SizedBox(height: LuminSpacing.lg),
           _managementSection(),
-          if (sig.status == 'ACTIVE') ...[
-            const SizedBox(height: LuminSpacing.lg),
-            _TakeSignalAction(sig: sig),
-          ],
+          const SizedBox(height: LuminSpacing.lg),
+          // Take-signal bar stays visible after close (owner brief) but faded
+          // + disabled — a closed signal can't be taken.
+          _TakeSignalAction(sig: sig, enabled: sig.status == 'ACTIVE'),
         ],
+        ),
       ),
     );
   }
 
   /// Per-symbol auto-trade management chooser — the two modes the owner
   /// asked to surface on tapping a symbol:
-  ///   • Full      — engine manages entry + exit + pre-TP + invalidation.
+  ///   • Full      — engine takes the trade and auto-closes 100% at TP1 or SL
+  ///     (the Session-34 default exit: no pre-TP, no invalidation).
   ///   • Entry-only — engine places the entry + protective SL only; you
   ///     manage the exit.
   /// Applies to every auto-trade on ``sig.symbol`` (not just this signal)
@@ -1295,8 +1342,8 @@ class _SignalDetailSheetState extends State<_SignalDetailSheet> {
         ),
         const SizedBox(height: LuminSpacing.sm),
         _ManagementOption(
-          title: 'Take full',
-          subtitle: 'Engine manages entry, exit, pre-TP and invalidation.',
+          title: 'Take full (auto execute)',
+          subtitle: 'Engine takes the trade and auto-closes 100% at TP1 or SL.',
           selected: _mgmtMode == 'full',
           onTap: () => _setMgmt('full'),
         ),
@@ -1380,6 +1427,107 @@ class _ManagementOption extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Outcome summary — the headline card on the detail sheet (owner brief
+/// 2026-06-24).  Highlights the positive result and the MAX PROFIT the trade
+/// reached before SL.  Default exit is TP1-full + fixed SL, so this is the
+/// centerpiece (replacing the old pre-TP/BE card).  Engine-recorded values
+/// only — no fabricated numbers (B3 / Hard Limit).
+class _OutcomeSummaryCard extends StatelessWidget {
+  const _OutcomeSummaryCard({required this.sig, required this.pnlPct});
+  final MockSignal sig;
+  final double pnlPct;
+
+  static const _terminal = {
+    'SL_HIT', 'BREAKEVEN_EXIT', 'PROFIT_LOCKED',
+    'INVALIDATED', 'EXPIRED', 'CANCELLED',
+    'FULL_TP_HIT', 'TP3_HIT', 'TP2_HIT', 'TP1_HIT', 'CLOSED',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final closed = _terminal.contains(sig.status);
+    final pnlPositive = pnlPct >= 0;
+    final mfe = sig.maxFavorableExcursionPct;
+    final hasMfe = mfe > 0;
+    // Lean positive (owner: "highlight positive results"): green whenever the
+    // trade closed in profit OR ever reached a positive peak.
+    final accent =
+        (pnlPositive || hasMfe) ? LuminColors.success : LuminColors.loss;
+    return Container(
+      padding: const EdgeInsets.all(LuminSpacing.md),
+      decoration: BoxDecoration(
+        color: accent.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(LuminRadii.md),
+        border: Border.all(color: accent.withOpacity(0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            closed ? 'OUTCOME' : 'LIVE',
+            style: TextStyle(
+              color: accent,
+              fontSize: 10,
+              letterSpacing: 1.4,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: LuminSpacing.sm),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: _stat(
+                  label: closed ? 'Result' : 'Live PnL',
+                  value: formatPct(pnlPct),
+                  color: pnlPositive ? LuminColors.success : LuminColors.loss,
+                ),
+              ),
+              Expanded(
+                child: _stat(
+                  label: closed ? 'Max profit before SL' : 'Peak so far',
+                  value: hasMfe ? '+${mfe.toStringAsFixed(2)}%' : '—',
+                  color:
+                      hasMfe ? LuminColors.success : LuminColors.textMuted,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _stat({
+    required String label,
+    required String value,
+    required Color color,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          value,
+          style: TextStyle(
+            color: color,
+            fontSize: 20,
+            fontWeight: FontWeight.w700,
+            letterSpacing: -0.3,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          label,
+          style: const TextStyle(
+            color: LuminColors.textSecondary,
+            fontSize: 11,
+          ),
+        ),
+      ],
     );
   }
 }
