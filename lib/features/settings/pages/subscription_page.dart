@@ -1,15 +1,16 @@
-/// Subscription page — Lumin Pro via Google Play Billing (B16).
+/// Subscription page — two-tier auto-trade plans via Google Play Billing (B16).
 ///
-/// Telegram is banned in-region, so the bot paywall reaches no one.
-/// Subscriptions are purchased through **Google Play Billing**; the
-/// resulting purchase is verified server-side by the engine
-/// (`POST /api/billing/play/verify`), which is the entitlement source of
-/// truth.  Positioned as education / market-analytics content (Google
-/// Play Payments policy bars investment-consulting services from Play
-/// billing — the framing is deliberate, not cosmetic).
+/// Signals + levels + analysis are FREE; the paywall is on trade automation:
+///   * Assist (₹1000/mo) — one-tap "take trade".
+///   * Auto   (₹2000/mo) — hands-off auto-execution.
+/// Telegram is banned in-region, so the bot paywall reaches no one.  Each
+/// purchase is verified server-side by the engine
+/// (`POST /api/billing/play/verify`), the entitlement source of truth.  The
+/// paid feature is automation *software functionality* run on the user's own
+/// exchange keys (Lumin never custodies funds) — not investment advice.
 ///
-/// Product IDs MUST match the subscription products created in Play
-/// Console AND the engine's `GOOGLE_PLAY_PRODUCT_IDS` allowlist.
+/// Product IDs MUST match the Play Console products AND the engine's
+/// GOOGLE_PLAY_ASSIST/AUTO_PRODUCT_IDS env.
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -20,11 +21,13 @@ import '../../../data/play_billing_service.dart';
 import '../../../shared/tokens.dart';
 import '../../../shared/widgets/lumin_card.dart';
 
-/// Play Console subscription product ids.  Keep in lockstep with the
-/// engine's `GOOGLE_PLAY_PRODUCT_IDS` env allowlist.
-const String kProMonthlyId = 'lumin_pro_monthly';
-const String kProYearlyId = 'lumin_pro_yearly';
-const Set<String> kProProductIds = {kProMonthlyId, kProYearlyId};
+/// Play Console subscription product ids (B16 two-tier model).  Keep in
+/// lockstep with the engine's GOOGLE_PLAY_ASSIST/AUTO_PRODUCT_IDS env.
+///   * Assist (₹1000/mo) — one-tap "take trade".
+///   * Auto   (₹2000/mo) — hands-off auto-execution.
+const String kAssistMonthlyId = 'lumin_assist_monthly';
+const String kAutoMonthlyId = 'lumin_auto_monthly';
+const Set<String> kSubscriptionProductIds = {kAssistMonthlyId, kAutoMonthlyId};
 
 class SubscriptionPage extends StatefulWidget {
   const SubscriptionPage({super.key});
@@ -81,8 +84,8 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
         }
         return;
       }
-      final products = await billing.loadProducts(kProProductIds);
-      // Cheapest first so Monthly renders above Yearly.
+      final products = await billing.loadProducts(kSubscriptionProductIds);
+      // Cheapest first so Assist (₹1000) renders above Auto (₹2000).
       products.sort((a, b) => a.rawPrice.compareTo(b.rawPrice));
       if (mounted) {
         setState(() {
@@ -113,7 +116,8 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
         break;
       case PlayBillingStatus.entitled:
         setState(() => _purchaseInFlight = false);
-        _snack('Lumin Pro is active — paid signals unlocked.');
+        final t = event.result?.tier == 'auto' ? 'Auto' : 'Assist';
+        _snack('$t plan active — automation unlocked.');
         Navigator.of(context).pop(true);
         break;
       case PlayBillingStatus.notEntitled:
@@ -221,8 +225,9 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
             ),
             SizedBox(height: LuminSpacing.xs),
             Text(
-              'Full 15-evaluator market analysis delivered in-app, with the '
-              'operational levels on every setup. Auto-trade unlock.',
+              'All signals, levels and analysis are free. Upgrade to '
+              'automate the trades — one-tap with Assist, fully hands-off '
+              'with Auto. Trades run on your own exchange keys.',
               style: TextStyle(
                 color: LuminColors.textSecondary,
                 fontSize: 13,
@@ -242,31 +247,36 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'WHAT YOU GET',
-              style: TextStyle(
-                color: LuminColors.textMuted,
-                fontSize: 10,
-                letterSpacing: 1.2,
-                fontWeight: FontWeight.w600,
-              ),
+            // Header row — Free / Assist / Auto column labels.
+            Row(
+              children: const [
+                Expanded(flex: 5, child: SizedBox()),
+                Expanded(child: Center(child: _ColHead('FREE'))),
+                Expanded(child: Center(child: _ColHead('ASSIST'))),
+                Expanded(child: Center(child: _ColHead('AUTO'))),
+              ],
             ),
-            const SizedBox(height: LuminSpacing.md),
-            _featureRow('Setup alerts — direction & confidence', true, true),
-            _featureRow('Full analysis — 15 evaluators', false, true),
-            _featureRow('Operational levels (entry / SL / TP)', false, true),
-            _featureRow('Pre-TP grab + auto-breakeven', false, true),
-            _featureRow('In-app auto-trade (Paper)', false, true),
-            _featureRow('In-app auto-trade (Live)', false, true),
-            _featureRow('Per-agent toggles', false, true),
-            _featureRow('Custom risk gates', false, true),
+            const SizedBox(height: LuminSpacing.sm),
+            _featureRow('Signals + entry / SL / TP', true, true, true),
+            _featureRow('Full 15-evaluator analysis', true, true, true),
+            _featureRow('Paper trading', true, true, true),
+            _featureRow('One-tap "take trade"', false, true, true),
+            _featureRow('Hands-off auto-execution', false, false, true),
+            _featureRow('Per-agent & risk controls', false, false, true),
           ],
         ),
       ),
     );
   }
 
-  Widget _featureRow(String label, bool free, bool pro) {
+  Widget _featureRow(String label, bool free, bool assist, bool auto) {
+    Widget mark(bool on, Color onColor) => Center(
+          child: Icon(
+            on ? Icons.check_circle : Icons.remove_circle_outline,
+            color: on ? onColor : LuminColors.textMuted,
+            size: 15,
+          ),
+        );
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
@@ -281,24 +291,9 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
               ),
             ),
           ),
-          Expanded(
-            child: Center(
-              child: Icon(
-                free ? Icons.check_circle : Icons.remove_circle_outline,
-                color: free ? LuminColors.success : LuminColors.textMuted,
-                size: 16,
-              ),
-            ),
-          ),
-          Expanded(
-            child: Center(
-              child: Icon(
-                pro ? Icons.check_circle : Icons.remove_circle_outline,
-                color: pro ? LuminColors.accent : LuminColors.textMuted,
-                size: 16,
-              ),
-            ),
-          ),
+          Expanded(child: mark(free, LuminColors.success)),
+          Expanded(child: mark(assist, LuminColors.accent)),
+          Expanded(child: mark(auto, LuminColors.accent)),
         ],
       ),
     );
@@ -340,10 +335,12 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
   }
 
   Widget _planTile(ProductDetails product) {
-    final isYearly = product.id == kProYearlyId;
-    final label = isYearly ? 'Yearly' : 'Monthly';
-    final unit = isYearly ? '/ year' : '/ month';
-    final note = isYearly ? 'Best value' : 'Cancel anytime';
+    final isAuto = product.id == kAutoMonthlyId;
+    final label = isAuto ? 'Auto' : 'Assist';
+    const unit = '/ month';
+    final note = isAuto
+        ? 'Hands-off — every eligible signal auto-executed'
+        : 'One-tap — take any signal in a tap';
     return Opacity(
       opacity: _purchaseInFlight ? 0.6 : 1.0,
       child: Material(
@@ -355,15 +352,15 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
           child: Container(
             padding: const EdgeInsets.all(LuminSpacing.md),
             decoration: BoxDecoration(
-              color: isYearly
+              color: isAuto
                   ? LuminColors.accent.withOpacity(0.10)
                   : LuminColors.bgCard,
               borderRadius: BorderRadius.circular(LuminRadii.md),
               border: Border.all(
-                color: isYearly
+                color: isAuto
                     ? LuminColors.accent.withOpacity(0.50)
                     : LuminColors.cardBorder,
-                width: isYearly ? 1.5 : 1,
+                width: isAuto ? 1.5 : 1,
               ),
             ),
             child: Row(
@@ -382,7 +379,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                               fontWeight: FontWeight.w600,
                             ),
                           ),
-                          if (isYearly) ...[
+                          if (isAuto) ...[
                             const SizedBox(width: LuminSpacing.sm),
                             Container(
                               padding: const EdgeInsets.symmetric(
@@ -395,7 +392,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                                     BorderRadius.circular(LuminRadii.pill),
                               ),
                               child: const Text(
-                                'BEST VALUE',
+                                'RECOMMENDED',
                                 style: TextStyle(
                                   color: LuminColors.bgDeep,
                                   fontSize: 9,
@@ -467,16 +464,37 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
       child: Text(
-        'Crypto trading carries substantial risk of loss. Lumin Pro is a '
-        'market-analysis and education subscription — not financial advice; '
-        'past results do not guarantee future performance. Subscriptions are '
-        'billed through Google Play and renew automatically until cancelled; '
-        'manage or cancel anytime in Google Play › Subscriptions.',
+        'Crypto trading carries substantial risk of loss. Assist and Auto '
+        'are trade-automation tools that act on your own connected exchange '
+        'account with your own keys — not financial advice, and past results '
+        'do not guarantee future performance. You are responsible for your '
+        'trades. Subscriptions are billed through Google Play and renew '
+        'automatically until cancelled; manage or cancel anytime in Google '
+        'Play › Subscriptions.',
         style: TextStyle(
           color: LuminColors.textMuted.withOpacity(0.85),
           fontSize: 10,
           height: 1.5,
         ),
+      ),
+    );
+  }
+}
+
+/// Small column header used in the Free / Assist / Auto comparison table.
+class _ColHead extends StatelessWidget {
+  const _ColHead(this.label);
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      label,
+      style: const TextStyle(
+        color: LuminColors.textMuted,
+        fontSize: 9,
+        letterSpacing: 0.8,
+        fontWeight: FontWeight.w700,
       ),
     );
   }

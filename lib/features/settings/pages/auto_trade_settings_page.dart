@@ -13,6 +13,7 @@ import '../../../data/api_client.dart';
 import '../../../data/app_config.dart';
 import '../../../data/repository.dart';
 import '../../../shared/tokens.dart';
+import '../../../shared/widgets/free_tier_gate.dart';
 import '../../../shared/widgets/lumin_card.dart';
 import '../../../shared/widgets/preview_badge.dart';
 import '../../launch/region_gate.dart';
@@ -258,7 +259,72 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
             ),
         ],
       ),
-      body: RegionGate(child: _bodyFor(isLive)),
+      // Hands-off auto-execution is the Auto tier (B16). The engine also
+      // enforces this server-side (signal_dispatch only auto-trades AUTO
+      // users), so this gate is the UX layer — non-auto users see an
+      // upgrade card instead of controls that wouldn't fire for them.
+      body: canAuto(scope.tier)
+          ? RegionGate(child: _bodyFor(isLive))
+          : _autoUpsell(context),
+    );
+  }
+
+  /// Shown to users below the Auto tier — explains that hands-off
+  /// auto-execution is the ₹2000/mo Auto plan and routes to plans.
+  Widget _autoUpsell(BuildContext context) {
+    return ListView(
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.all(LuminSpacing.lg),
+      children: [
+        LuminCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.smart_toy_rounded,
+                  color: LuminColors.accent, size: 32),
+              const SizedBox(height: LuminSpacing.sm),
+              const Text(
+                'Hands-off auto-trade',
+                style: TextStyle(
+                  color: LuminColors.textPrimary,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: LuminSpacing.xs),
+              const Text(
+                'Auto-execution places every eligible signal on your '
+                'connected exchange with no manual effort — the Auto plan. '
+                'On the free and Assist plans you can still take any signal '
+                'yourself; Auto runs it for you.',
+                style: TextStyle(
+                  color: LuminColors.textSecondary,
+                  fontSize: 13,
+                  height: 1.45,
+                ),
+              ),
+              const SizedBox(height: LuminSpacing.lg),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: LuminColors.accent,
+                    foregroundColor: LuminColors.bgDeep,
+                    padding: const EdgeInsets.symmetric(
+                        vertical: LuminSpacing.md),
+                  ),
+                  onPressed: () => showUpgradeSheet(context),
+                  child: const Text(
+                    'See plans',
+                    style: TextStyle(
+                        fontSize: 14, fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
