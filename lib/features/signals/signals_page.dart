@@ -1260,42 +1260,10 @@ class _SignalDetailSheetState extends State<_SignalDetailSheet> {
             _PreTpCard(sig: sig),
             const SizedBox(height: LuminSpacing.md),
           ],
-          _DetailRow('Entry', formatPrice(sig.entry)),
-          if (_livePrice > 0)
-            _DetailRow(
-              'Current',
-              formatPrice(_livePrice),
-              valueColor: sig.status == 'ACTIVE' ? LuminColors.accent : null,
-            ),
-          _DetailRow(
-            'SL',
-            _isBreakeven(sig) ? 'BE (banked)' : formatPrice(sig.sl),
-          ),
-          _DetailRow('TP1', formatPrice(sig.tp1)),
-          _DetailRow('TP2', formatPrice(sig.tp2)),
-          _DetailRow(
-            'PnL',
-            formatPct(_pnlPct),
-            valueColor: _pnlPct >= 0 ? LuminColors.success : LuminColors.loss,
-          ),
-          _DetailRow('Confidence',
-              '${sig.confidence.toStringAsFixed(1)} (${sig.tier})'),
-          _DetailRow('Status', sig.status),
-          if (sig.holdMins != null) ...[
-            Builder(builder: (_) {
-              final isTerminal = const {
-                'SL_HIT', 'BREAKEVEN_EXIT', 'PROFIT_LOCKED',
-                'INVALIDATED', 'EXPIRED', 'CANCELLED',
-                'FULL_TP_HIT', 'TP3_HIT', 'CLOSED',
-              }.contains(sig.status);
-              return _DetailRow(
-                'Hold',
-                isTerminal
-                    ? '${formatAge(sig.holdMins!)} (closed ${formatAge(sig.minutesAgo)} ago)'
-                    : 'open ${formatAge(sig.holdMins!)}',
-              );
-            }),
-          ],
+          // Entry / SL / TP / meta collapsed into one bordered box (owner
+          // brief 2026-06-24) — matches the outcome card's framing.  PnL is
+          // omitted here; the outcome card above already carries it.
+          _TradeDetailsCard(sig: sig, livePrice: _livePrice),
           const SizedBox(height: LuminSpacing.lg),
           _managementSection(),
           const SizedBox(height: LuminSpacing.lg),
@@ -1619,6 +1587,80 @@ class _PriceCol extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Trade details collapsed into one bordered box (owner brief 2026-06-24:
+/// "fit entry SL tps etc in one box like that PnL").  Mirrors the outcome
+/// card's framing.  PnL is intentionally omitted — the outcome card above
+/// already carries the result / live PnL.
+class _TradeDetailsCard extends StatelessWidget {
+  const _TradeDetailsCard({required this.sig, required this.livePrice});
+  final MockSignal sig;
+  final double livePrice;
+
+  static const _terminal = {
+    'SL_HIT', 'BREAKEVEN_EXIT', 'PROFIT_LOCKED',
+    'INVALIDATED', 'EXPIRED', 'CANCELLED',
+    'FULL_TP_HIT', 'TP3_HIT', 'TP2_HIT', 'TP1_HIT', 'CLOSED',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final holdMins = sig.holdMins;
+    final closed = _terminal.contains(sig.status);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(
+        horizontal: LuminSpacing.md,
+        vertical: LuminSpacing.sm,
+      ),
+      decoration: BoxDecoration(
+        color: LuminColors.bgDeep,
+        borderRadius: BorderRadius.circular(LuminRadii.md),
+        border: Border.all(color: LuminColors.cardBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(bottom: LuminSpacing.xs),
+            child: Text(
+              'TRADE DETAILS',
+              style: TextStyle(
+                color: LuminColors.textMuted,
+                fontSize: 10,
+                letterSpacing: 1.4,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          _DetailRow('Entry', formatPrice(sig.entry)),
+          if (livePrice > 0)
+            _DetailRow(
+              'Current',
+              formatPrice(livePrice),
+              valueColor: sig.status == 'ACTIVE' ? LuminColors.accent : null,
+            ),
+          _DetailRow(
+            'SL',
+            _isBreakeven(sig) ? 'BE (banked)' : formatPrice(sig.sl),
+          ),
+          _DetailRow('TP1', formatPrice(sig.tp1)),
+          _DetailRow('TP2', formatPrice(sig.tp2)),
+          _DetailRow('Confidence',
+              '${sig.confidence.toStringAsFixed(1)} (${sig.tier})'),
+          _DetailRow('Status', sig.status),
+          if (holdMins != null)
+            _DetailRow(
+              'Hold',
+              closed
+                  ? '${formatAge(holdMins)} (closed ${formatAge(sig.minutesAgo)} ago)'
+                  : 'open ${formatAge(holdMins)}',
+            ),
+        ],
+      ),
     );
   }
 }
