@@ -3551,6 +3551,8 @@ class HttpRepository implements LuminRepository {
         preTpThresholdPct:
             (j['pre_tp_threshold_pct'] as num?)?.toDouble() ?? 0.0,
         preTpHit: j['pre_tp_hit'] as bool? ?? false,
+        maxFavorableExcursionPct:
+            (j['max_favorable_excursion_pct'] as num?)?.toDouble() ?? 0.0,
       );
 
   MockPosition _positionFromJson(Map<String, dynamic> j) => MockPosition(
