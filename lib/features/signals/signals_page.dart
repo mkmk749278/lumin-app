@@ -780,6 +780,13 @@ class _SignalCard extends StatelessWidget {
           ? (live - sig.entry) / sig.entry * 100
           : (sig.entry - live) / sig.entry * 100;
     }
+    // For TP-hit signals show the locked result at the TP price, not the
+    // current live pnl — the engine keeps pnl_pct updating post-TP1 for
+    // internal tracking but subscribers want to see what they banked.
+    if ((sig.status == 'TP1_HIT' || sig.status == 'TP2_HIT') &&
+        sig.bestTpPnlPct != 0.0) {
+      return sig.bestTpPnlPct;
+    }
     return sig.pnlPct;
   }
 
@@ -1002,6 +1009,22 @@ class _SignalCard extends StatelessWidget {
                       fontWeight: FontWeight.w600,
                     ),
                   ),
+                  // Max profit peak indicator — shown when the signal has
+                  // reached a higher point than the current result.  Persists
+                  // through TP1 hit and continues updating until SL is hit
+                  // (engine keeps max_favorable_excursion_pct live on TP-hit
+                  // signals; it's frozen only on terminal SL/expired exit).
+                  if (sig.maxFavorableExcursionPct > effectivePnl + 0.05) ...[
+                    const SizedBox(width: 5),
+                    Text(
+                      '↑${formatPct(sig.maxFavorableExcursionPct)}',
+                      style: TextStyle(
+                        color: LuminColors.success.withOpacity(0.70),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
                 ],
               );
             },

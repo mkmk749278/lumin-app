@@ -69,6 +69,7 @@ class MockSignal {
     this.preTpThresholdPct = 0.0,
     this.preTpHit = false,
     this.maxFavorableExcursionPct = 0.0,
+    this.bestTpPnlPct = 0.0,
   });
 
   final String id;
@@ -108,6 +109,12 @@ class MockSignal {
   /// the outcome summary highlights.  0.0 when offline / mock data.
   final double maxFavorableExcursionPct;
 
+  /// Locked profit % at the highest TP level hit (calculated at exact TP
+  /// price).  After TP1 this is the TP1 result; after TP2 the TP2 result.
+  /// 0.0 when no TP has been hit yet.  Displayed as the "banked" result for
+  /// TP-hit signals while [maxFavorableExcursionPct] tracks the continuing peak.
+  final double bestTpPnlPct;
+
   Map<String, dynamic> toMap() => {
     'id': id,
     'symbol': symbol,
@@ -130,6 +137,7 @@ class MockSignal {
     'preTpThresholdPct': preTpThresholdPct,
     'preTpHit': preTpHit,
     'maxFavorableExcursionPct': maxFavorableExcursionPct,
+    'bestTpPnlPct': bestTpPnlPct,
   };
 
   factory MockSignal.fromMap(Map<String, dynamic> m) => MockSignal(
@@ -155,6 +163,7 @@ class MockSignal {
     preTpHit: m['preTpHit'] as bool? ?? false,
     maxFavorableExcursionPct:
         (m['maxFavorableExcursionPct'] as num?)?.toDouble() ?? 0.0,
+    bestTpPnlPct: (m['bestTpPnlPct'] as num?)?.toDouble() ?? 0.0,
   );
 }
 
