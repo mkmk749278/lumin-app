@@ -48,6 +48,7 @@ class SignupPage extends StatefulWidget {
 class _SignupPageState extends State<SignupPage> {
   final _formKey = GlobalKey<FormState>();
   final _nameCtl = TextEditingController();
+  final _referralCtl = TextEditingController();
   CountryCode? _country;
   String _currency = 'USD';
   bool _acceptTerms = false;
@@ -71,6 +72,7 @@ class _SignupPageState extends State<SignupPage> {
   @override
   void dispose() {
     _nameCtl.dispose();
+    _referralCtl.dispose();
     super.dispose();
   }
 
@@ -150,6 +152,13 @@ class _SignupPageState extends State<SignupPage> {
         currency: _currency,
       );
       await repo.updateProfile(partial, acceptTerms: true);
+      final referral = _referralCtl.text.trim();
+      if (referral.isNotEmpty) {
+        // Best-effort: a stale/garbled invite code never blocks signup.
+        try {
+          await repo.claimReferralCode(referral);
+        } catch (_) {}
+      }
       await scope.auth?.markOnboarded();
       scope.auth?.cacheDisplayName(_nameCtl.text.trim());
       if (!mounted) return;
@@ -216,6 +225,8 @@ class _SignupPageState extends State<SignupPage> {
                 _currencyCard(),
                 const SizedBox(height: LuminSpacing.md),
                 _termsCard(),
+                const SizedBox(height: LuminSpacing.md),
+                _referralCard(),
                 if (_error != null) ...[
                   const SizedBox(height: LuminSpacing.md),
                   Text(
@@ -363,6 +374,36 @@ class _SignupPageState extends State<SignupPage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _referralCard() {
+    return LuminCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'INVITE CODE (OPTIONAL)',
+            style: TextStyle(
+              color: LuminColors.textMuted,
+              fontSize: 10,
+              letterSpacing: 1.2,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: LuminSpacing.sm),
+          TextFormField(
+            controller: _referralCtl,
+            textCapitalization: TextCapitalization.characters,
+            maxLength: 16,
+            style: const TextStyle(
+              color: LuminColors.textPrimary,
+              fontSize: 15,
+            ),
+            decoration: _inputDecoration('Have a friend\'s code?'),
+          ),
+        ],
       ),
     );
   }

@@ -19,6 +19,7 @@ import 'pages/auto_trade_settings_page.dart';
 import 'pages/invalidation_settings_page.dart';
 import 'pages/pretp_settings_page.dart';
 import 'pages/profile_settings_page.dart';
+import 'pages/referral_page.dart';
 import 'pages/subscription_page.dart';
 import 'pages/symbol_preference_page.dart';
 
@@ -93,6 +94,12 @@ class SettingsPage extends StatelessWidget {
                 label: 'Subscription',
                 subtitle: 'Free / Pro tiers',
                 onTap: () => _push(context, const SubscriptionPage()),
+              ),
+              _Row(
+                icon: Icons.person_add_alt_1_outlined,
+                label: 'Invite a friend',
+                subtitle: 'Share your code, track who joined',
+                onTap: () => _push(context, const ReferralPage()),
               ),
               _Row(
                 icon: Icons.info_outline,

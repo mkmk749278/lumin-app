@@ -35,6 +35,9 @@ dependencies:
   # source of truth.  Telegram-bot payment retired (Telegram banned
   # in-region).
   in_app_purchase: ^3.2.0
+  # Referral invite-a-friend (Phase 1, 2026-06-27) — native share sheet
+  # for sending the user's referral link via WhatsApp/SMS/etc.
+  share_plus: ^13.2.0
 
 dev_dependencies:
   flutter_test:
