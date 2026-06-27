@@ -61,6 +61,33 @@ class AutoModeStatus {
       );
 }
 
+/// Referral invite-a-friend (Phase 1, 2026-06-27) — this user's stable
+/// code plus how many friends have joined via it.  Free tracking only;
+/// no reward grant yet.
+class ReferralStats {
+  const ReferralStats({required this.code, required this.referredCount});
+  final String code;
+  final int referredCount;
+
+  factory ReferralStats.fromJson(Map<String, dynamic> j) => ReferralStats(
+        code: j['code'] as String,
+        referredCount: (j['referred_count'] as num?)?.toInt() ?? 0,
+      );
+}
+
+/// Result of redeeming someone else's referral code.
+class ReferralClaimResult {
+  const ReferralClaimResult({required this.ok, this.reason});
+  final bool ok;
+  final String? reason;
+
+  factory ReferralClaimResult.fromJson(Map<String, dynamic> j) =>
+      ReferralClaimResult(
+        ok: j['ok'] as bool? ?? false,
+        reason: j['reason'] as String?,
+      );
+}
+
 /// One day's bucket from the persistent PnL ledger.  Used by the chart
 /// widget on Pulse.
 class PnlPoint {
@@ -1453,6 +1480,19 @@ abstract class LuminRepository {
   /// dispatch for that symbol.
   Future<Map<String, String>> setSymbolManagement(String symbol, String mode);
 
+  /// This user's stable referral code + how many friends have joined via
+  /// it (``GET /api/referral/me``).  Phase 1: free invite/share tracking
+  /// only — no reward grant yet.  Generates the code on first call.
+  Future<ReferralStats> getReferralStats();
+
+  /// Redeem someone else's referral code (``POST /api/referral/claim``),
+  /// typically called once during onboarding.  Returns ``ok: false`` with
+  /// a ``reason`` (``invalid_code`` | ``self_referral`` |
+  /// ``already_redeemed``) rather than throwing — the caller decides how
+  /// loud to be about a failed claim (onboarding stays silent on failure
+  /// so a stale/garbled link never blocks signup).
+  Future<ReferralClaimResult> claimReferralCode(String code);
+
   /// Verify a Google Play subscription purchase server-side (B16 —
   /// ``POST /api/billing/play/verify``).  The app sends the opaque
   /// ``purchaseToken`` + ``productId`` after Play Billing confirms a
@@ -2604,6 +2644,30 @@ class MockRepository implements LuminRepository {
     return Map<String, String>.from(_mockSymbolManagement);
   }
 
+  // In-memory referral state for offline/preview mode. ``static`` so it
+  // persists for the lifetime of the const MockRepository.
+  static const String _mockReferralCode = 'PREV1EW';
+  static int _mockReferredCount = 0;
+
+  @override
+  Future<ReferralStats> getReferralStats() async => ReferralStats(
+        code: _mockReferralCode,
+        referredCount: _mockReferredCount,
+      );
+
+  @override
+  Future<ReferralClaimResult> claimReferralCode(String code) async {
+    final token = code.trim().toUpperCase();
+    if (token.isEmpty) {
+      return const ReferralClaimResult(ok: false, reason: 'invalid_code');
+    }
+    if (token == _mockReferralCode) {
+      return const ReferralClaimResult(ok: false, reason: 'self_referral');
+    }
+    _mockReferredCount += 1;
+    return const ReferralClaimResult(ok: true);
+  }
+
   @override
   Future<PlayVerifyResult> verifyPlayPurchase({
     required String productId,
@@ -3471,6 +3535,21 @@ class HttpRepository implements LuminRepository {
       body: {'symbol': symbol, 'mode': mode},
     );
     return _coerceManagementMap(j);
+  }
+
+  @override
+  Future<ReferralStats> getReferralStats() async {
+    final j = await client.get('/api/referral/me');
+    return ReferralStats.fromJson(j as Map<String, dynamic>);
+  }
+
+  @override
+  Future<ReferralClaimResult> claimReferralCode(String code) async {
+    final j = await client.post(
+      '/api/referral/claim',
+      body: {'code': code},
+    );
+    return ReferralClaimResult.fromJson(j as Map<String, dynamic>);
   }
 
   @override

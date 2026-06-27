@@ -35,6 +35,13 @@ dependencies:
   # source of truth.  Telegram-bot payment retired (Telegram banned
   # in-region).
   in_app_purchase: ^3.2.0
+  # Referral invite-a-friend (Phase 1, 2026-06-27) — native share sheet
+  # for sending the user's referral link via WhatsApp/SMS/etc.
+  # Pinned <13.0.0: share_plus 13.x bumps its win32 dependency to ^6.0.1,
+  # which conflicts with flutter_secure_storage ^9.2.0's win32 ^5.0.0
+  # requirement (via flutter_secure_storage_windows). 12.0.2 already has
+  # the SharePlus.instance.share(ShareParams(...)) API we use.
+  share_plus: ^12.0.2
 
 dev_dependencies:
   flutter_test:
