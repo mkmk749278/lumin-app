@@ -2,19 +2,20 @@
 ///
 /// Reached from (1) the Charts tab pair list (no overlay) and (2) a signal
 /// detail sheet's "Open chart" (overlay = that signal's entry/SL/TP/BE).
-/// History from Binance public klines, live last bar from the kline WS, both
-/// app→Binance direct. Rendered by the vendored Lightweight Charts WebView.
+/// History from Binance public klines; the live last bar is kept current by a
+/// short REST poll of the latest klines (reliable — reuses the same proven
+/// `klines()` path that loads history, so it can't silently freeze the way a
+/// background WebSocket can). All app→Binance direct. Rendered by the vendored
+/// Lightweight Charts WebView.
 library;
 
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../../data/binance_kline_socket.dart';
 import '../../data/binance_market_data.dart';
 import '../../data/mock_data.dart';
 import 'chart_webview.dart';
-import 'models/candle.dart';
 import 'models/chart_overlay.dart';
 
 class ChartPage extends StatefulWidget {
@@ -32,19 +33,21 @@ class ChartPage extends StatefulWidget {
 class _ChartPageState extends State<ChartPage> {
   final BinanceMarketData _md = BinanceMarketData();
   ChartBridge? _bridge;
-  BinanceKlineSocket? _socket;
-  StreamSubscription<Candle>? _sub;
+  Timer? _poll;
+  bool _ticking = false; // guards against overlapping poll fetches
 
   String _tf = '15m';
   bool _loading = true;
   String? _error;
 
+  /// How often the live last bar is refreshed from REST while the chart is open.
+  static const Duration _pollInterval = Duration(seconds: 2);
+
   static const List<String> _tfs = ['1m', '5m', '15m', '1h', '4h'];
 
   @override
   void dispose() {
-    _sub?.cancel();
-    _socket?.dispose();
+    _poll?.cancel();
     _md.close();
     super.dispose();
   }
@@ -72,7 +75,7 @@ class _ChartPageState extends State<ChartPage> {
       if (sig != null) {
         await bridge.setOverlay(ChartOverlay.fromSignal(sig));
       }
-      _openSocket();
+      _startPoll();
       if (mounted) setState(() => _loading = false);
     } catch (e) {
       if (mounted) {
@@ -84,17 +87,31 @@ class _ChartPageState extends State<ChartPage> {
     }
   }
 
-  void _openSocket() {
-    _sub?.cancel();
-    _socket?.dispose();
-    _socket = BinanceKlineSocket(
-      symbol: widget.symbol,
-      interval: BinanceMarketData.intervals[_tf] ?? '15m',
-    );
-    _sub = _socket!.stream().listen(
-      (c) => _bridge?.updateCandle(c),
-      onError: (_) {/* socket self-reconnects; REST history still shown */},
-    );
+  /// Keep the latest bar(s) live with a short REST poll. We re-fetch the last
+  /// two klines so both the in-progress bar and the just-closed bar finalise.
+  void _startPoll() {
+    _poll?.cancel();
+    _poll = Timer.periodic(_pollInterval, (_) => _tick());
+  }
+
+  Future<void> _tick() async {
+    final bridge = _bridge;
+    if (bridge == null || _ticking) return;
+    _ticking = true;
+    try {
+      final latest = await _md.klines(
+        symbol: widget.symbol,
+        interval: BinanceMarketData.intervals[_tf] ?? '15m',
+        limit: 2,
+      );
+      for (final c in latest) {
+        await bridge.updateCandle(c);
+      }
+    } catch (_) {
+      /* transient — next tick retries; history already on screen */
+    } finally {
+      _ticking = false;
+    }
   }
 
   void _onTf(String tf) {
