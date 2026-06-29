@@ -42,6 +42,11 @@ dependencies:
   # requirement (via flutter_secure_storage_windows). 12.0.2 already has
   # the SharePlus.instance.share(ShareParams(...)) API we use.
   share_plus: ^12.0.2
+  # Market Charts tab (2026-06-29) — WebView host for the vendored TradingView
+  # Lightweight Charts asset, fed by a live Binance kline WebSocket. App→Binance
+  # direct (public, no key); no load on the Lumin engine.
+  webview_flutter: ^4.7.0
+  web_socket_channel: ^3.0.1
 
 dev_dependencies:
   flutter_test:
@@ -50,3 +55,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    # Market Charts — vendored TradingView Lightweight Charts + WebView host.
+    - assets/chart/
