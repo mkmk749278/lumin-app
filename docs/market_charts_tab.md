@@ -1,0 +1,218 @@
+# Market Charts tab — design note
+
+**Status:** design — pending owner review
+**Branch (impl):** `feat/market-charts-tab` (not yet cut)
+**Companion (engine):** none required for v1 — overlay data already flows to the app
+**Owner directive:** the Agents tab isn't earning its slot; repurpose it for live market charts.
+
+---
+
+## 1. Goal
+
+Replace the **Agents** bottom-nav tab with a **Charts** tab: a markets browser →
+live candlestick chart with **our own signal levels drawn on it** (entry / SL /
+TP1·2·3 / break-even + a fired/closed marker). The differentiator vs any generic
+charting app is that a subscriber sees *Lumin's* trade plan on a real, live chart
+and watches it play out — the single biggest "this is legit" moment for a signals
+product.
+
+Honest framing: this is a **trust / retention** feature, not a signal-quality one.
+It does not make signals more profitable; it makes subscribers believe and stay
+(the retention→revenue link in the chain).
+
+## 2. Scope
+
+**In (v1):**
+- Charts tab replacing Agents (nav index 2); Agents demoted to a Menu row.
+- Pair selector defaulting to (a) pairs with a live/recent Lumin signal, (b) top
+  movers. Searchable.
+- Candlestick + volume via **TradingView Lightweight Charts™** in a WebView.
+- History from Binance public `/fapi/v1/klines`; live from Binance kline WS.
+- Timeframe chips: 1m / 5m / 15m / 1h / 4h.
+- Overlay: when the selected pair has a live/recent Lumin signal, draw entry / SL /
+  TP1·2·3 / BE price lines + entry/closed markers.
+
+**Out (later phases):**
+- Client-side indicators (EMA stack, RSI, MACD) — Phase 2.
+- Sparkline thumbnails in the Signals list — Phase 2.
+- User drawing tools (trendlines, fib) — **Phase 3 only if demanded**; requires
+  TradingView *Advanced Charts*, which is **not free behind a paywall** (commercial
+  licence ~$1.5–3k/mo). Explicitly deferred.
+
+## 3. Navigation change
+
+`lib/app/nav_shell.dart`:
+- `_destinations[2]`: icon `Icons.candlestick_chart_outlined` / `Icons.candlestick_chart`, label **"Charts"**.
+- `_tabAt(2)`: return `ChartsPage(key: _tabKeys[2])`.
+- Keep the existing lazy-mount (`_visited`) + `ForegroundRefreshable` plumbing —
+  `ChartsPage` implements `refreshFromForeground()` (re-pull klines, reopen WS).
+
+`lib/features/settings/settings_page.dart`:
+- Add a row under a new **INSIGHTS** section (or under ABOUT): "AI agents" →
+  `_push(context, const AgentsPage())`. Agents code is **kept**, just demoted —
+  the 713 LOC of per-agent stats stays accessible, off the prime tab.
+
+## 4. Architecture (data path)
+
+```
+Binance public REST  /fapi/v1/klines?symbol=&interval=&limit=1000   → history   ($0, no key)
+Binance public WS    wss://fstream.binance.com/ws/<sym>@kline_<tf>  → live bar   ($0, no key)
+        │   app → Binance directly (same pattern as binance_client.dart today)
+        ▼
+   WebView (assets/chart/index.html) running Lightweight Charts
+        ▲
+        │   overlay payload from the app's existing Lumin signal data
+        └─ entry / sl / tp1 / tp2 / tp3 / be price lines + markers
+```
+
+No data is served by our engine. Binance public klines/WS need no API key and
+flow device→Binance, so there is **no egress/compute cost on our infra** and **no
+per-user fan-out** — each device opens its own single WS for the visible chart.
+
+## 5. Charting tech + licensing
+
+**TradingView Lightweight Charts™** (vendored JS, ~50 KB) in `webview_flutter`.
+- Licence: **Apache-2.0** — free, commercial use OK *including behind our paywall*.
+  Obligation: a visible attribution ("Charts by TradingView", link to tradingview.com)
+  rendered in the chart footer. We will include it.
+- Not chosen: *Advanced Charts* (drawing tools / full indicators) — free only for
+  **public, non-paywalled** use; our paid app would require a commercial licence.
+  Deferred to Phase 3 pending real demand.
+- Not chosen: native Flutter libs (`fl_chart` weak candles; `syncfusion` community
+  licence is revenue/seat-gated; `k_chart` variable upkeep) — none give the genuine
+  TradingView look, and WebView keeps us on TradingView's own renderer.
+
+## 6. Dependencies to add
+
+- `webview_flutter: ^4.x` (+ platform setup already covered by Flutter).
+- Vendored asset: `assets/chart/lightweight-charts.standalone.production.js`
+  (pinned version, checked into the repo — no CDN at runtime, works offline-first
+  for the chart shell) + `assets/chart/index.html` + a tiny `chart_bridge.js`.
+- `pubspec.yaml`: register the `assets/chart/` directory.
+
+## 7. File layout
+
+```
+lib/features/charts/
+  charts_page.dart          # tab root: pair selector + chart host + TF chips
+  chart_controller.dart     # owns klines fetch, WS lifecycle, overlay state
+  chart_webview.dart        # WebView host + JS bridge (Dart side)
+  pair_picker.dart          # searchable list (live-signal pairs + movers)
+  models/
+    candle.dart             # OHLCV
+    chart_overlay.dart      # the overlay payload model (see §9)
+lib/data/
+  binance_client.dart       # EXTEND: klines() REST + klineSocket() WS
+assets/chart/
+  index.html  chart_bridge.js  lightweight-charts.standalone.production.js
+```
+
+## 8. WebView ↔ Flutter bridge contract
+
+One Flutter→JS direction via `controller.runJavaScript(...)`, one JS→Flutter via a
+single `JavaScriptChannel('LuminChart')`. All payloads are JSON strings.
+
+**Flutter → JS (commands):**
+
+| Command | Payload | Effect |
+|---|---|---|
+| `setCandles` | `{tf, candles:[{t,o,h,l,c,v}]}` | seed/replace the series (history load or TF switch) |
+| `updateCandle` | `{t,o,h,l,c,v}` | upsert the latest live bar (from WS) |
+| `setOverlay` | `ChartOverlay` (§9) | draw/replace our signal price-lines + markers |
+| `clearOverlay` | `{}` | remove overlay (pair has no live signal) |
+| `setTheme` | `{dark:bool}` | match app theme |
+
+**JS → Flutter (events on `LuminChart` channel):**
+
+| Event | Payload | Use |
+|---|---|---|
+| `ready` | `{}` | chart initialised → Dart sends first `setCandles` |
+| `visibleRangeChanged` | `{from,to}` | (Phase 2) lazy-load older history |
+| `error` | `{message}` | surface a graceful fallback state |
+
+Lifecycle: `chart_controller` opens the WS only while the Charts tab is foreground
+and visible; `refreshFromForeground()` + tab-deselect/dispose close it. WS
+reconnect with backoff; on failure the chart still shows REST history (degraded,
+not blank).
+
+## 9. Overlay data contract (`ChartOverlay`)
+
+Built entirely from the **Lumin signal object the app already receives** (no new
+engine endpoint). One overlay = one signal on this symbol.
+
+```jsonc
+{
+  "signal_id": "MVRTP-…",
+  "side": "LONG" | "SHORT",
+  "entry": 0.10799,
+  "sl": 0.11122,          // current stop (moves to entry once BE@+1% arms — reflects live state)
+  "be_armed": true,        // whether the +1% break-even shift has fired
+  "tp1": 0.10428,
+  "tp2": 0.10143,          // may be null under TP1-full default
+  "tp3": 0.09830,          // may be null
+  "opened_at_ms": 1719640000000,
+  "status": "ACTIVE" | "TP1_HIT" | "SL_HIT" | "CLOSED" | "INVALIDATED",
+  "markers": [             // optional lifecycle markers
+    {"t": 1719640000, "kind": "entry"},
+    {"t": 1719641800, "kind": "tp1"}
+  ]
+}
+```
+
+Rendering: horizontal price lines (entry = neutral, SL = red, TP = green, BE =
+amber when armed); markers at their candle time. Lines update live via `setOverlay`
+when the signal's stop moves (BE shift) or status changes.
+
+## 10. Pair selector sources
+
+- **Live-signal pairs:** from the app's existing signals/pulse data (already
+  fetched) — these float to the top, badged.
+- **Top movers:** Binance public `/fapi/v1/ticker/24hr` (one call, free, no key),
+  sorted by abs %change, liquidity-floored — same spirit as the engine's mover feed.
+- Search box filters the full futures symbol list (already available via
+  `binance_client.exchangeInfo`).
+
+## 11. Performance / limits
+
+- Lightweight Charts handles 100k+ points on-canvas; we load ≤1000 bars/TF.
+- One WebView, one chart, one WS at a time → low memory/battery. No charts in
+  scrolling lists (Phase 2 sparklines will be native, not WebView).
+- Binance klines REST ≤1500 bars/req; pagination deferred to Phase 2.
+- Pause WS on background (battery + mobile data).
+
+## 12. Cost
+
+- Lightweight Charts: **$0** (Apache-2.0) + attribution link.
+- Binance klines/WS: **$0**, no key, no egress on us.
+- Net cost = engineering time + maintaining the vendored JS pin. No recurring fees.
+
+## 13. Testing
+
+- Dart unit: `binance_client` klines parse + WS frame→candle mapping; `ChartOverlay`
+  build-from-signal mapping; controller WS lifecycle (open on foreground, close on
+  background/dispose).
+- Widget: `ChartsPage` renders pair picker + WebView host; TF chip switches series.
+- Manual on-device: history loads, live bar ticks, overlay lines match the signal,
+  theme + attribution visible, backgrounding closes the WS.
+
+## 14. Risks / open questions
+
+- **WebView bridge robustness** — main implementation risk; mitigated by the small,
+  explicit message contract (§8) and REST-only degraded mode.
+- **Binance WS rate limits on aggressive pair-switching** — debounce pair/TF changes
+  before (re)subscribing.
+- **Attribution placement** — must stay visible to satisfy the Apache-2.0/TradingView
+  terms; confirm a chart-footer line is acceptable to the owner.
+- **Open Q:** v1 default pair when the user has no live signals — top mover, or a
+  fixed BTCUSDT? (Proposed: top mover.)
+- **Open Q:** keep Agents under a new "INSIGHTS" Menu section vs fold into "ABOUT"?
+  (Proposed: new INSIGHTS section.)
+
+## 15. Phasing
+
+1. **v1 (this design):** Charts tab, pair selector, live candlestick + our overlay,
+   Agents → Menu.
+2. **v2:** client-side indicators (MA stack / RSI / volume) that *explain* a signal;
+   native sparklines in the Signals list; older-history pagination.
+3. **v3 (only on demand):** Advanced Charts + user drawing tools — re-evaluate the
+   commercial-licence cost at that point.
