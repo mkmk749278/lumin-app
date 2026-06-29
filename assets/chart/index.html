@@ -68,6 +68,7 @@
       chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
 
       var priceLines = [];   // our overlay price lines (entry/SL/TP/BE)
+      var lastBarTime = 0;   // newest candle time on the series (seconds)
 
       function clearOverlay() {
         for (var i = 0; i < priceLines.length; i++) {
@@ -89,14 +90,25 @@
       window.lumin = {
         setCandles: function (s) {
           var d = JSON.parse(s);
-          candleSeries.setData(d.candles || []);
+          var c = d.candles || [];
+          candleSeries.setData(c);
           if (d.volumes) volSeries.setData(d.volumes);
+          lastBarTime = c.length ? c[c.length - 1].time : 0;
           chart.timeScale().fitContent();
         },
         updateCandle: function (s) {
-          var d = JSON.parse(s);
-          if (d.candle) candleSeries.update(d.candle);
-          if (d.volume) volSeries.update(d.volume);
+          try {
+            var d = JSON.parse(s);
+            // Lightweight Charts' update() throws if time < the newest bar's
+            // time — drop stale frames so one bad tick can't wedge live updates.
+            if (d.candle && d.candle.time >= lastBarTime) {
+              candleSeries.update(d.candle);
+              lastBarTime = d.candle.time;
+              if (d.volume) volSeries.update(d.volume);
+            }
+          } catch (e) {
+            post({ event: "error", message: "updateCandle: " + e });
+          }
         },
         setOverlay: function (s) {
           var o = JSON.parse(s);

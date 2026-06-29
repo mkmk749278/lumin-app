@@ -11,8 +11,8 @@
 ///   GET /fapi/v1/ticker/24hr                       — all-symbol 24h stats
 ///   GET /fapi/v1/exchangeInfo                      — tradable perp universe
 ///
-/// Live updates come from the kline WebSocket and live in [BinanceKlineSocket]
-/// (added with the chart screen), not here.
+/// The chart keeps its last bar live by polling [klines] on a short interval
+/// (see `ChartPage`) — reliable and reusing this same path.
 library;
 
 import 'dart:convert';
