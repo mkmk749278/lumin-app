@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import '../../app/foreground_refresh.dart';
+import '../charts/chart_page.dart';
 import '../../data/app_config.dart';
 import '../../data/mock_data.dart';
 import '../../data/repository.dart';
@@ -1269,6 +1270,20 @@ class _SignalDetailSheetState extends State<_SignalDetailSheet> {
           Text(
             'Signal ${sig.id} • ${sig.agentName}',
             style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          const SizedBox(height: LuminSpacing.md),
+          // Open this symbol's live chart with our signal levels drawn on it.
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              icon: const Icon(Icons.candlestick_chart_outlined),
+              label: const Text('Open chart'),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => ChartPage(symbol: sig.symbol, signal: sig),
+                ),
+              ),
+            ),
           ),
           const SizedBox(height: LuminSpacing.lg),
           // Outcome summary — the centerpiece (owner brief 2026-06-24):
