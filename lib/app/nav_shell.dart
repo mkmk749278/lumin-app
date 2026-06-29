@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../features/agents/agents_page.dart';
+import '../features/charts/charts_page.dart';
 import '../features/pulse/pulse_page.dart';
 import '../features/settings/settings_page.dart';
 import '../features/signals/signals_page.dart';
@@ -52,7 +52,7 @@ class _NavShellState extends State<NavShell> with WidgetsBindingObserver {
   static const _destinations = <NavigationDestination>[
     NavigationDestination(icon: Icon(Icons.monitor_heart_outlined), selectedIcon: Icon(Icons.monitor_heart), label: 'Pulse'),
     NavigationDestination(icon: Icon(Icons.bolt_outlined), selectedIcon: Icon(Icons.bolt), label: 'Signals'),
-    NavigationDestination(icon: Icon(Icons.psychology_outlined), selectedIcon: Icon(Icons.psychology), label: 'Agents'),
+    NavigationDestination(icon: Icon(Icons.candlestick_chart_outlined), selectedIcon: Icon(Icons.candlestick_chart), label: 'Charts'),
     NavigationDestination(icon: Icon(Icons.swap_vert_outlined), selectedIcon: Icon(Icons.swap_vert), label: 'Trade'),
     NavigationDestination(icon: Icon(Icons.menu), selectedIcon: Icon(Icons.menu_open), label: 'Menu'),
   ];
@@ -113,7 +113,7 @@ class _NavShellState extends State<NavShell> with WidgetsBindingObserver {
       case 1:
         return SignalsPage(key: _tabKeys[1]);
       case 2:
-        return AgentsPage(key: _tabKeys[2]);
+        return ChartsPage(key: _tabKeys[2]);
       case 3:
         return TradePage(key: _tabKeys[3]);
       case 4:
