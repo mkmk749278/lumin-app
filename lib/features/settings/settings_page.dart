@@ -10,6 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../data/app_config.dart';
 import '../../data/legal_urls.dart';
 import '../../data/repository.dart';
+import '../agents/agents_page.dart';
 import '../auth/pages/phone_signin_page.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
@@ -76,6 +77,18 @@ class SettingsPage extends StatelessWidget {
                 subtitle: '24/7 execution from Lumin\'s engine (B18)',
                 onTap: () =>
                     _push(context, const ServerSideExecutionPage()),
+              ),
+            ],
+          ),
+          const SizedBox(height: LuminSpacing.md),
+          _section(
+            title: 'INSIGHTS',
+            rows: [
+              _Row(
+                icon: Icons.psychology_outlined,
+                label: 'AI agents',
+                subtitle: 'The 15 setup specialists + their live stats',
+                onTap: () => _push(context, const AgentsPage()),
               ),
             ],
           ),
