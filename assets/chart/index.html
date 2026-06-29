@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<!--
+  Lumin Market Charts — WebView host for TradingView Lightweight Charts™.
+  Realises the Flutter↔JS bridge in docs/market_charts_tab.md §8.
+
+  Flutter → JS:  window.lumin.<cmd>(jsonString)
+    setCandles({tf,candles:[{time,open,high,low,close}],volumes:[{time,value}]})
+    updateCandle({candle:{...}, volume:{time,value}})
+    setOverlay(ChartOverlay)        clearOverlay()        setTheme({dark})
+  JS → Flutter:  LuminChart.postMessage(jsonString)  -> {event, ...}
+    {event:'ready'}  {event:'error',message}  {event:'visibleRangeChanged',from,to}
+
+  Attribution ("Charts by TradingView", link to tradingview.com) is rendered
+  in the footer to satisfy the Apache-2.0 / Lightweight Charts terms.
+-->
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; background: #0e1116; overflow: hidden; }
+    #chart { position: absolute; top: 0; left: 0; right: 0; bottom: 16px; }
+    #attr { position: absolute; right: 6px; bottom: 2px; font: 10px -apple-system, Roboto, sans-serif; }
+    #attr a { color: #5d6b7a; text-decoration: none; }
+  </style>
+  <script src="lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+  <div id="chart"></div>
+  <div id="attr"><a href="https://www.tradingview.com/" target="_blank" rel="noopener">Charts by TradingView</a></div>
+  <script>
+    (function () {
+      "use strict";
+
+      function post(obj) {
+        try { LuminChart.postMessage(JSON.stringify(obj)); } catch (e) {}
+      }
+
+      var dark = true;
+      function theme() {
+        return dark
+          ? { bg: "#0e1116", text: "#9aa7b4", grid: "#1b2027", border: "#2a313a" }
+          : { bg: "#ffffff", text: "#33414f", grid: "#eef1f4", border: "#d6dde4" };
+      }
+
+      var el = document.getElementById("chart");
+      var chart = LightweightCharts.createChart(el, {
+        layout: { background: { color: theme().bg }, textColor: theme().text },
+        grid: { vertLines: { color: theme().grid }, horzLines: { color: theme().grid } },
+        rightPriceScale: { borderColor: theme().border },
+        timeScale: { borderColor: theme().border, timeVisible: true, secondsVisible: false },
+        crosshair: { mode: 0 },
+        autoSize: true,
+      });
+
+      var candleSeries = chart.addCandlestickSeries({
+        upColor: "#26a69a", downColor: "#ef5350",
+        borderUpColor: "#26a69a", borderDownColor: "#ef5350",
+        wickUpColor: "#26a69a", wickDownColor: "#ef5350",
+      });
+
+      // Volume as an overlay histogram pinned to the lower 18% of the pane.
+      var volSeries = chart.addHistogramSeries({
+        priceFormat: { type: "volume" },
+        priceScaleId: "vol",
+        color: "#3a4452",
+      });
+      chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+
+      var priceLines = [];   // our overlay price lines (entry/SL/TP/BE)
+
+      function clearOverlay() {
+        for (var i = 0; i < priceLines.length; i++) {
+          try { candleSeries.removePriceLine(priceLines[i]); } catch (e) {}
+        }
+        priceLines = [];
+        try { candleSeries.setMarkers([]); } catch (e) {}
+      }
+
+      function addLine(price, color, title) {
+        if (price == null || !isFinite(price) || price <= 0) return;
+        priceLines.push(candleSeries.createPriceLine({
+          price: price, color: color, lineWidth: 1,
+          lineStyle: LightweightCharts.LineStyle.Dashed,
+          axisLabelVisible: true, title: title,
+        }));
+      }
+
+      window.lumin = {
+        setCandles: function (s) {
+          var d = JSON.parse(s);
+          candleSeries.setData(d.candles || []);
+          if (d.volumes) volSeries.setData(d.volumes);
+          chart.timeScale().fitContent();
+        },
+        updateCandle: function (s) {
+          var d = JSON.parse(s);
+          if (d.candle) candleSeries.update(d.candle);
+          if (d.volume) volSeries.update(d.volume);
+        },
+        setOverlay: function (s) {
+          var o = JSON.parse(s);
+          clearOverlay();
+          addLine(o.entry, "#9aa7b4", "Entry");
+          addLine(o.sl, o.be_armed ? "#f0a020" : "#ef5350", o.be_armed ? "BE" : "SL");
+          addLine(o.tp1, "#26a69a", "TP1");
+          addLine(o.tp2, "#26a69a", "TP2");
+          addLine(o.tp3, "#26a69a", "TP3");
+          if (o.markers && o.markers.length) {
+            candleSeries.setMarkers(o.markers.map(function (m) {
+              var up = (o.side === "LONG");
+              return {
+                time: m.time,
+                position: up ? "belowBar" : "aboveBar",
+                color: m.kind === "entry" ? "#5d8bf4" : (m.kind === "sl" ? "#ef5350" : "#26a69a"),
+                shape: up ? "arrowUp" : "arrowDown",
+                text: (m.kind || "").toUpperCase(),
+              };
+            }));
+          }
+        },
+        clearOverlay: clearOverlay,
+        setTheme: function (s) {
+          dark = !!JSON.parse(s).dark;
+          var t = theme();
+          chart.applyOptions({
+            layout: { background: { color: t.bg }, textColor: t.text },
+            grid: { vertLines: { color: t.grid }, horzLines: { color: t.grid } },
+            rightPriceScale: { borderColor: t.border },
+            timeScale: { borderColor: t.border },
+          });
+          document.body.style.background = t.bg;
+        },
+      };
+
+      chart.timeScale().subscribeVisibleTimeRangeChange(function (r) {
+        if (r) post({ event: "visibleRangeChanged", from: r.from, to: r.to });
+      });
+
+      window.addEventListener("error", function (e) {
+        post({ event: "error", message: String(e.message || e) });
+      });
+
+      post({ event: "ready" });
+    })();
+  </script>
+</body>
+</html>
