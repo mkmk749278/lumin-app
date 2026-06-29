@@ -1,9 +1,14 @@
 # Market Charts tab — design note
 
-**Status:** design — pending owner review
-**Branch (impl):** `feat/market-charts-tab` (not yet cut)
+**Status:** approved (owner, 2026-06-29) — building
+**Branch (impl):** `feat/market-charts-tab`
 **Companion (engine):** none required for v1 — overlay data already flows to the app
 **Owner directive:** the Agents tab isn't earning its slot; repurpose it for live market charts.
+
+**Owner decisions (2026-06-29):**
+- Agents → demoted to a new **INSIGHTS** Menu section (kept, not deleted).
+- Charts tab = **the full Binance futures pair list** (every listed perp), searchable; tap a pair → chart. (Not a curated movers/live-signal list — show everything.)
+- **Two entry points into the chart screen:** (1) Charts tab pair list → market chart; (2) Signals tab → tap a signal → detail sheet → **"Open chart"** → same chart with our signal set (entry/SL/TP/BE) overlaid on the full chart.
 
 ---
 
@@ -23,14 +28,18 @@ It does not make signals more profitable; it makes subscribers believe and stay
 ## 2. Scope
 
 **In (v1):**
-- Charts tab replacing Agents (nav index 2); Agents demoted to a Menu row.
-- Pair selector defaulting to (a) pairs with a live/recent Lumin signal, (b) top
-  movers. Searchable.
+- Charts tab replacing Agents (nav index 2); Agents demoted to a Menu row (INSIGHTS).
+- **Full Binance futures pair list** (all listed perps from `exchangeInfo`),
+  searchable; tap → chart. Live-signal pairs badged + floated to top, but every
+  pair is present.
+- Shared **chart screen** `ChartPage(symbol, {signal})` reached from two places:
+  the pair list (no overlay) and the **signal detail sheet → "Open chart"** (with
+  that signal's overlay).
 - Candlestick + volume via **TradingView Lightweight Charts™** in a WebView.
 - History from Binance public `/fapi/v1/klines`; live from Binance kline WS.
 - Timeframe chips: 1m / 5m / 15m / 1h / 4h.
-- Overlay: when the selected pair has a live/recent Lumin signal, draw entry / SL /
-  TP1·2·3 / BE price lines + entry/closed markers.
+- Overlay (when a signal is passed in, or the pair has a live Lumin signal): entry /
+  SL / TP1·2·3 / BE price lines + entry/closed markers.
 
 **Out (later phases):**
 - Client-side indicators (EMA stack, RSI, MACD) — Phase 2.
@@ -48,9 +57,13 @@ It does not make signals more profitable; it makes subscribers believe and stay
   `ChartsPage` implements `refreshFromForeground()` (re-pull klines, reopen WS).
 
 `lib/features/settings/settings_page.dart`:
-- Add a row under a new **INSIGHTS** section (or under ABOUT): "AI agents" →
-  `_push(context, const AgentsPage())`. Agents code is **kept**, just demoted —
-  the 713 LOC of per-agent stats stays accessible, off the prime tab.
+- New **INSIGHTS** section with row "AI agents" → `_push(context, const AgentsPage())`.
+  Agents code is **kept**, just demoted — the 713 LOC of per-agent stats stays
+  accessible, off the prime tab.
+
+`lib/features/signals/signals_page.dart` (`_SignalDetailSheet`, already exists):
+- Add an **"Open chart"** action → `Navigator.push` to `ChartPage(symbol: sig.symbol,
+  signal: sig)`. The sheet already has the full signal; the overlay is built from it.
 
 ## 4. Architecture (data path)
 
@@ -163,14 +176,15 @@ Rendering: horizontal price lines (entry = neutral, SL = red, TP = green, BE =
 amber when armed); markers at their candle time. Lines update live via `setOverlay`
 when the signal's stop moves (BE shift) or status changes.
 
-## 10. Pair selector sources
+## 10. Pair list (Charts tab)
 
-- **Live-signal pairs:** from the app's existing signals/pulse data (already
-  fetched) — these float to the top, badged.
-- **Top movers:** Binance public `/fapi/v1/ticker/24hr` (one call, free, no key),
-  sorted by abs %change, liquidity-floored — same spirit as the engine's mover feed.
-- Search box filters the full futures symbol list (already available via
-  `binance_client.exchangeInfo`).
+- **Full universe:** every listed USDT-M perp from `binance_client.exchangeInfo`
+  (already available) — the tab shows *all* pairs, searchable.
+- **24h context per row:** `/fapi/v1/ticker/24hr` (one batched call, free, no key)
+  for last price + %change, so each row reads like a market list.
+- **Live-signal pairs** (from the app's existing signals data) are badged and
+  floated to the top, but the list is the whole board, not a curated subset.
+- Tap a row → `ChartPage(symbol)` (no overlay unless that symbol has a live signal).
 
 ## 11. Performance / limits
 
@@ -202,11 +216,9 @@ when the signal's stop moves (BE shift) or status changes.
 - **Binance WS rate limits on aggressive pair-switching** — debounce pair/TF changes
   before (re)subscribing.
 - **Attribution placement** — must stay visible to satisfy the Apache-2.0/TradingView
-  terms; confirm a chart-footer line is acceptable to the owner.
-- **Open Q:** v1 default pair when the user has no live signals — top mover, or a
-  fixed BTCUSDT? (Proposed: top mover.)
-- **Open Q:** keep Agents under a new "INSIGHTS" Menu section vs fold into "ABOUT"?
-  (Proposed: new INSIGHTS section.)
+  terms; a chart-footer "Charts by TradingView" line.
+- ~~Default pair~~ — resolved: Charts tab is a full list, the user picks; no default.
+- ~~Agents Menu placement~~ — resolved: new **INSIGHTS** section.
 
 ## 15. Phasing
 
