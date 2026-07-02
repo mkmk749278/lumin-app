@@ -49,6 +49,31 @@ void main() {
     });
   });
 
+  group('upsertCandles (live-poll merge)', () {
+    Candle c(int t, double close) => Candle(
+        time: t, open: close, high: close, low: close, close: close, volume: 1);
+
+    test('replaces the in-progress bar and appends the new one', () {
+      final base = [c(100, 1), c(200, 2)];
+      final out = upsertCandles(base, [c(200, 2.5), c(300, 3)]);
+      expect([for (final x in out) x.time], [100, 200, 300]);
+      expect(out[1].close, 2.5);
+      expect(out.last.close, 3);
+    });
+
+    test('bars older than anything held are dropped, not inserted', () {
+      final base = [c(200, 2), c(300, 3)];
+      final out = upsertCandles(base, [c(100, 1)]);
+      expect([for (final x in out) x.time], [200, 300]);
+    });
+
+    test('empty base takes the updates as-is; empty updates are a no-op', () {
+      expect(upsertCandles([], [c(100, 1)]).length, 1);
+      final base = [c(100, 1)];
+      expect(upsertCandles(base, []), same(base));
+    });
+  });
+
   group('MarketTicker.fromJson', () {
     test('parses 24h ticker fields with string numerics', () {
       final t = MarketTicker.fromJson({

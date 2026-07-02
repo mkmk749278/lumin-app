@@ -40,15 +40,18 @@ class BinanceMarketData {
   };
 
   /// OHLCV history for [symbol] at [interval] (Binance code, e.g. `15m`).
-  /// [limit] is clamped to Binance's 1500-row ceiling.
+  /// [limit] is clamped to Binance's 1500-row ceiling. Pass [endTimeMs] to
+  /// page back through older history (bars with openTime ≤ endTimeMs).
   Future<List<Candle>> klines({
     required String symbol,
     String interval = '15m',
     int limit = 500,
+    int? endTimeMs,
   }) async {
     final lim = limit.clamp(1, 1500);
+    final end = endTimeMs != null ? '&endTime=$endTimeMs' : '';
     final uri = Uri.parse(
-      '$baseUrl/fapi/v1/klines?symbol=$symbol&interval=$interval&limit=$lim',
+      '$baseUrl/fapi/v1/klines?symbol=$symbol&interval=$interval&limit=$lim$end',
     );
     final resp = await _http.get(uri).timeout(const Duration(seconds: 12));
     _ensureOk(resp, '/klines');

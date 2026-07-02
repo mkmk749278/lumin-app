@@ -4,8 +4,12 @@
   Realises the Flutter↔JS bridge in docs/market_charts_tab.md §8.
 
   Flutter → JS:  window.lumin.<cmd>(jsonString)
-    setCandles({tf,candles:[{time,open,high,low,close}],volumes:[{time,value}]})
+    setCandles({tf, candles:[{time,open,high,low,close}], volumes:[{time,value}],
+                precision, minMove, preserveView})
     updateCandle({candle:{...}, volume:{time,value}})
+    setIndicators({lines:[{id,color,title,data:[{time,value}]}],
+                   rsi:{data:[{time,value}]} | null, showVolume})
+    updateIndicators({points:[{id,time,value}], rsi:{time,value} | null})
     setOverlay(ChartOverlay)        clearOverlay()        setTheme({dark})
   JS → Flutter:  LuminChart.postMessage(jsonString)  -> {event, ...}
     {event:'ready'}  {event:'error',message}  {event:'visibleRangeChanged',from,to}
@@ -20,6 +24,13 @@
   <style>
     html, body { margin: 0; padding: 0; height: 100%; background: #0e1116; overflow: hidden; }
     #chart { position: absolute; top: 0; left: 0; right: 0; bottom: 16px; }
+    #legend {
+      position: absolute; top: 4px; left: 6px; z-index: 3; pointer-events: none;
+      font: 10px -apple-system, Roboto, sans-serif; color: #9aa7b4;
+      text-shadow: 0 0 2px #0e1116; white-space: nowrap;
+    }
+    #legend .up { color: #26a69a; }
+    #legend .dn { color: #ef5350; }
     #attr { position: absolute; right: 6px; bottom: 2px; font: 10px -apple-system, Roboto, sans-serif; }
     #attr a { color: #5d6b7a; text-decoration: none; }
   </style>
@@ -27,6 +38,7 @@
 </head>
 <body>
   <div id="chart"></div>
+  <div id="legend"></div>
   <div id="attr"><a href="https://www.tradingview.com/" target="_blank" rel="noopener">Charts by TradingView</a></div>
   <script>
     (function () {
@@ -43,7 +55,11 @@
           : { bg: "#ffffff", text: "#33414f", grid: "#eef1f4", border: "#d6dde4" };
       }
 
+      var UP = "#26a69a", DOWN = "#ef5350";
+      var VOL_UP = "rgba(38,166,154,0.45)", VOL_DOWN = "rgba(239,83,80,0.45)";
+
       var el = document.getElementById("chart");
+      var legendEl = document.getElementById("legend");
       var chart = LightweightCharts.createChart(el, {
         layout: { background: { color: theme().bg }, textColor: theme().text },
         grid: { vertLines: { color: theme().grid }, horzLines: { color: theme().grid } },
@@ -54,21 +70,55 @@
       });
 
       var candleSeries = chart.addCandlestickSeries({
-        upColor: "#26a69a", downColor: "#ef5350",
-        borderUpColor: "#26a69a", borderDownColor: "#ef5350",
-        wickUpColor: "#26a69a", wickDownColor: "#ef5350",
+        upColor: UP, downColor: DOWN,
+        borderUpColor: UP, borderDownColor: DOWN,
+        wickUpColor: UP, wickDownColor: DOWN,
       });
 
       // Volume as an overlay histogram pinned to the lower 18% of the pane.
       var volSeries = chart.addHistogramSeries({
         priceFormat: { type: "volume" },
         priceScaleId: "vol",
-        color: "#3a4452",
+        color: VOL_UP,
+        lastValueVisible: false,
+        priceLineVisible: false,
       });
       chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
 
-      var priceLines = [];   // our overlay price lines (entry/SL/TP/BE)
-      var lastBarTime = 0;   // newest candle time on the series (seconds)
+      var priceLines = [];    // our overlay price lines (entry/SL/TP/BE)
+      var lastBarTime = 0;    // newest candle time on the series (seconds)
+      var precision = 2;      // active price-axis decimals
+      var barsByTime = {};    // time -> {open,close} for volume colouring + legend
+      var indSeries = {};     // id -> line series (EMA/SMA overlays)
+      var rsiSeries = null;   // RSI line in the bottom band (swaps with volume)
+      var rsiGuides = [];     // 30/70 price lines on the RSI series
+      var lastCandle = null;  // newest candle payload (legend idle state)
+      var lastVolume = null;
+
+      function volColor(c) { return c.close >= c.open ? VOL_UP : VOL_DOWN; }
+
+      function fmt(v) {
+        return (v == null || !isFinite(v)) ? "—" : Number(v).toFixed(precision);
+      }
+      function fmtVol(v) {
+        if (v == null || !isFinite(v)) return "—";
+        if (v >= 1e9) return (v / 1e9).toFixed(2) + "B";
+        if (v >= 1e6) return (v / 1e6).toFixed(1) + "M";
+        if (v >= 1e3) return (v / 1e3).toFixed(0) + "K";
+        return Number(v).toFixed(0);
+      }
+
+      function renderLegend(candle, vol) {
+        if (!candle) { legendEl.innerHTML = ""; return; }
+        var up = candle.close >= candle.open;
+        var chg = candle.open ? ((candle.close - candle.open) / candle.open) * 100 : 0;
+        var cls = up ? "up" : "dn";
+        legendEl.innerHTML =
+          "O " + fmt(candle.open) + "  H " + fmt(candle.high) +
+          "  L " + fmt(candle.low) + "  C <span class='" + cls + "'>" + fmt(candle.close) +
+          " (" + (chg >= 0 ? "+" : "") + chg.toFixed(2) + "%)</span>" +
+          (vol != null ? "  V " + fmtVol(vol) : "");
+      }
 
       function clearOverlay() {
         for (var i = 0; i < priceLines.length; i++) {
@@ -91,10 +141,31 @@
         setCandles: function (s) {
           var d = JSON.parse(s);
           var c = d.candles || [];
+          if (d.precision != null) {
+            precision = d.precision;
+            candleSeries.applyOptions({
+              priceFormat: { type: "price", precision: d.precision, minMove: d.minMove || Math.pow(10, -d.precision) },
+            });
+          }
+          barsByTime = {};
+          for (var i = 0; i < c.length; i++) barsByTime[c[i].time] = c[i];
+          // Preserve the viewport across a data replace (history prepend) so
+          // the user's scroll position doesn't jump; initial loads fit content.
+          var saved = d.preserveView ? chart.timeScale().getVisibleRange() : null;
           candleSeries.setData(c);
-          if (d.volumes) volSeries.setData(d.volumes);
+          if (d.volumes) {
+            var vols = d.volumes.map(function (v) {
+              var bar = barsByTime[v.time];
+              return { time: v.time, value: v.value, color: bar ? volColor(bar) : VOL_UP };
+            });
+            volSeries.setData(vols);
+            lastVolume = vols.length ? vols[vols.length - 1].value : null;
+          }
           lastBarTime = c.length ? c[c.length - 1].time : 0;
-          chart.timeScale().fitContent();
+          lastCandle = c.length ? c[c.length - 1] : null;
+          if (saved) { try { chart.timeScale().setVisibleRange(saved); } catch (e) {} }
+          else chart.timeScale().fitContent();
+          renderLegend(lastCandle, lastVolume);
         },
         updateCandle: function (s) {
           try {
@@ -103,11 +174,84 @@
             // time — drop stale frames so one bad tick can't wedge live updates.
             if (d.candle && d.candle.time >= lastBarTime) {
               candleSeries.update(d.candle);
+              barsByTime[d.candle.time] = d.candle;
               lastBarTime = d.candle.time;
-              if (d.volume) volSeries.update(d.volume);
+              lastCandle = d.candle;
+              if (d.volume) {
+                volSeries.update({ time: d.volume.time, value: d.volume.value, color: volColor(d.candle) });
+                lastVolume = d.volume.value;
+              }
+              renderLegend(lastCandle, lastVolume);
             }
           } catch (e) {
             post({ event: "error", message: "updateCandle: " + e });
+          }
+        },
+        setIndicators: function (s) {
+          try {
+            var d = JSON.parse(s);
+            var lines = d.lines || [];
+            var keep = {};
+            for (var i = 0; i < lines.length; i++) {
+              var L = lines[i];
+              keep[L.id] = true;
+              if (!indSeries[L.id]) {
+                indSeries[L.id] = chart.addLineSeries({
+                  color: L.color, lineWidth: 1,
+                  priceLineVisible: false, lastValueVisible: false,
+                  crosshairMarkerVisible: false, title: L.title || "",
+                });
+              }
+              indSeries[L.id].setData(L.data || []);
+            }
+            for (var id in indSeries) {
+              if (!keep[id]) {
+                try { chart.removeSeries(indSeries[id]); } catch (e) {}
+                delete indSeries[id];
+              }
+            }
+            // RSI lives in the bottom band on its own overlay scale and swaps
+            // with the volume histogram (one bottom band on a phone screen).
+            if (d.rsi) {
+              if (!rsiSeries) {
+                rsiSeries = chart.addLineSeries({
+                  color: "#b18cf2", lineWidth: 1, priceScaleId: "rsi",
+                  priceLineVisible: false, lastValueVisible: true,
+                  crosshairMarkerVisible: false, title: "RSI 14",
+                });
+                chart.priceScale("rsi").applyOptions({ scaleMargins: { top: 0.78, bottom: 0 } });
+                rsiGuides = [30, 70].map(function (lvl) {
+                  return rsiSeries.createPriceLine({
+                    price: lvl, color: "#3a4452", lineWidth: 1,
+                    lineStyle: LightweightCharts.LineStyle.Dotted,
+                    axisLabelVisible: false, title: "",
+                  });
+                });
+              }
+              rsiSeries.setData(d.rsi.data || []);
+            } else if (rsiSeries) {
+              try { chart.removeSeries(rsiSeries); } catch (e) {}
+              rsiSeries = null;
+              rsiGuides = [];
+            }
+            volSeries.applyOptions({ visible: d.showVolume !== false });
+          } catch (e) {
+            post({ event: "error", message: "setIndicators: " + e });
+          }
+        },
+        updateIndicators: function (s) {
+          try {
+            var d = JSON.parse(s);
+            var pts = d.points || [];
+            for (var i = 0; i < pts.length; i++) {
+              var p = pts[i];
+              if (indSeries[p.id] && p.value != null) {
+                indSeries[p.id].update({ time: p.time, value: p.value });
+              }
+            }
+            if (d.rsi && rsiSeries && d.rsi.value != null) rsiSeries.update(d.rsi);
+          } catch (e) {
+            post({ event: "error", message: "updateIndicators: " + e });
           }
         },
         setOverlay: function (s) {
@@ -144,6 +288,13 @@
           document.body.style.background = t.bg;
         },
       };
+
+      chart.subscribeCrosshairMove(function (param) {
+        if (!param || !param.time) { renderLegend(lastCandle, lastVolume); return; }
+        var bar = barsByTime[param.time];
+        var v = param.seriesData && param.seriesData.get ? param.seriesData.get(volSeries) : null;
+        renderLegend(bar || lastCandle, v ? v.value : null);
+      });
 
       chart.timeScale().subscribeVisibleTimeRangeChange(function (r) {
         if (r) post({ event: "visibleRangeChanged", from: r.from, to: r.to });
