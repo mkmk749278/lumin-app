@@ -1,6 +1,9 @@
 # Market Charts tab — design note
 
-**Status:** approved (owner, 2026-06-29) — building
+**Status:** v1 shipped (#108–#111); Phase-2 + v1 gap-closure shipped 2026-07-02
+(price-axis precision fix, live-signal badges/overlay on the tab, EMA/MA/RSI
+indicators, older-history pagination, live overlay refresh, lifecycle pause,
+crosshair OHLC legend — see §16)
 **Branch (impl):** `feat/market-charts-tab`
 **Companion (engine):** none required for v1 — overlay data already flows to the app
 **Owner directive:** the Agents tab isn't earning its slot; repurpose it for live market charts.
@@ -223,8 +226,53 @@ when the signal's stop moves (BE shift) or status changes.
 ## 15. Phasing
 
 1. **v1 (this design):** Charts tab, pair selector, live candlestick + our overlay,
-   Agents → Menu.
+   Agents → Menu. **Shipped** (#108–#111; live bar via 2s REST poll, not WS — #111).
 2. **v2:** client-side indicators (MA stack / RSI / volume) that *explain* a signal;
-   native sparklines in the Signals list; older-history pagination.
+   native sparklines in the Signals list; older-history pagination. **Shipped
+   2026-07-02 except sparklines** (deferred — they change the owner-approved
+   signal-card layout, an owner design call; and each visible row costs a
+   device→Binance kline fetch that wants its own caching design).
 3. **v3 (only on demand):** Advanced Charts + user drawing tools — re-evaluate the
    commercial-licence cost at that point.
+
+## 16. Phase-2 + gap-closure changelog (2026-07-02)
+
+Audit of the shipped v1 found four real gaps; all fixed, plus the Phase-2
+features, in one change set:
+
+**Fixes (v1 gaps):**
+- **Price-axis precision** — Lightweight Charts defaults to 2 decimals, which
+  flattened every sub-dollar perp (a 0.107 alt rendered in 0.01 ≈ 9% steps and
+  the overlay's entry/SL/TP axis labels collapsed together). Precision is now
+  derived from the symbol's price magnitude (`chartPrecisionFor`, ~5 sig figs,
+  clamped [2,8]) and applied via `setCandles`.
+- **Live-signal pairs on the Charts tab (§10)** — was never wired. The tab now
+  watches the SWR-cached open-signals stream (dedups with the Signals tab's own
+  traffic), badges live-signal pairs (LONG/SHORT pill), floats them to the top,
+  and opens their chart **with** the signal overlay.
+- **Poll didn't pause on background (§11)** — the 2s kline poll now stops on
+  app pause/inactive and resumes (with an immediate catch-up tick) on resume
+  via `WidgetsBindingObserver`.
+- **Static overlay** — the overlay was drawn once at load; §9 promised live
+  updates. The signal is now re-read every 30s from the same SWR signals list,
+  so the BE shift moves the stop line to entry and status changes propagate.
+  Redraws only fire when the overlay payload actually changed.
+- **TF-switch race** — a load-generation counter discards stale async
+  completions; the poll is cancelled during a reload so a wrong-TF bar can't
+  merge into the new series.
+
+**Phase-2 features:**
+- **Indicators**, computed Dart-side (`indicators.dart`, unit-tested) and
+  rendered as line series: **EMA 21/50** (the engine's canonical
+  pullback/trend EMAs), **SMA 7/25/99** (the owner's mover-chart MA stack),
+  **RSI 14** (bottom band; swaps with the volume histogram — one bottom band
+  on a phone). Toggles persist across sessions (`shared_preferences`). Live
+  ticks push only each line's newest point over the bridge.
+- **Older-history pagination** — panning within ~30 bars of the oldest data
+  lazy-loads another 500 bars (`endTime` paging, ≤3000 bars) with the
+  viewport preserved across the data replace.
+- **Crosshair OHLC legend** — top-left readout of the hovered bar's
+  O/H/L/C, intrabar %change, and volume, at the derived precision.
+- **Volume colouring** — histogram bars now follow candle direction.
+
+Sparklines in the Signals list remain deferred (see §15 point 2).

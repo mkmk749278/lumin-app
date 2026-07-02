@@ -80,6 +80,30 @@ class Candle {
   }
 }
 
+/// Merge [updates] (typically the last 1–2 live bars from the poll) into
+/// [base] by bar time: matching times are replaced, newer bars appended,
+/// bars older than anything in [base] are dropped. Both inputs are
+/// time-ascending (the Binance kline order); the result stays ascending.
+List<Candle> upsertCandles(List<Candle> base, List<Candle> updates) {
+  if (updates.isEmpty) return base;
+  final out = List<Candle>.of(base);
+  for (final u in updates) {
+    if (out.isEmpty || u.time > out.last.time) {
+      out.add(u);
+      continue;
+    }
+    // Live updates only ever touch the tail — scan back from the end.
+    for (var i = out.length - 1; i >= 0; i--) {
+      if (out[i].time == u.time) {
+        out[i] = u;
+        break;
+      }
+      if (out[i].time < u.time) break; // gap bar we never held — drop it
+    }
+  }
+  return out;
+}
+
 /// One row of the Charts-tab pair list: a tradable perp + its 24h context.
 class MarketTicker {
   const MarketTicker({

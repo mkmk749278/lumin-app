@@ -72,6 +72,15 @@ class AppConfigScope extends StatefulWidget {
     return inh!._state;
   }
 
+  /// Like [of], but returns null when no scope is present — pages that can
+  /// also be built standalone (widget tests, chart screens) degrade
+  /// gracefully instead of asserting.
+  static _AppConfigScopeState? maybeOf(BuildContext context) {
+    return context
+        .dependOnInheritedWidgetOfExactType<_InheritedConfig>()
+        ?._state;
+  }
+
   @override
   State<AppConfigScope> createState() => _AppConfigScopeState();
 }
