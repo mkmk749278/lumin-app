@@ -1458,7 +1458,17 @@ class _OutcomeSummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final closed = _terminal.contains(sig.status);
     final pnlPositive = pnlPct >= 0;
-    final mfe = sig.maxFavorableExcursionPct;
+    // "Peak so far" is the max favorable excursion — by definition it can never
+    // sit *below* the current gain. Live PnL is computed app-side from the fresh
+    // 5s price poll (see _pnlPct), while the engine's recorded MFE rides in on
+    // the slower snapshot and, in isolated mode, from a different price sample —
+    // so rendering the raw engine field can show a peak beneath the current gain
+    // (owner-reported: Live +1.42% next to Peak +0.05%). For a live signal the
+    // app has itself just witnessed pnlPct, so clamp the peak up to at least it;
+    // a closed signal keeps the engine's recorded historical max — its excursion
+    // is over and can't be recomputed from the current price.
+    final rawMfe = sig.maxFavorableExcursionPct;
+    final mfe = closed ? rawMfe : (rawMfe > pnlPct ? rawMfe : pnlPct);
     final hasMfe = mfe > 0;
     // Lean positive (owner: "highlight positive results"): green whenever the
     // trade closed in profit OR ever reached a positive peak.
