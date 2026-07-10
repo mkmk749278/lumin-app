@@ -70,6 +70,7 @@ class MockSignal {
     this.preTpHit = false,
     this.maxFavorableExcursionPct = 0.0,
     this.bestTpPnlPct = 0.0,
+    this.isOpen,
   });
 
   final String id;
@@ -115,6 +116,26 @@ class MockSignal {
   /// TP-hit signals while [maxFavorableExcursionPct] tracks the continuing peak.
   final double bestTpPnlPct;
 
+  /// Engine truth for open vs closed (``is_open`` on /api/signals,
+  /// 2026-07-10).  The status string alone is ambiguous: under the
+  /// BE-then-TP1 default a signal CLOSES with status TP1_HIT, while under
+  /// the mover runner exit a TP1_HIT/TP2_HIT mover is still OPEN with the
+  /// trail riding the remainder.  Null when the payload predates the field
+  /// (older engine / mock data) — [effectiveIsOpen] falls back to the
+  /// legacy terminal-status heuristic.
+  final bool? isOpen;
+
+  static const Set<String> _terminalStatuses = {
+    'SL_HIT', 'BREAKEVEN_EXIT', 'PROFIT_LOCKED',
+    'INVALIDATED', 'EXPIRED', 'CANCELLED',
+    'FULL_TP_HIT', 'TP3_HIT', 'TP2_HIT', 'TP1_HIT', 'CLOSED',
+  };
+
+  /// Single open/closed truth every widget must use for labels, sorting,
+  /// dots and PnL display.  Prefers the engine's [isOpen]; falls back to
+  /// the terminal-status heuristic for payloads that predate the field.
+  bool get effectiveIsOpen => isOpen ?? !_terminalStatuses.contains(status);
+
   Map<String, dynamic> toMap() => {
     'id': id,
     'symbol': symbol,
@@ -138,6 +159,7 @@ class MockSignal {
     'preTpHit': preTpHit,
     'maxFavorableExcursionPct': maxFavorableExcursionPct,
     'bestTpPnlPct': bestTpPnlPct,
+    'isOpen': isOpen,
   };
 
   factory MockSignal.fromMap(Map<String, dynamic> m) => MockSignal(
@@ -164,6 +186,7 @@ class MockSignal {
     maxFavorableExcursionPct:
         (m['maxFavorableExcursionPct'] as num?)?.toDouble() ?? 0.0,
     bestTpPnlPct: (m['bestTpPnlPct'] as num?)?.toDouble() ?? 0.0,
+    isOpen: m['isOpen'] as bool?,
   );
 }
 
