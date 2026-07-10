@@ -3633,6 +3633,7 @@ class HttpRepository implements LuminRepository {
         maxFavorableExcursionPct:
             (j['max_favorable_excursion_pct'] as num?)?.toDouble() ?? 0.0,
         bestTpPnlPct: (j['best_tp_pnl_pct'] as num?)?.toDouble() ?? 0.0,
+        isOpen: j['is_open'] as bool?,
       );
 
   MockPosition _positionFromJson(Map<String, dynamic> j) => MockPosition(

@@ -212,7 +212,8 @@ class _SignalsPageState extends State<SignalsPage>
     if (data == null) return const [];
     final seen = <String>{};
     for (final s in data) {
-      if (s.status == 'ACTIVE') seen.add(s.symbol);
+      // Open runner movers (TP1_HIT/TP2_HIT, is_open) need live prices too.
+      if (s.effectiveIsOpen) seen.add(s.symbol);
     }
     return seen.toList();
   }
@@ -408,6 +409,16 @@ class _SignalsPageState extends State<SignalsPage>
       items = items
           .where((s) => _matchesSubFilter(s, _subFilter))
           .toList(growable: false);
+    }
+    if (_filter == _SignalFilter.all) {
+      // Open trades first (owner ask, 2026-07-10) — the All feed is the
+      // default view and live positions must never scroll below closed
+      // history.  Stable partition (not sort) preserves the API's
+      // newest-first order inside each group.
+      items = [
+        ...items.where((s) => s.effectiveIsOpen),
+        ...items.where((s) => !s.effectiveIsOpen),
+      ];
     }
     if (items.isEmpty) {
       return _SignalsEmpty(
@@ -772,30 +783,28 @@ class _SignalCard extends StatelessWidget {
 
   /// Price helpers used inside [ValueListenableBuilder] — kept as
   /// static helpers so they don't capture any stale widget state.
+  /// Open/closed comes from [MockSignal.effectiveIsOpen] (engine truth) —
+  /// a runner mover at TP1_HIT/TP2_HIT is still OPEN and keeps its live
+  /// price/PnL, while a BE-then-TP1 close at TP1_HIT is terminal.
   static double _effectivePrice(MockSignal sig, double live) =>
-      (sig.status == 'ACTIVE' && live > 0) ? live : sig.currentPrice;
+      (sig.effectiveIsOpen && live > 0) ? live : sig.currentPrice;
 
   static double _effectivePnl(MockSignal sig, double live) {
-    if (sig.status == 'ACTIVE' && live > 0 && sig.entry > 0) {
+    if (sig.effectiveIsOpen && live > 0 && sig.entry > 0) {
       return sig.direction == 'LONG'
           ? (live - sig.entry) / sig.entry * 100
           : (sig.entry - live) / sig.entry * 100;
     }
-    // For TP-hit signals show the locked result at the TP price, not the
-    // current live pnl — the engine keeps pnl_pct updating post-TP1 for
-    // internal tracking but subscribers want to see what they banked.
-    if ((sig.status == 'TP1_HIT' || sig.status == 'TP2_HIT') &&
+    // CLOSED TP-hit signals show the locked result at the TP price —
+    // what subscribers banked.  An OPEN TP-hit signal (runner riding the
+    // trail) keeps showing the live PnL above.
+    if (!sig.effectiveIsOpen &&
+        (sig.status == 'TP1_HIT' || sig.status == 'TP2_HIT') &&
         sig.bestTpPnlPct != 0.0) {
       return sig.bestTpPnlPct;
     }
     return sig.pnlPct;
   }
-
-  static const _terminalStatuses = {
-    'SL_HIT', 'BREAKEVEN_EXIT', 'PROFIT_LOCKED',
-    'INVALIDATED', 'EXPIRED', 'CANCELLED',
-    'FULL_TP_HIT', 'TP3_HIT', 'TP2_HIT', 'TP1_HIT', 'CLOSED',
-  };
 
   @override
   Widget build(BuildContext context) {
@@ -967,17 +976,22 @@ class _SignalCard extends StatelessWidget {
                   ),
                   const SizedBox(width: LuminSpacing.sm),
                   Builder(builder: (_) {
-                    final isTerminal = const {
-                      'SL_HIT', 'BREAKEVEN_EXIT', 'PROFIT_LOCKED',
-                      'INVALIDATED', 'EXPIRED', 'CANCELLED',
-                      'FULL_TP_HIT', 'TP3_HIT', 'CLOSED',
-                    }.contains(sig.status);
+                    // Engine is_open truth: a TP1_HIT can be a terminal
+                    // BE-then-TP1 close OR an open runner mover — the
+                    // status string alone can't say which (owner-reported
+                    // "closed EIGENUSDT shows open 8h" / "open MVLLUSDT
+                    // reads closed at TP1", 2026-07-10).
+                    final isOpen = sig.effectiveIsOpen;
                     final holdMins = sig.holdMins;
+                    final runnerRiding = isOpen &&
+                        (sig.status == 'TP1_HIT' || sig.status == 'TP2_HIT');
                     final String timeLabel;
-                    if (isTerminal && holdMins != null) {
+                    if (!isOpen && holdMins != null) {
                       timeLabel = '• held ${formatAge(holdMins)} · ${formatAge(sig.minutesAgo)} ago';
-                    } else if (!isTerminal && holdMins != null) {
-                      timeLabel = '• open ${formatAge(holdMins)}';
+                    } else if (isOpen && holdMins != null) {
+                      timeLabel = runnerRiding
+                          ? '• open ${formatAge(holdMins)} · runner riding'
+                          : '• open ${formatAge(holdMins)}';
                     } else {
                       timeLabel = '• ${formatAge(sig.minutesAgo)} ago';
                     }
@@ -1034,10 +1048,9 @@ class _SignalCard extends StatelessWidget {
       ),
     );
     // Closed signals stay visible in the feed but faded out (owner brief
-    // 2026-06-24) — the story stays, the eye goes to live signals.
-    return _terminalStatuses.contains(sig.status)
-        ? Opacity(opacity: 0.55, child: card)
-        : card;
+    // 2026-06-24) — the story stays, the eye goes to live signals.  A runner
+    // mover at TP1_HIT is OPEN (engine is_open) and must not fade.
+    return sig.effectiveIsOpen ? card : Opacity(opacity: 0.55, child: card);
   }
 
   void _showDetail(BuildContext context) {
@@ -1448,15 +1461,11 @@ class _OutcomeSummaryCard extends StatelessWidget {
   final MockSignal sig;
   final double pnlPct;
 
-  static const _terminal = {
-    'SL_HIT', 'BREAKEVEN_EXIT', 'PROFIT_LOCKED',
-    'INVALIDATED', 'EXPIRED', 'CANCELLED',
-    'FULL_TP_HIT', 'TP3_HIT', 'TP2_HIT', 'TP1_HIT', 'CLOSED',
-  };
-
   @override
   Widget build(BuildContext context) {
-    final closed = _terminal.contains(sig.status);
+    // Engine is_open truth — a TP1_HIT runner mover is still OPEN (trail
+    // riding); a BE-then-TP1 close at TP1_HIT is terminal.
+    final closed = !sig.effectiveIsOpen;
     final pnlPositive = pnlPct >= 0;
     // "Peak so far" is the max favorable excursion — by definition it can never
     // sit *below* the current gain. Live PnL is computed app-side from the fresh
@@ -1649,16 +1658,11 @@ class _TradeDetailsCard extends StatelessWidget {
   final MockSignal sig;
   final double livePrice;
 
-  static const _terminal = {
-    'SL_HIT', 'BREAKEVEN_EXIT', 'PROFIT_LOCKED',
-    'INVALIDATED', 'EXPIRED', 'CANCELLED',
-    'FULL_TP_HIT', 'TP3_HIT', 'TP2_HIT', 'TP1_HIT', 'CLOSED',
-  };
-
   @override
   Widget build(BuildContext context) {
     final holdMins = sig.holdMins;
-    final closed = _terminal.contains(sig.status);
+    // Engine is_open truth (see _OutcomeSummaryCard).
+    final closed = !sig.effectiveIsOpen;
     // Flat cell list (Current/Hold are conditional), laid out two-per-row so
     // the box fills the full width instead of leaving the right half empty.
     final cells = <Widget>[
