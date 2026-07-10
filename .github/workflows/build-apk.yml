@@ -300,8 +300,14 @@ jobs:
           fi
 
       - name: Build release APK
+        # --obfuscate (audit F-12/M-1): the app gates the paid Assist tier
+        # client-side and composes Binance orders on-device — plain Dart
+        # symbols made both trivially readable/patchable.  Symbol maps are
+        # uploaded as an artifact below so release crash traces remain
+        # de-obfuscatable (flutter symbolize -d <trace> -i <symbols>).
         run: |
           flutter build apk --release \
+            --obfuscate --split-debug-info=build/symbols/apk \
             --build-name=${{ github.ref_name }} \
             --build-number=${{ github.run_number }}
 
@@ -423,8 +429,11 @@ jobs:
       # and ship the AAB only as a downloadable artifact (Play
       # uploads happen manually via the Play Console UI for v1).
       - name: Build release AAB
+        # Same obfuscation as the APK (audit F-12) — the Play build is the
+        # one real users install, it must not be the un-obfuscated variant.
         run: |
           flutter build appbundle --release \
+            --obfuscate --split-debug-info=build/symbols/aab \
             --dart-define=LUMIN_DISTRIBUTION=play \
             --build-name=${{ github.ref_name }} \
             --build-number=${{ github.run_number }}
@@ -441,6 +450,16 @@ jobs:
           name: lumin-aab-${{ github.run_number }}
           path: build/app/outputs/bundle/release/lumin-*.aab
           retention-days: 30
+
+      - name: Upload obfuscation symbol maps
+        # Without these, a production crash trace from an obfuscated build
+        # is undecodable.  Keep 90 days — longer than the release cadence.
+        uses: actions/upload-artifact@v4
+        with:
+          name: lumin-symbols-${{ github.run_number }}
+          path: build/symbols/
+          retention-days: 90
+          if-no-files-found: error
 
       - name: Attach APK to existing GitHub Release (manual release event)
         if: github.event_name == 'release'
