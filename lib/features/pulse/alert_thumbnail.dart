@@ -19,6 +19,7 @@ import '../../data/klines_thumbnail_service.dart';
 import '../../data/market_alert.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/shimmer.dart';
+import '../charts/mini_chart_paint.dart';
 import '../charts/models/alert_overlay.dart';
 import '../charts/models/candle.dart';
 
@@ -250,16 +251,14 @@ class AlertThumbnailPainter extends CustomPainter {
   AlertThumbnailPainter(this.data);
   final ThumbData data;
 
-  static const _up = Color(0xFF26A69A);
-  static const _down = Color(0xFFEF5350);
   static const _neutral = Color(0xFFF6C85F);
 
   Color get _biasColor {
     switch (data.bias) {
       case 'BULLISH':
-        return _up;
+        return kMiniUp;
       case 'BEARISH':
-        return _down;
+        return kMiniDown;
       default:
         return _neutral;
     }
@@ -271,27 +270,15 @@ class AlertThumbnailPainter extends CustomPainter {
     if (candles.isEmpty || size.width <= 0 || size.height <= 0) return;
 
     // y-range over everything painted, with 8% breathing room.
-    var minP = double.infinity;
-    var maxP = -double.infinity;
-    for (final c in candles) {
-      if (c.low < minP) minP = c.low;
-      if (c.high > maxP) maxP = c.high;
-    }
-    for (final v in [
+    final range = miniPriceRange(candles, [
       data.zoneLow,
       data.zoneHigh,
       data.levelPrice,
       data.divergence?.$2,
       data.divergence?.$4,
-    ]) {
-      if (v == null) continue;
-      if (v < minP) minP = v;
-      if (v > maxP) maxP = v;
-    }
-    if (!minP.isFinite || !maxP.isFinite) return;
-    final pad = (maxP - minP) == 0 ? maxP * 0.01 + 1e-9 : (maxP - minP) * 0.08;
-    minP -= pad;
-    maxP += pad;
+    ]);
+    if (range == null) return;
+    final (minP, maxP) = range;
 
     // x: index-linear with a right gutter so the zone visibly "runs on".
     final gutter = size.width * 0.10;
@@ -330,27 +317,7 @@ class AlertThumbnailPainter extends CustomPainter {
     }
 
     // 3. Candles.
-    final bodyW = (xStep * 0.6).clamp(1.0, 6.0);
-    for (var i = 0; i < candles.length; i++) {
-      final c = candles[i];
-      final x = xAt(i);
-      final color = c.close >= c.open ? _up : _down;
-      final paint = Paint()
-        ..color = color
-        ..strokeWidth = 1;
-      canvas.drawLine(Offset(x, yAt(c.high)), Offset(x, yAt(c.low)), paint);
-      final top = yAt(c.open >= c.close ? c.open : c.close);
-      final bottom = yAt(c.open >= c.close ? c.close : c.open);
-      canvas.drawRect(
-        Rect.fromLTRB(
-          x - bodyW / 2,
-          top,
-          x + bodyW / 2,
-          bottom - top < 1 ? top + 1 : bottom, // dojis stay visible
-        ),
-        paint,
-      );
-    }
+    paintMiniCandles(canvas, candles, xAt, yAt, xStep);
 
     // 4. Divergence trend line.
     final div = data.divergence;
