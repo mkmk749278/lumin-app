@@ -14,6 +14,7 @@ import 'app/nav_shell.dart';
 import 'data/app_config.dart';
 import 'data/auth_service.dart';
 import 'data/consent_storage.dart';
+import 'data/notification_service.dart';
 import 'features/auth/pages/phone_signin_page.dart';
 import 'features/onboarding/pages/welcome_consent_page.dart';
 import 'features/onboarding/pages/welcome_page.dart';
@@ -29,6 +30,9 @@ Future<void> main() async {
   // bare AuthService with a throwaway base URL — we only need the
   // secure-storage delete; no network call happens here.
   await AuthService(baseUrl: '').cleanupLegacyJwtStorage();
+  // FCM topic subscriptions + tap routing.  Never throws — a
+  // Play-Services hiccup must not block app start.
+  await NotificationService.instance.init();
   final cfg = await AppConfig.load();
   runApp(LuminApp(initialConfig: cfg));
 }
@@ -46,6 +50,8 @@ class LuminApp extends StatelessWidget {
         title: 'Lumin',
         debugShowCheckedModeBanner: false,
         theme: buildLuminTheme(),
+        // Foreground FCM pushes surface as SnackBars via this key.
+        scaffoldMessengerKey: NotificationService.instance.messengerKey,
         home: const _FirstRunGate(),
       ),
     );

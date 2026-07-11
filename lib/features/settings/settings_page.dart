@@ -15,6 +15,7 @@ import '../auth/pages/phone_signin_page.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
 import 'pages/about_page.dart';
+import 'pages/notification_settings_page.dart';
 import 'pages/server_side_execution_page.dart';
 import 'pages/auto_trade_settings_page.dart';
 import 'pages/invalidation_settings_page.dart';
@@ -96,6 +97,13 @@ class SettingsPage extends StatelessWidget {
           _section(
             title: 'ACCOUNT',
             rows: [
+              _Row(
+                icon: Icons.notifications_outlined,
+                label: 'Notifications',
+                subtitle: 'Push for signals + market alerts',
+                onTap: () =>
+                    _push(context, const NotificationSettingsPage()),
+              ),
               _Row(
                 icon: Icons.person_outline,
                 label: 'Profile',

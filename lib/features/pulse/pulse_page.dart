@@ -13,6 +13,7 @@ import 'package:flutter/material.dart';
 import '../../app/foreground_refresh.dart';
 import '../../data/app_config.dart';
 import '../../data/mock_data.dart';
+import '../../data/notification_service.dart';
 import '../../data/repository.dart';
 import '../../shared/format.dart';
 import '../../shared/tokens.dart';
@@ -20,6 +21,7 @@ import '../../shared/widgets/lumin_card.dart';
 import '../../shared/widgets/preview_badge.dart';
 import '../../shared/widgets/shimmer.dart';
 import '../trade/paper_trades_page.dart';
+import 'alerts_tab.dart';
 
 // _PulseBundle promoted to ``PulseBundle`` in lib/data/repository.dart
 // (Phase 2b perf push) so the repository can cache the assembled bundle
@@ -33,6 +35,7 @@ class PulsePage extends StatefulWidget {
 }
 
 class _PulsePageState extends State<PulsePage>
+    with SingleTickerProviderStateMixin
     implements ForegroundRefreshable {
   // Stream-based load (Phase 2b perf push) — yields the cached
   // PulseBundle synchronously on subscribe when HttpRepository has a
@@ -53,6 +56,33 @@ class _PulsePageState extends State<PulsePage>
   /// Same pattern as TradePage._refreshDone.
   Completer<void>? _refreshDone;
 
+  /// Reaches the Alerts top-tab's state so the foreground-refresh hook
+  /// can silently refetch the feed alongside the Dashboard bundle.
+  final GlobalKey<AlertsTabState> _alertsKey = GlobalKey<AlertsTabState>();
+
+  /// Dashboard / Alerts top tabs.  Explicit controller (not
+  /// DefaultTabController) so a notification tap routed as
+  /// `pulse_alerts` can flip straight to the Alerts tab.
+  late final TabController _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+    NotificationService.instance.pendingRoute
+        .addListener(_onNotificationRoute);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onNotificationRoute());
+  }
+
+  void _onNotificationRoute() {
+    if (!mounted) return;
+    if (NotificationService.instance.pendingRoute.value != 'pulse_alerts') {
+      return;
+    }
+    NotificationService.instance.pendingRoute.value = null;
+    _tabController.animateTo(1);
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -65,6 +95,9 @@ class _PulsePageState extends State<PulsePage>
 
   @override
   void dispose() {
+    NotificationService.instance.pendingRoute
+        .removeListener(_onNotificationRoute);
+    _tabController.dispose();
     _sub?.cancel();
     super.dispose();
   }
@@ -105,6 +138,8 @@ class _PulsePageState extends State<PulsePage>
     if (!mounted) return;
     AppConfigScope.of(context).repo.invalidatePulseBundleCache();
     _resubscribe();
+    // Alerts top-tab refreshes silently too (no-op when never mounted).
+    _alertsKey.currentState?.refreshSilently();
   }
 
   Future<void> _refresh() async {
@@ -134,20 +169,50 @@ class _PulsePageState extends State<PulsePage>
   Widget build(BuildContext context) {
     final scope = AppConfigScope.of(context);
     final displayName = scope.auth?.currentDisplayName();
+    // Two top tabs: Dashboard (the original Pulse content) and Alerts
+    // (100eyes-class market alert feed).  AlertsTab uses keep-alive so
+    // both stay warm across swipes.
     return Scaffold(
       appBar: AppBar(
         title: _GreetingTitle(displayName: displayName),
         titleSpacing: LuminSpacing.lg,
-      ),
-      body: RefreshIndicator(
-        color: LuminColors.accent,
-        onRefresh: _refresh,
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 200),
-          switchInCurve: Curves.easeOut,
-          switchOutCurve: Curves.easeIn,
-          child: _buildBody(isLive: scope.repo.isLive),
+        bottom: TabBar(
+          controller: _tabController,
+          indicatorColor: LuminColors.accent,
+          indicatorWeight: 2.5,
+          labelColor: LuminColors.accent,
+          unselectedLabelColor: LuminColors.textMuted,
+          labelStyle: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.4,
+          ),
+          unselectedLabelStyle: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.4,
+          ),
+          tabs: const [
+            Tab(height: 40, text: 'Dashboard'),
+            Tab(height: 40, text: 'Alerts'),
+          ],
         ),
+      ),
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          RefreshIndicator(
+            color: LuminColors.accent,
+            onRefresh: _refresh,
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 200),
+              switchInCurve: Curves.easeOut,
+              switchOutCurve: Curves.easeIn,
+              child: _buildBody(isLive: scope.repo.isLive),
+            ),
+          ),
+          AlertsTab(key: _alertsKey),
+        ],
       ),
     );
   }

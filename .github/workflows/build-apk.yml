@@ -82,6 +82,17 @@ jobs:
           fi
           grep REQUEST_INSTALL_PACKAGES "$MANIFEST" || (echo "FAIL: missing" && exit 1)
 
+      - name: Inject POST_NOTIFICATIONS permission for FCM push (Android 13+)
+        run: |
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          if ! grep -q "android.permission.POST_NOTIFICATIONS" "$MANIFEST"; then
+            sed -i "s|<application|<uses-permission android:name=\"android.permission.POST_NOTIFICATIONS\" />\n    <application|" "$MANIFEST"
+            echo "Added POST_NOTIFICATIONS permission"
+          else
+            echo "POST_NOTIFICATIONS permission already present"
+          fi
+          grep POST_NOTIFICATIONS "$MANIFEST" || (echo "FAIL: missing" && exit 1)
+
       - name: Inject google-services.json (if secret is set)
         id: gs_json
         env:

@@ -13,6 +13,10 @@ dependencies:
   cupertino_icons: ^1.0.8
   firebase_core: ^3.6.0
   firebase_auth: ^5.3.1
+  # FCM push (2026-07-11) — topic-based notifications for market alerts
+  # (`alerts`) and signal lifecycle (`signals`).  Engine sends via
+  # firebase-admin (src/push_notifications.py); no device-token registry.
+  firebase_messaging: ^15.1.0
   http: ^1.2.0
   shared_preferences: ^2.3.0
   flutter_secure_storage: ^9.2.0
