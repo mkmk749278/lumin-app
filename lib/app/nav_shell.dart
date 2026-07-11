@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../data/notification_service.dart';
 import '../features/charts/charts_page.dart';
 import '../features/pulse/pulse_page.dart';
 import '../features/settings/settings_page.dart';
@@ -73,12 +74,41 @@ class _NavShellState extends State<NavShell> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    NotificationService.instance.pendingRoute
+        .addListener(_onNotificationRoute);
+    // A push tapped before this shell mounted (cold start) is already
+    // sitting in the notifier — consume it on first frame.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onNotificationRoute());
   }
 
   @override
   void dispose() {
+    NotificationService.instance.pendingRoute
+        .removeListener(_onNotificationRoute);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  /// Notification tap → bottom-tab switch.  `pulse_alerts` lands on
+  /// Pulse (whose page listens to the same notifier to flip its
+  /// Dashboard/Alerts top tab before clearing it); `signals` lands on
+  /// the Signals tab.
+  void _onNotificationRoute() {
+    final route = NotificationService.instance.pendingRoute.value;
+    if (route == null || !mounted) return;
+    switch (route) {
+      case 'pulse_alerts':
+        _onSelect(0);
+        // Not cleared here — PulsePage consumes and clears it so the
+        // top-tab flip works even when Pulse mounts on this frame.
+        break;
+      case 'signals':
+        _onSelect(1);
+        NotificationService.instance.pendingRoute.value = null;
+        break;
+      default:
+        NotificationService.instance.pendingRoute.value = null;
+    }
   }
 
   @override

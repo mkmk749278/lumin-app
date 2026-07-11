@@ -12,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../shared/tokens.dart';
 import 'api_client.dart';
+import 'market_alert.dart';
 import 'mock_data.dart';
 import 'server_side_execution_models.dart';
 import 'swr_cache.dart';
@@ -1231,6 +1232,20 @@ abstract class LuminRepository {
     // Default no-op.  HttpRepository overrides.
   }
 
+  /// Market alerts feed (Pulse → Alerts tab) — informational detector
+  /// events from ``/api/alerts``, newest first.
+  Future<List<MarketAlert>> fetchAlerts({int limit = 100});
+
+  /// SWR variant of ``fetchAlerts`` — same pattern as ``watchSignals``.
+  Stream<List<MarketAlert>> watchAlerts({int limit = 100}) =>
+      Stream.fromFuture(fetchAlerts(limit: limit));
+
+  /// Drop the cached ``watchAlerts`` entry (pull-to-refresh / foreground
+  /// refresh).  No-op on impls without a cache (Mock).
+  void invalidateAlertsCache({int limit = 100}) {
+    // Default no-op.  HttpRepository overrides.
+  }
+
   /// Stream the composed Pulse bundle (engine snapshot + recent
   /// signals + tickers + pnl history) with SWR semantics.  Default
   /// impl assembles the four sub-fetches in parallel and wraps the
@@ -1634,6 +1649,18 @@ class MockRepository implements LuminRepository {
         limit: limit,
         setupClass: setupClass,
       ));
+
+  @override
+  Future<List<MarketAlert>> fetchAlerts({int limit = 100}) async =>
+      mockAlerts.take(limit).toList();
+
+  @override
+  Stream<List<MarketAlert>> watchAlerts({int limit = 100}) =>
+      Stream.fromFuture(fetchAlerts(limit: limit));
+
+  /// Mock impl: no-op (no cache).
+  @override
+  void invalidateAlertsCache({int limit = 100}) {}
 
   /// Mock impl: no-op.  ``implements LuminRepository`` requires this
   /// even though the abstract has a default body — Dart doesn't
@@ -2823,6 +2850,42 @@ class HttpRepository implements LuminRepository {
     _swr.invalidate(
       _signalsKey(status: status, limit: limit, setupClass: setupClass),
     );
+  }
+
+  static String _alertsKey(int limit) => 'alerts:$limit';
+
+  @override
+  Future<List<MarketAlert>> fetchAlerts({int limit = 100}) async {
+    final j = (await client.get('/api/alerts', query: {'limit': limit}))
+        as Map<String, dynamic>;
+    final items = (j['items'] as List? ?? []).cast<Map<String, dynamic>>();
+    return items.map(MarketAlert.fromMap).toList();
+  }
+
+  @override
+  Stream<List<MarketAlert>> watchAlerts({int limit = 100}) {
+    return _swr.watch<List<MarketAlert>>(
+      _alertsKey(limit),
+      fetch: () => fetchAlerts(limit: limit),
+      ttl: const Duration(seconds: 30),
+      persistKey: 'swr_alerts_$limit',
+      toJson: (items) => jsonEncode(items.map((a) => a.toMap()).toList()),
+      fromJson: (str) {
+        try {
+          final list = jsonDecode(str) as List;
+          return list
+              .map((j) => MarketAlert.fromMap(j as Map<String, dynamic>))
+              .toList();
+        } catch (_) {
+          return null;
+        }
+      },
+    );
+  }
+
+  @override
+  void invalidateAlertsCache({int limit = 100}) {
+    _swr.invalidate(_alertsKey(limit));
   }
 
   static const _kPulseBundleKey = 'pulse_bundle';
