@@ -22,6 +22,7 @@ import '../../shared/widgets/free_tier_gate.dart';
 import '../../shared/widgets/lumin_card.dart';
 import '../../shared/widgets/preview_badge.dart';
 import '../../shared/widgets/shimmer.dart';
+import 'signal_snap.dart';
 import 'take_signal_sheet.dart';
 
 /// Fetch mark prices for a batch of symbols from Binance's public
@@ -1245,6 +1246,16 @@ class _SignalDetailSheetState extends State<_SignalDetailSheet> {
     } catch (_) {}
   }
 
+  /// Full live chart with this signal's levels drawn on it — shared by the
+  /// setup snap tap and the "Open chart" button.
+  void _openChart(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ChartPage(symbol: widget.sig.symbol, signal: widget.sig),
+      ),
+    );
+  }
+
   double get _pnlPct {
     if (widget.sig.status == 'ACTIVE' && _livePrice > 0 && widget.sig.entry > 0) {
       return widget.sig.direction == 'LONG'
@@ -1285,17 +1296,18 @@ class _SignalDetailSheetState extends State<_SignalDetailSheet> {
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: LuminSpacing.md),
+          // Setup snap — the alert-card mini chart pattern: candles with the
+          // entry / effective SL / TP ladder drawn on.  Tapping it opens the
+          // same full chart as the button below.
+          SignalSnap(sig: sig, onTap: () => _openChart(context)),
+          const SizedBox(height: LuminSpacing.md),
           // Open this symbol's live chart with our signal levels drawn on it.
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
               icon: const Icon(Icons.candlestick_chart_outlined),
               label: const Text('Open chart'),
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => ChartPage(symbol: sig.symbol, signal: sig),
-                ),
-              ),
+              onPressed: () => _openChart(context),
             ),
           ),
           const SizedBox(height: LuminSpacing.lg),
