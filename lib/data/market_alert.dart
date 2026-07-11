@@ -108,7 +108,15 @@ final List<MarketAlert> mockAlerts = [
     title: 'Near Horizontal Resistance',
     message: 'Price 0.14% from resistance at 1803.8 (5 touches)',
     bias: 'BEARISH',
-    metrics: const {'level_price': 1803.8, 'touches': 5},
+    metrics: const {
+      'level_price': 1803.8,
+      'touches': 5,
+      'touch_count': 5,
+      'zone_low': 1801.1,
+      'zone_high': 1806.5,
+      'first_touch_bars_ago': 42,
+      'last_touch_bars_ago': 1,
+    },
     createdAt: DateTime.now()
         .toUtc()
         .subtract(const Duration(hours: 1, minutes: 5))
@@ -138,7 +146,14 @@ final List<MarketAlert> mockAlerts = [
     title: 'RSI Bullish Divergence',
     message: 'Price made a lower low while RSI rose 24→37',
     bias: 'BULLISH',
-    metrics: const {'rsi_first': 24.0, 'rsi_second': 37.0},
+    metrics: const {
+      'rsi_first': 24.0,
+      'rsi_second': 37.0,
+      'pivot_a_bars_ago': 18,
+      'pivot_b_bars_ago': 4,
+      'pivot_a_price': 0.981,
+      'pivot_b_price': 0.958,
+    },
     createdAt: DateTime.now()
         .toUtc()
         .subtract(const Duration(hours: 6))

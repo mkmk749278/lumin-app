@@ -11,6 +11,12 @@
                    rsi:{data:[{time,value}]} | null, showVolume})
     updateIndicators({points:[{id,time,value}], rsi:{time,value} | null})
     setOverlay(ChartOverlay)        clearOverlay()        setTheme({dark})
+    setAlertOverlay({lines:[{price,color,title,solid,width}],
+                     segments:[{color,points:[{time,value}]}],        // price pane
+                     rsiSegments:[{color,points:[{time,value}]}],     // RSI band
+                     zones:[{from,low,high,color,borderColor,label}], // shaded S/R box
+                     markers:[{time,position,color,shape,text}],
+                     focus:{from,to} | null})                          // zoom to setup
   JS → Flutter:  LuminChart.postMessage(jsonString)  -> {event, ...}
     {event:'ready'}  {event:'error',message}  {event:'visibleRangeChanged',from,to}
 
@@ -130,6 +136,56 @@
 
       var alertLines = [];      // price lines drawn by setAlertOverlay
       var alertSegments = [];   // line series drawn by setAlertOverlay
+      var alertZones = [];      // series primitives drawn by setAlertOverlay
+
+      // Shaded S/R zone rectangle (the 100eyes look): a series primitive
+      // that fills [zone.low, zone.high] from the zone's start time to the
+      // right edge of the pane.  Coordinates are recomputed on every render
+      // pass, so the box tracks pan/zoom for free.
+      function ZonePrimitive(zone) {
+        var self = this;
+        this._zone = zone;
+        this._renderer = {
+          draw: function (target) {
+            target.useMediaCoordinateSpace(function (scope) {
+              try {
+                var vis = chart.timeScale().getVisibleRange();
+                if (!vis) return;
+                if (self._zone.from > vis.to) return; // zone entirely off-right
+                var x1 = 0;
+                if (self._zone.from > vis.from) {
+                  var c = chart.timeScale().timeToCoordinate(self._zone.from);
+                  if (c != null) x1 = c;
+                }
+                var x2 = scope.mediaSize.width;
+                var y1 = candleSeries.priceToCoordinate(self._zone.high);
+                var y2 = candleSeries.priceToCoordinate(self._zone.low);
+                if (y1 == null || y2 == null || x2 <= x1) return;
+                var ctx = scope.context;
+                ctx.fillStyle = self._zone.color || "rgba(154,167,180,0.14)";
+                ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+                ctx.strokeStyle = self._zone.borderColor || "rgba(154,167,180,0.5)";
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(x1, y1); ctx.lineTo(x2, y1);
+                ctx.moveTo(x1, y2); ctx.lineTo(x2, y2);
+                ctx.stroke();
+                if (self._zone.label) {
+                  ctx.font = "10px -apple-system, Roboto, sans-serif";
+                  ctx.fillStyle = self._zone.borderColor || "#9aa7b4";
+                  ctx.fillText(self._zone.label, x1 + 4, y1 - 4);
+                }
+              } catch (e) {}
+            });
+          },
+        };
+        this._view = {
+          zOrder: function () { return "bottom"; },
+          renderer: function () { return self._renderer; },
+        };
+      }
+      ZonePrimitive.prototype.updateAllViews = function () {};
+      ZonePrimitive.prototype.paneViews = function () { return [this._view]; };
 
       function clearAlertOverlay() {
         for (var i = 0; i < alertLines.length; i++) {
@@ -140,6 +196,10 @@
           try { chart.removeSeries(alertSegments[j]); } catch (e) {}
         }
         alertSegments = [];
+        for (var k = 0; k < alertZones.length; k++) {
+          try { candleSeries.detachPrimitive(alertZones[k]); } catch (e) {}
+        }
+        alertZones = [];
         try { candleSeries.setMarkers([]); } catch (e) {}
       }
 
@@ -323,6 +383,35 @@
               series.setData(seg.points);
               alertSegments.push(series);
             });
+            // Divergence trend line on the RSI band (mirrors the price-pane
+            // segment — the 100eyes double-line look).  Bound to the "rsi"
+            // price scale; the margins guard keeps it in the bottom band
+            // even if it draws before setIndicators created the RSI series.
+            (o.rsiSegments || []).forEach(function (seg) {
+              if (!seg.points || seg.points.length < 2) return;
+              try {
+                chart.priceScale("rsi").applyOptions({ scaleMargins: { top: 0.78, bottom: 0 } });
+              } catch (e) {}
+              var series = chart.addLineSeries({
+                color: seg.color || "#f6c85f",
+                lineWidth: 2,
+                priceScaleId: "rsi",
+                priceLineVisible: false,
+                lastValueVisible: false,
+                crosshairMarkerVisible: false,
+              });
+              series.setData(seg.points);
+              alertSegments.push(series);
+            });
+            (o.zones || []).forEach(function (z) {
+              if (z.from == null || z.low == null || z.high == null) return;
+              if (!isFinite(z.low) || !isFinite(z.high) || z.high <= z.low) return;
+              var p = new ZonePrimitive(z);
+              try {
+                candleSeries.attachPrimitive(p);
+                alertZones.push(p);
+              } catch (e) {}
+            });
             if (o.markers && o.markers.length) {
               candleSeries.setMarkers(o.markers.map(function (m) {
                 return {
@@ -333,6 +422,13 @@
                   text: m.text || "",
                 };
               }));
+            }
+            // Zoom to the setup window (overrides setCandles' fitContent —
+            // an alert-opened chart lands ON the setup, not on 500 bars).
+            if (o.focus && o.focus.from && o.focus.to && o.focus.to > o.focus.from) {
+              try {
+                chart.timeScale().setVisibleRange({ from: o.focus.from, to: o.focus.to });
+              } catch (e) {}
             }
           } catch (e) {
             post({ event: "error", message: "setAlertOverlay: " + e });
