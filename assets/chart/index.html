@@ -128,6 +128,21 @@
         try { candleSeries.setMarkers([]); } catch (e) {}
       }
 
+      var alertLines = [];      // price lines drawn by setAlertOverlay
+      var alertSegments = [];   // line series drawn by setAlertOverlay
+
+      function clearAlertOverlay() {
+        for (var i = 0; i < alertLines.length; i++) {
+          try { candleSeries.removePriceLine(alertLines[i]); } catch (e) {}
+        }
+        alertLines = [];
+        for (var j = 0; j < alertSegments.length; j++) {
+          try { chart.removeSeries(alertSegments[j]); } catch (e) {}
+        }
+        alertSegments = [];
+        try { candleSeries.setMarkers([]); } catch (e) {}
+      }
+
       function addLine(price, color, title) {
         if (price == null || !isFinite(price) || price <= 0) return;
         priceLines.push(candleSeries.createPriceLine({
@@ -276,6 +291,54 @@
           }
         },
         clearOverlay: clearOverlay,
+        // Generic market-alert setup overlay: horizontal price lines
+        // (S/R level, alert price), bar markers at the alert candle, and
+        // optional two-point segments (RSI-divergence trend line).
+        setAlertOverlay: function (s) {
+          try {
+            var o = JSON.parse(s);
+            clearAlertOverlay();
+            (o.lines || []).forEach(function (l) {
+              if (l.price == null || !isFinite(l.price) || l.price <= 0) return;
+              alertLines.push(candleSeries.createPriceLine({
+                price: l.price,
+                color: l.color || "#9aa7b4",
+                lineWidth: l.width || 1,
+                lineStyle: l.solid
+                  ? LightweightCharts.LineStyle.Solid
+                  : LightweightCharts.LineStyle.Dashed,
+                axisLabelVisible: true,
+                title: l.title || "",
+              }));
+            });
+            (o.segments || []).forEach(function (seg) {
+              if (!seg.points || seg.points.length < 2) return;
+              var series = chart.addLineSeries({
+                color: seg.color || "#f6c85f",
+                lineWidth: 2,
+                priceLineVisible: false,
+                lastValueVisible: false,
+                crosshairMarkerVisible: false,
+              });
+              series.setData(seg.points);
+              alertSegments.push(series);
+            });
+            if (o.markers && o.markers.length) {
+              candleSeries.setMarkers(o.markers.map(function (m) {
+                return {
+                  time: m.time,
+                  position: m.position === "above" ? "aboveBar" : "belowBar",
+                  color: m.color || "#f6c85f",
+                  shape: m.shape || "circle",
+                  text: m.text || "",
+                };
+              }));
+            }
+          } catch (e) {
+            post({ event: "error", message: "setAlertOverlay: " + e });
+          }
+        },
+        clearAlertOverlay: clearAlertOverlay,
         setTheme: function (s) {
           dark = !!JSON.parse(s).dark;
           var t = theme();

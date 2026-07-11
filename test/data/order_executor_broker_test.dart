@@ -874,4 +874,96 @@ void main() {
       expect(result.message, contains('immediately trigger'));
     });
   });
+
+  group('OrderExecutor.placeAlertEntry (entry-only, from a market alert)', () {
+    test('places ONLY leverage + market entry — never a stop or TP order',
+        () async {
+      final fake = _FakeBinanceClient();
+      final logService = OrderLogService(store: _FakeKvStore());
+      final executor = OrderExecutor(
+        logService: logService,
+        clientFactory: (_) => fake,
+      );
+
+      final result = await executor.placeAlertEntry(
+        userId: 1,
+        alertId: 'al-42',
+        symbol: 'BTCUSDT',
+        direction: 'SHORT',
+        keys: _keys(),
+        settings: _settings(),
+        equity: 1000.0,
+        markPrice: 50000.0,
+      );
+
+      expect(result.success, true);
+      expect(fake.calls.map((c) => c['method']).toList(),
+          ['getSymbolFilters', 'setLeverage', 'createMarketOrder']);
+      final entryCall = fake.calls.last;
+      expect(entryCall['side'], 'SELL');
+      expect(entryCall['clientOrderId'], 'lumin-entry-alert-al-42');
+      // Notional = 1000 × 2% × 10x = 200.  Qty = 200 / 50000 = 0.004.
+      expect(result.entry!.quantity, closeTo(0.004, 1e-9));
+      expect(result.entry!.stopOrderId, isNull);
+      expect(result.entry!.tpOrderId, isNull);
+      expect(result.entry!.executionMode, 'alert-manual');
+      expect(result.message, contains('No SL/TP'));
+      expect(fake.disposed, true);
+    });
+
+    test('is idempotent on the alert id (double-tap cannot double-fire)',
+        () async {
+      final fake = _FakeBinanceClient();
+      final logService = OrderLogService(store: _FakeKvStore());
+      final executor = OrderExecutor(
+        logService: logService,
+        clientFactory: (_) => fake,
+      );
+
+      Future<ExecutionResult> place() => executor.placeAlertEntry(
+            userId: 1,
+            alertId: 'al-42',
+            symbol: 'BTCUSDT',
+            direction: 'LONG',
+            keys: _keys(),
+            settings: _settings(),
+            equity: 1000.0,
+            markPrice: 50000.0,
+          );
+
+      final first = await place();
+      expect(first.success, true);
+      final callsAfterFirst = fake.calls.length;
+
+      final second = await place();
+      expect(second.success, true);
+      expect(second.alreadyTaken, isNotNull);
+      expect(second.entry, isNull);
+      expect(fake.calls.length, callsAfterFirst,
+          reason: 'no broker calls on the idempotency hit');
+    });
+
+    test('fails cleanly without broker calls when sizing is unset', () async {
+      final fake = _FakeBinanceClient();
+      final executor = OrderExecutor(
+        logService: OrderLogService(store: _FakeKvStore()),
+        clientFactory: (_) => fake,
+      );
+
+      final result = await executor.placeAlertEntry(
+        userId: 1,
+        alertId: 'al-1',
+        symbol: 'BTCUSDT',
+        direction: 'LONG',
+        keys: _keys(),
+        settings: const AutoTradeSettings(mode: 'live'),
+        equity: 1000.0,
+        markPrice: 50000.0,
+      );
+
+      expect(result.success, false);
+      expect(result.message, contains('position size'));
+      expect(fake.calls, isEmpty);
+    });
+  });
 }

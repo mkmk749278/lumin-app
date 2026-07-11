@@ -12,6 +12,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
+import 'models/alert_overlay.dart';
 import 'models/candle.dart';
 import 'models/chart_overlay.dart';
 
@@ -92,6 +93,11 @@ class ChartBridge {
   }
 
   Future<void> setOverlay(ChartOverlay o) => _call('setOverlay', o.toJson());
+
+  /// Draw a market-alert setup (level lines / divergence segment / alert
+  /// marker) — the alert-tap counterpart of the signal overlay.
+  Future<void> setAlertOverlay(AlertChartOverlay o) =>
+      _call('setAlertOverlay', o.toJson());
 
   Future<void> clearOverlay() => _controller.runJavaScript('window.lumin.clearOverlay();');
 

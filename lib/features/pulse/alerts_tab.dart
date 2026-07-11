@@ -32,6 +32,28 @@ class AlertsTabState extends State<AlertsTab>
   LuminRepository? _lastRepo;
   Completer<void>? _refreshDone;
 
+  /// 100eyes-style client-side feed filters: alert family + timeframe.
+  /// Null = All.  Session-only — the feed itself is untouched.
+  String? _familyFilter;
+  String? _tfFilter;
+
+  static const Map<String, List<String>> _families = {
+    'RSI': ['RSI_OVERBOUGHT', 'RSI_OVERSOLD'],
+    'Divergence': ['RSI_BULLISH_DIVERGENCE', 'RSI_BEARISH_DIVERGENCE'],
+    'S/R': ['NEAR_SUPPORT', 'NEAR_RESISTANCE'],
+    'Volume': ['VOLUME_SPIKE', 'ABNORMAL_VOLATILITY'],
+  };
+
+  List<MarketAlert> _filtered(List<MarketAlert> alerts) {
+    return [
+      for (final a in alerts)
+        if ((_familyFilter == null ||
+                (_families[_familyFilter]?.contains(a.alertType) ?? true)) &&
+            (_tfFilter == null || a.timeframe == _tfFilter))
+          a,
+    ];
+  }
+
   /// Keep the feed alive across top-tab switches — same reason the
   /// bottom tabs use IndexedStack: don't refetch on every swipe back.
   @override
@@ -154,7 +176,8 @@ class AlertsTabState extends State<AlertsTab>
         ],
       );
     }
-    return ListView.separated(
+    final visible = _filtered(alerts);
+    return ListView(
       physics: const AlwaysScrollableScrollPhysics(
         parent: BouncingScrollPhysics(),
       ),
@@ -162,15 +185,68 @@ class AlertsTabState extends State<AlertsTab>
         horizontal: LuminSpacing.lg,
         vertical: LuminSpacing.md,
       ),
-      itemCount: alerts.length + (isLive ? 0 : 1),
-      separatorBuilder: (_, __) => const SizedBox(height: LuminSpacing.sm),
-      itemBuilder: (context, i) {
-        if (!isLive) {
-          if (i == 0) return const PreviewBadge();
-          return _AlertCard(alert: alerts[i - 1]);
-        }
-        return _AlertCard(alert: alerts[i]);
-      },
+      children: [
+        _buildFilterRow(),
+        const SizedBox(height: LuminSpacing.sm),
+        if (!isLive) ...[
+          const PreviewBadge(),
+          const SizedBox(height: LuminSpacing.sm),
+        ],
+        if (visible.isEmpty)
+          const Padding(
+            padding: EdgeInsets.only(top: 48),
+            child: Center(
+              child: Text(
+                'No alerts match this filter',
+                style: TextStyle(color: LuminColors.textSecondary, fontSize: 12),
+              ),
+            ),
+          )
+        else
+          for (final a in visible) ...[
+            _AlertCard(alert: a),
+            const SizedBox(height: LuminSpacing.sm),
+          ],
+      ],
+    );
+  }
+
+  Widget _buildFilterRow() {
+    Widget chip(String label, bool selected, VoidCallback onTap) {
+      return Padding(
+        padding: const EdgeInsets.only(right: 6),
+        child: ChoiceChip(
+          label: Text(label, style: const TextStyle(fontSize: 11)),
+          selected: selected,
+          visualDensity: VisualDensity.compact,
+          onSelected: (_) => onTap(),
+        ),
+      );
+    }
+
+    return SizedBox(
+      height: 34,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        children: [
+          chip('All', _familyFilter == null && _tfFilter == null, () {
+            setState(() {
+              _familyFilter = null;
+              _tfFilter = null;
+            });
+          }),
+          for (final f in _families.keys)
+            chip(f, _familyFilter == f, () {
+              setState(
+                () => _familyFilter = _familyFilter == f ? null : f,
+              );
+            }),
+          for (final tf in const ['15m', '1h', '4h'])
+            chip(tf, _tfFilter == tf, () {
+              setState(() => _tfFilter = _tfFilter == tf ? null : tf);
+            }),
+        ],
+      ),
     );
   }
 }
@@ -227,7 +303,7 @@ class _AlertCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(LuminRadii.sm),
         onTap: () => Navigator.of(context).push(
           MaterialPageRoute(
-            builder: (_) => ChartPage(symbol: alert.symbol),
+            builder: (_) => ChartPage(symbol: alert.symbol, alert: alert),
           ),
         ),
         child: Row(

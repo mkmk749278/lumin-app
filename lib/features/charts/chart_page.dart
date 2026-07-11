@@ -29,20 +29,29 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../data/app_config.dart';
 import '../../data/binance_market_data.dart';
+import '../../data/market_alert.dart';
 import '../../data/mock_data.dart';
 import '../../data/repository.dart';
+import '../../shared/tokens.dart';
+import '../pulse/take_alert_trade_sheet.dart';
 import 'chart_webview.dart';
 import 'indicators.dart';
+import 'models/alert_overlay.dart';
 import 'models/candle.dart';
 import 'models/chart_overlay.dart';
 
 class ChartPage extends StatefulWidget {
-  const ChartPage({super.key, required this.symbol, this.signal});
+  const ChartPage({super.key, required this.symbol, this.signal, this.alert});
 
   final String symbol;
 
   /// When opened from a signal, draw its entry/SL/TP/BE overlay.
   final MockSignal? signal;
+
+  /// When opened from a market alert: open on the ALERT's timeframe with
+  /// the alert's own indicators active and its setup drawn — no manual
+  /// effort.  Also shows the alert context bar with the Take-trade action.
+  final MarketAlert? alert;
 
   @override
   State<ChartPage> createState() => _ChartPageState();
@@ -170,8 +179,19 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
   Future<void> _onReady(ChartBridge bridge) async {
     _bridge = bridge;
     await _prefsLoaded; // restore last TF + indicator toggles before first draw
+    _applyAlertContext();
     if (mounted) setState(() {});
     await _loadAndStream();
+  }
+
+  /// Opened from an alert card: mirror the alert's context exactly — its
+  /// timeframe and the indicator it observed — without touching the
+  /// user's saved chart preferences (session-only overrides).
+  void _applyAlertContext() {
+    final a = widget.alert;
+    if (a == null) return;
+    if (_tfs.contains(a.timeframe)) _tf = a.timeframe;
+    if (a.alertType.startsWith('RSI')) _showRsi = true;
   }
 
   Future<void> _loadAndStream() async {
@@ -204,6 +224,7 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
       );
       await _pushIndicators();
       await _pushOverlay(force: true);
+      await _pushAlertOverlay();
       _startPoll();
       _startOverlayTimer();
       if (mounted) setState(() => _loading = false);
@@ -421,6 +442,16 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
     await bridge.setOverlay(overlay);
   }
 
+  /// Draw the alert's setup (level line / divergence segment / alert
+  /// marker) — static once drawn; the setup the alert observed doesn't
+  /// move the way a signal's BE/SL does.
+  Future<void> _pushAlertOverlay() async {
+    final bridge = _bridge;
+    final a = widget.alert;
+    if (bridge == null || a == null) return;
+    await bridge.setAlertOverlay(AlertChartOverlay.fromAlert(a));
+  }
+
   /// Re-read the signal from the repository so the drawn lines track reality
   /// (BE shift moves the stop line to entry; a close updates the status).
   /// Uses the SWR-cached signals list — the same key the Signals tab watches,
@@ -529,6 +560,7 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
               ],
             ),
           ),
+          if (widget.alert != null) _AlertContextBar(alert: widget.alert!),
         ],
       ),
     );
@@ -536,5 +568,84 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
 
   void _onWebError(String message) {
     if (mounted) setState(() => _error = 'Chart error: $message');
+  }
+}
+
+/// Compact bar under the chart when opened from a market alert: shows what
+/// the alert observed (the setup drawn above) and the Take-trade action —
+/// an entry-only manual trade on the user's own account.
+class _AlertContextBar extends StatelessWidget {
+  const _AlertContextBar({required this.alert});
+  final MarketAlert alert;
+
+  Color _biasColor() {
+    switch (alert.bias) {
+      case 'BULLISH':
+        return LuminColors.success;
+      case 'BEARISH':
+        return LuminColors.loss;
+      default:
+        return LuminColors.warn;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _biasColor();
+    return SafeArea(
+      top: false,
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: LuminSpacing.lg,
+          vertical: LuminSpacing.sm,
+        ),
+        decoration: const BoxDecoration(
+          color: LuminColors.bgCard,
+          border: Border(top: BorderSide(color: LuminColors.cardBorder)),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${alert.title} (${alert.timeframe})',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: color,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    alert.message,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: LuminColors.textSecondary,
+                      fontSize: 11,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: LuminSpacing.md),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: LuminColors.accent,
+                foregroundColor: LuminColors.bgDeep,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+              ),
+              onPressed: () => showTakeAlertTradeSheet(context, alert: alert),
+              child: const Text('Take trade'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
