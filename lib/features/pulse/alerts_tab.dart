@@ -16,6 +16,7 @@ import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
 import '../../shared/widgets/preview_badge.dart';
 import '../charts/chart_page.dart';
+import 'alert_thumbnail.dart';
 
 class AlertsTab extends StatefulWidget {
   const AlertsTab({super.key});
@@ -177,7 +178,27 @@ class AlertsTabState extends State<AlertsTab>
       );
     }
     final visible = _filtered(alerts);
-    return ListView(
+    // Header rows first, then one card per index.  ListView.builder keeps
+    // the ~100 thumbnail cards lazy — only viewport cards build/fetch.
+    final header = <Widget>[
+      _buildFilterRow(),
+      const SizedBox(height: LuminSpacing.sm),
+      if (!isLive) ...[
+        const PreviewBadge(),
+        const SizedBox(height: LuminSpacing.sm),
+      ],
+      if (visible.isEmpty)
+        const Padding(
+          padding: EdgeInsets.only(top: 48),
+          child: Center(
+            child: Text(
+              'No alerts match this filter',
+              style: TextStyle(color: LuminColors.textSecondary, fontSize: 12),
+            ),
+          ),
+        ),
+    ];
+    return ListView.builder(
       physics: const AlwaysScrollableScrollPhysics(
         parent: BouncingScrollPhysics(),
       ),
@@ -185,29 +206,14 @@ class AlertsTabState extends State<AlertsTab>
         horizontal: LuminSpacing.lg,
         vertical: LuminSpacing.md,
       ),
-      children: [
-        _buildFilterRow(),
-        const SizedBox(height: LuminSpacing.sm),
-        if (!isLive) ...[
-          const PreviewBadge(),
-          const SizedBox(height: LuminSpacing.sm),
-        ],
-        if (visible.isEmpty)
-          const Padding(
-            padding: EdgeInsets.only(top: 48),
-            child: Center(
-              child: Text(
-                'No alerts match this filter',
-                style: TextStyle(color: LuminColors.textSecondary, fontSize: 12),
-              ),
-            ),
-          )
-        else
-          for (final a in visible) ...[
-            _AlertCard(alert: a),
-            const SizedBox(height: LuminSpacing.sm),
-          ],
-      ],
+      itemCount: header.length + visible.length,
+      itemBuilder: (context, i) {
+        if (i < header.length) return header[i];
+        return Padding(
+          padding: const EdgeInsets.only(bottom: LuminSpacing.sm),
+          child: _AlertCard(alert: visible[i - header.length]),
+        );
+      },
     );
   }
 
@@ -364,6 +370,9 @@ class _AlertCard extends StatelessWidget {
                       height: 1.35,
                     ),
                   ),
+                  const SizedBox(height: LuminSpacing.sm),
+                  // 100eyes look: the setup itself, drawn on a mini chart.
+                  AlertThumbnail(alert: alert),
                 ],
               ),
             ),

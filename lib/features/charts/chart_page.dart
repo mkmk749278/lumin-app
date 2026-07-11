@@ -442,14 +442,18 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
     await bridge.setOverlay(overlay);
   }
 
-  /// Draw the alert's setup (level line / divergence segment / alert
-  /// marker) — static once drawn; the setup the alert observed doesn't
-  /// move the way a signal's BE/SL does.
+  /// Draw the alert's setup (zone box / level line / divergence segments /
+  /// alert marker) and zoom to the setup window — static once drawn; the
+  /// setup the alert observed doesn't move the way a signal's BE/SL does.
   Future<void> _pushAlertOverlay() async {
     final bridge = _bridge;
     final a = widget.alert;
     if (bridge == null || a == null) return;
-    await bridge.setAlertOverlay(AlertChartOverlay.fromAlert(a));
+    // The overlay's focus fires a visibleRangeChanged whose `from` can sit
+    // near the oldest bar — re-arm suppression so it can't trigger an
+    // unwanted history-pagination fetch.
+    _suppressRangeUntil = DateTime.now().add(const Duration(milliseconds: 1500));
+    await bridge.setAlertOverlay(AlertChartOverlay.fromAlert(a, chartTf: _tf));
   }
 
   /// Re-read the signal from the repository so the drawn lines track reality
