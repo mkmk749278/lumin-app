@@ -68,11 +68,21 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
   BinanceConnectStatus? _existing;
   bool _replacing = false;
 
+  // Engine VPS IP the user must whitelist on their Binance key
+  // (2026-07-16).  Fetched up front from ``GET /api/binance/connect/info``
+  // and shown in the doctrine card with one-tap copy, so the user can
+  // whitelist it BEFORE connecting rather than only discovering it on a
+  // failed connect.  ``null`` while the fetch is in flight, or if the
+  // engine hasn't been configured with an IP — in which case the
+  // doctrine card falls back to generic whitelist wording.
+  String? _engineVpsIp;
+
   @override
   void initState() {
     super.initState();
     _refreshTosStatus();
     _refreshConnectStatus();
+    _refreshConnectInfo();
   }
 
   Future<void> _refreshTosStatus() async {
@@ -93,6 +103,22 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
     } catch (_) {
       if (!mounted) return;
       setState(() => _existing = BinanceConnectStatus.notConnected);
+    }
+  }
+
+  Future<void> _refreshConnectInfo() async {
+    // Soft failure — the whitelist IP is a nice-to-have hint shown up
+    // front.  If the engine is unreachable or hasn't been configured
+    // with an IP, leave ``_engineVpsIp`` null and fall back to the
+    // generic whitelist wording; never block the page on this fetch.
+    try {
+      final info =
+          await AppConfigScope.of(context).repo.fetchBinanceConnectInfo();
+      if (!mounted) return;
+      setState(() => _engineVpsIp = info.engineVpsIp);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _engineVpsIp = null);
     }
   }
 
@@ -244,6 +270,20 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
     );
   }
 
+  Future<void> _copyEngineVpsIp() async {
+    final ip = _engineVpsIp;
+    if (ip == null) return;
+    await Clipboard.setData(ClipboardData(text: ip));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Engine IP $ip copied to clipboard'),
+        backgroundColor: LuminColors.success,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -350,41 +390,106 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
         ),
       );
 
-  Widget _doctrineCard() => Container(
-        padding: const EdgeInsets.all(LuminSpacing.md),
-        decoration: BoxDecoration(
-          color: LuminColors.bgCard,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: LuminColors.warn, width: 1),
-        ),
-        child: const Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Read this before connecting',
-              style: TextStyle(
-                color: LuminColors.warn,
-                fontWeight: FontWeight.w700,
-                fontSize: 14,
-              ),
+  Widget _doctrineCard() {
+    final hasIp = _engineVpsIp != null;
+    return Container(
+      padding: const EdgeInsets.all(LuminSpacing.md),
+      decoration: BoxDecoration(
+        color: LuminColors.bgCard,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: LuminColors.warn, width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Read this before connecting',
+            style: TextStyle(
+              color: LuminColors.warn,
+              fontWeight: FontWeight.w700,
+              fontSize: 14,
             ),
-            SizedBox(height: LuminSpacing.sm),
-            Text(
-              '• Withdraw permission must be DISABLED on your Binance key.\n'
-              '• IP whitelist must include Lumin\'s engine IP (shown on '
-              'validation failure with one-tap copy).\n'
-              '• Lumin never sees your funds — only signs trade orders '
-              'within configured limits (default \$500 max position, '
-              '5 orders/min, signal-channel symbols only).\n'
-              '• You can disconnect at any time from Settings.',
-              style: TextStyle(
-                color: LuminColors.textPrimary,
-                fontSize: 12,
-                height: 1.5,
-              ),
+          ),
+          const SizedBox(height: LuminSpacing.sm),
+          Text(
+            '• Withdraw permission must be DISABLED on your Binance key.\n'
+            '• IP whitelist must include Lumin\'s engine IP'
+            '${hasIp ? ' (below — one-tap copy).' : ' (shown on '
+                'validation failure with one-tap copy).'}\n'
+            '• Lumin never sees your funds — only signs trade orders '
+            'within configured limits (default \$500 max position, '
+            '5 orders/min, signal-channel symbols only).\n'
+            '• You can disconnect at any time from Settings.',
+            style: const TextStyle(
+              color: LuminColors.textPrimary,
+              fontSize: 12,
+              height: 1.5,
             ),
-          ],
-        ),
+          ),
+          if (hasIp) _engineIpWhitelistBlock(_engineVpsIp!),
+        ],
+      ),
+    );
+  }
+
+  /// Up-front whitelist block: the engine VPS IP + a one-tap Copy so the
+  /// user can add it to their Binance API-key whitelist BEFORE connecting.
+  /// Mirrors the on-failure IP affordance in ``_errorCard`` so the two
+  /// paths look and behave identically.
+  Widget _engineIpWhitelistBlock(String ip) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: LuminSpacing.md),
+          const Text(
+            'Add this engine IP to your Binance key whitelist:',
+            style: TextStyle(
+              color: LuminColors.textPrimary,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: LuminSpacing.sm),
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: LuminSpacing.sm,
+                    vertical: LuminSpacing.xs,
+                  ),
+                  decoration: BoxDecoration(
+                    color: LuminColors.bgDeep,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    ip,
+                    style: const TextStyle(
+                      color: LuminColors.textPrimary,
+                      fontFamily: 'monospace',
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: LuminSpacing.sm),
+              TextButton.icon(
+                onPressed: _copyEngineVpsIp,
+                icon: const Icon(Icons.copy, size: 16),
+                label: const Text('Copy'),
+              ),
+            ],
+          ),
+          const SizedBox(height: LuminSpacing.xs),
+          const Text(
+            'This IP is safe to share — it\'s not a secret. Whitelisting '
+            'it locks your key so it only works from Lumin\'s server.',
+            style: TextStyle(
+              color: LuminColors.textSecondary,
+              fontSize: 11,
+              height: 1.4,
+            ),
+          ),
+        ],
       );
 
   Widget _connectedCard(BinanceConnectStatus status) {
