@@ -1,13 +1,14 @@
-/// Free-tier signal gate — locks SL/TP/entry price fields for users who
-/// haven't subscribed, and surfaces an upgrade CTA when they tap.
+/// Tier gate for the B16 two-tier auto-trade paywall.
 ///
-/// Uses the tier claim from [AppConfigScope] which is already populated
-/// everywhere via the Firebase JWT.  Free users see that a signal fired,
-/// its direction, setup, confidence, and outcome — they cannot see the
-/// operational levels (entry, SL, TP) that let them actually trade it.
+/// Signals + entry/SL/TP + analysis are FREE — the paywall is on trade
+/// automation only.  This file exposes the tier helpers (`tierRank`,
+/// `canAssist`, `canAuto`) used to gate the one-tap "take trade" (Assist)
+/// and hands-off auto-execution (Auto) surfaces, plus [UpgradeSheet] — a
+/// lightweight inline upsell that routes to the full SubscriptionPage so
+/// the user can act immediately without navigating away.
 ///
-/// The upgrade sheet is a lightweight inline version of the full
-/// SubscriptionPage so the user can act immediately without navigating away.
+/// Tier is read from [AppConfigScope], populated from the Firebase session +
+/// engine profile/entitlement.  Null / unknown → free.
 import 'package:flutter/material.dart';
 
 import '../../features/settings/pages/subscription_page.dart';
@@ -43,119 +44,6 @@ bool canAssist(String? tier) => tierRank(tier) >= 1;
 /// May enable hands-off auto-execution — Auto tier (or higher).
 bool canAuto(String? tier) => tierRank(tier) >= 2;
 
-/// A price column replacement for free-tier users.
-///
-/// Shows the column label and a locked chip. Tapping anywhere in the column
-/// opens [UpgradeSheet].  Width and layout match [_PriceCol] in
-/// signals_page.dart so the card row doesn't reflow.
-class LockedPriceCol extends StatelessWidget {
-  const LockedPriceCol({super.key, required this.label});
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: () => showUpgradeSheet(context),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: const TextStyle(
-              color: LuminColors.textMuted,
-              fontSize: 10,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-            decoration: BoxDecoration(
-              color: LuminColors.bgElevated,
-              borderRadius: BorderRadius.circular(LuminRadii.sm),
-              border: Border.all(color: LuminColors.cardBorder),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: const [
-                Icon(Icons.lock_outline_rounded,
-                    size: 10, color: LuminColors.warn),
-                SizedBox(width: 3),
-                Text(
-                  'PRO',
-                  style: TextStyle(
-                    color: LuminColors.warn,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// A locked detail row used in the signal detail sheet.
-/// Label shows as normal; value is replaced by a tappable lock chip.
-class LockedDetailRow extends StatelessWidget {
-  const LockedDetailRow({super.key, required this.label});
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 90,
-            child: Text(
-              label,
-              style: const TextStyle(
-                color: LuminColors.textSecondary,
-                fontSize: 13,
-              ),
-            ),
-          ),
-          GestureDetector(
-            onTap: () => showUpgradeSheet(context),
-            child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: LuminColors.bgElevated,
-                borderRadius: BorderRadius.circular(LuminRadii.sm),
-                border: Border.all(color: LuminColors.cardBorder),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: const [
-                  Icon(Icons.lock_outline_rounded,
-                      size: 11, color: LuminColors.warn),
-                  SizedBox(width: 4),
-                  Text(
-                    'Unlock with Pro',
-                    style: TextStyle(
-                      color: LuminColors.warn,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 /// Show the upgrade bottom sheet from any context.
 void showUpgradeSheet(BuildContext context) {
   showModalBottomSheet(
@@ -170,9 +58,11 @@ void showUpgradeSheet(BuildContext context) {
   );
 }
 
-/// Inline upgrade sheet — shown when a free user taps a locked field.
-/// Lighter than navigating to the full SubscriptionPage; surfaces the key
-/// proof points and the Telegram bot CTA.
+/// Inline upgrade sheet — shown when a sub-tier user taps a gated action
+/// (one-tap "take trade", auto-trade settings).  Lighter than navigating
+/// to the full SubscriptionPage; surfaces what Assist/Auto unlock and a
+/// "See plans" CTA that routes to the Google Play SubscriptionPage (B16 —
+/// the Telegram-bot paywall was retired, Telegram is banned in-region).
 class UpgradeSheet extends StatelessWidget {
   const UpgradeSheet({super.key});
 
