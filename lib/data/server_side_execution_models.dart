@@ -114,6 +114,31 @@ class BinanceConnectStatus {
 }
 
 
+/// Mirror of the engine's ``GET /api/binance/connect/info`` response.
+///
+/// Non-secret onboarding info shown on the Server-side execution page
+/// BEFORE a connect attempt.  Today that is just the engine VPS IP the
+/// user must add to their Binance API-key IP whitelist.  The engine
+/// serves this independently of KMS/Firestore, so the IP stays
+/// retrievable even while the connect flow itself is 500ing on a server
+/// misconfiguration — the user can still copy the IP and prepare their
+/// Binance key.
+///
+/// ``engineVpsIp == null`` means the operator hasn't set
+/// ``ENGINE_VPS_PUBLIC_IP``; the page falls back to generic whitelist
+/// wording rather than showing an error.
+class BinanceConnectInfo {
+  const BinanceConnectInfo({this.engineVpsIp});
+
+  final String? engineVpsIp;
+
+  factory BinanceConnectInfo.fromJson(Map<String, dynamic> j) =>
+      BinanceConnectInfo(
+        engineVpsIp: j['engine_vps_ip'] as String?,
+      );
+}
+
+
 /// Mirror of the engine's ``GET /api/auto-trade/runtime-status`` response.
 ///
 /// Drives the Live-tab "Auto-trade armed" card: each ``boolean`` gate

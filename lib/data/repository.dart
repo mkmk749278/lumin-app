@@ -1456,6 +1456,18 @@ abstract class LuminRepository {
   /// ``BinanceConnectStatus.notConnected`` on a fresh user.
   Future<BinanceConnectStatus> fetchBinanceConnectStatus();
 
+  /// Fetch non-secret connect onboarding info — currently the engine
+  /// VPS IP the user must add to their Binance API-key whitelist
+  /// (``GET /api/binance/connect/info``).  Shown UP FRONT (with
+  /// one-tap copy) so the user can whitelist the IP BEFORE attempting
+  /// to connect — a connect can only succeed once the IP is already
+  /// whitelisted.  Served independently of KMS/Firestore, so the IP
+  /// stays retrievable even when the connect flow itself is 500ing on
+  /// a server misconfiguration.  Returns ``engineVpsIp == null`` when
+  /// the operator hasn't configured it; the page then falls back to
+  /// generic whitelist wording.
+  Future<BinanceConnectInfo> fetchBinanceConnectInfo();
+
   /// Hard-disconnect: delete the encrypted Binance key blob in
   /// Firestore (``DELETE /api/binance/connect``).  Idempotent — no
   /// error when already disconnected.  Existing positions on Binance
@@ -2618,6 +2630,13 @@ class MockRepository implements LuminRepository {
   }
 
   @override
+  Future<BinanceConnectInfo> fetchBinanceConnectInfo() async {
+    // Mock: a placeholder documentation IP (RFC 5737 TEST-NET-3) so the
+    // up-front whitelist chip + Copy control render in offline dev.
+    return const BinanceConnectInfo(engineVpsIp: '203.0.113.42');
+  }
+
+  @override
   Future<void> disconnectBinanceServerSide() async {
     // Mock: no-op; idempotent disconnect.
   }
@@ -3560,6 +3579,13 @@ class HttpRepository implements LuminRepository {
     final j = (await client.get('/api/binance/connect/status'))
         as Map<String, dynamic>;
     return BinanceConnectStatus.fromJson(j);
+  }
+
+  @override
+  Future<BinanceConnectInfo> fetchBinanceConnectInfo() async {
+    final j = (await client.get('/api/binance/connect/info'))
+        as Map<String, dynamic>;
+    return BinanceConnectInfo.fromJson(j);
   }
 
   @override
