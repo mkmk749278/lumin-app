@@ -7,6 +7,7 @@
 /// No bearer token field — the app authenticates anonymously on first
 /// launch via ``/api/auth/anonymous`` and silently refreshes/re-mints
 /// thereafter.  Server-side secret rotations are invisible to the user.
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -143,9 +144,9 @@ class _AppConfigScopeState extends State<AppConfigScope> {
   /// non-blocking — show controls" and any concrete non-owner value
   /// as "hide".  Engine 403 remains the source-of-truth backstop.
   ///
-  /// Tier changes are not reactive — they update on next rebuild after
-  /// signin / signout / refresh.  Acceptable because tier transitions
-  /// are bursty (subscription state changes), not continuous.
+  /// Reading `tier` alone is a one-shot snapshot — widgets that must update
+  /// the instant it changes (e.g. after a Play purchase) listen to
+  /// [tierRevision] below rather than polling this getter.
   String? get tier => _auth?.currentTier();
 
   /// Fires whenever the cached tier changes (signin / signout / profile
