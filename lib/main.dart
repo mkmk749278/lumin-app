@@ -9,6 +9,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'app/nav_shell.dart';
 import 'data/app_config.dart';
@@ -23,6 +24,17 @@ import 'theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Android 15 enforces edge-to-edge for apps targeting SDK 35; opt in
+  // explicitly on every version and make both system bars transparent so
+  // the app renders identically pre/post 15 (Play Console "edge-to-edge"
+  // recommendation on release 282).  Dark theme → light bar icons.
+  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.light,
+    systemNavigationBarColor: Colors.transparent,
+    systemNavigationBarIconBrightness: Brightness.light,
+  ));
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
