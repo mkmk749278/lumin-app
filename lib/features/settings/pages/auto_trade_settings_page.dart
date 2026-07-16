@@ -263,9 +263,17 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
       // enforces this server-side (signal_dispatch only auto-trades AUTO
       // users), so this gate is the UX layer — non-auto users see an
       // upgrade card instead of controls that wouldn't fire for them.
-      body: canAuto(scope.tier)
-          ? RegionGate(child: _bodyFor(isLive))
-          : _autoUpsell(context),
+      //
+      // Rebuild on tier changes so a purchase made via the upsell's "See
+      // plans" → SubscriptionPage unlocks the controls the moment we pop
+      // back here — without it this page (mounted underneath the purchase
+      // flow) keeps showing the upsell until a revisit or app restart.
+      body: ValueListenableBuilder<int>(
+        valueListenable: scope.tierRevision,
+        builder: (context, _, __) => canAuto(scope.tier)
+            ? RegionGate(child: _bodyFor(isLive))
+            : _autoUpsell(context),
+      ),
     );
   }
 

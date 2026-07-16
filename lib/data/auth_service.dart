@@ -26,6 +26,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 
@@ -81,6 +82,18 @@ class AuthService {
   String? _cachedPaidUntil;
   bool _cachedNeedsOnboarding = false;
   String? _cachedDisplayName;
+
+  /// Bumped whenever the cached tier changes (signin / signout / profile
+  /// refresh / Play purchase).  `AppConfigScope` is an InheritedWidget that
+  /// only rebuilds on config changes, and the NavShell keeps tab pages alive
+  /// in an IndexedStack — so tier-gated controls (take-trade, auto-settings)
+  /// would otherwise stay stale until a revisit or app restart.  Widgets that
+  /// gate on tier wrap their gated region in a `ValueListenableBuilder` on
+  /// this notifier so a purchase unlocks them immediately.  The engine remains
+  /// the authoritative backstop; this only drives instant local UI refresh.
+  final ValueNotifier<int> tierRevision = ValueNotifier<int>(0);
+
+  void _bumpTier() => tierRevision.value++;
 
   // ---- Firebase session surface ----------------------------------------
 
@@ -245,6 +258,7 @@ class AuthService {
     _cachedPaidUntil = null;
     _cachedNeedsOnboarding = false;
     _cachedDisplayName = null;
+    _bumpTier();
     await _auth.signOut();
   }
 
@@ -310,6 +324,7 @@ class AuthService {
     if (displayName != null && displayName.isNotEmpty) {
       _cachedDisplayName = displayName;
     }
+    _bumpTier();
   }
 
   /// Apply a fresh entitlement after a Google Play purchase verifies
@@ -320,6 +335,7 @@ class AuthService {
   void applyEntitlement({required String tier, String? paidUntil}) {
     _cachedTier = tier;
     _cachedPaidUntil = paidUntil;
+    _bumpTier();
   }
 
   /// Cache the user's display name independently — called after signup

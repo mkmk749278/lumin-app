@@ -148,6 +148,15 @@ class _AppConfigScopeState extends State<AppConfigScope> {
   /// are bursty (subscription state changes), not continuous.
   String? get tier => _auth?.currentTier();
 
+  /// Fires whenever the cached tier changes (signin / signout / profile
+  /// refresh / Play purchase).  Tier-gated controls wrap their gated region
+  /// in a `ValueListenableBuilder` on this so a purchase unlocks them
+  /// immediately — see [AuthService.tierRevision] for why the InheritedWidget
+  /// rebuild alone isn't enough (IndexedStack keeps tab pages alive).  In
+  /// mock mode (no auth) this is a constant that never fires.
+  ValueListenable<int> get tierRevision => _auth?.tierRevision ?? _noTierChanges;
+  static final ValueNotifier<int> _noTierChanges = ValueNotifier<int>(0);
+
   /// Whether the current user still needs to complete the signup
   /// flow (display name + terms acceptance).  Engine sets the bit
   /// based on ``users.onboarded_at``.  Used by OtpEntryPage to choose
