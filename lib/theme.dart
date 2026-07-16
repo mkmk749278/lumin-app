@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
 import 'shared/tokens.dart';
 
 ThemeData buildLuminTheme() {
@@ -54,6 +56,15 @@ ThemeData buildLuminTheme() {
       elevation: 0,
       centerTitle: false,
       titleTextStyle: TextStyle(color: LuminColors.textPrimary, fontSize: 24, fontWeight: FontWeight.w300, letterSpacing: 1.5),
+      // Edge-to-edge (Android 15 / SDK 35): AppBars re-assert the
+      // transparent status bar with light icons — without this a page's
+      // AppBar can silently override the app-wide overlay style set in main.
+      systemOverlayStyle: SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+        systemNavigationBarColor: Colors.transparent,
+        systemNavigationBarIconBrightness: Brightness.light,
+      ),
     ),
     iconTheme: const IconThemeData(color: LuminColors.textPrimary),
   );

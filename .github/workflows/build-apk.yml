@@ -310,6 +310,58 @@ jobs:
             exit 1
           fi
 
+      - name: Enable full R8 optimisation (Play recommendation, release 282)
+        # Play Console flagged the app at ~46% optimisation/obfuscation/
+        # shrinking rates — flutter create's template release buildType never
+        # sets isMinifyEnabled/isShrinkResources, so R8 ran in its default
+        # partial mode.  Full R8 + resource shrinking cuts APK/AAB size and
+        # memory; the keeps in proguard-rules.pro cover the classes R8 can't
+        # see (Flutter JNI embedding, Play Core split-install references from
+        # Flutter's deferred-components support).  Runs on PR builds too, so
+        # an R8-stripped-too-much regression fails CI before merge.
+        run: |
+          set -eu
+          cat > android/app/proguard-rules.pro << 'RULES'
+          # Flutter engine + embedding: entry points invoked from native/JNI,
+          # invisible to R8's reachability analysis.
+          -keep class io.flutter.** { *; }
+          # Play Core split-install: referenced by Flutter's deferred-components
+          # plumbing even when the app uses none — R8 full mode fails the build
+          # or strips them without an explicit keep.
+          -keep class com.google.android.play.core.** { *; }
+          -dontwarn com.google.android.play.core.**
+          # Firebase / Play services / Billing ship consumer keep rules inside
+          # their AARs — no extra rules required here.
+          RULES
+          python3 << 'PYEOF'
+          from pathlib import Path
+
+          kts = Path('android/app/build.gradle.kts')
+          content = kts.read_text()
+          if 'isMinifyEnabled' in content:
+              print('R8 already configured — idempotent re-run.')
+              raise SystemExit(0)
+          anchor = 'signingConfig = signingConfigs.getByName('
+          idx = content.find(anchor)
+          if idx == -1:
+              raise SystemExit('ERROR: release signingConfig line not found — template drifted?')
+          line_end = content.index('\n', idx)
+          insert = (
+              '\n'
+              '            isMinifyEnabled = true\n'
+              '            isShrinkResources = true\n'
+              '            proguardFiles(\n'
+              '                getDefaultProguardFile("proguard-android-optimize.txt"),\n'
+              '                "proguard-rules.pro",\n'
+              '            )'
+          )
+          content = content[:line_end] + insert + content[line_end:]
+          kts.write_text(content)
+          print('--- release buildType after R8 patch ---')
+          start = content.index('buildTypes')
+          print(content[start:start + 600])
+          PYEOF
+
       - name: Build release APK
         # --obfuscate (audit F-12/M-1): the app gates the paid Assist tier
         # client-side and composes Binance orders on-device — plain Dart
@@ -472,11 +524,17 @@ jobs:
           retention-days: 90
           if-no-files-found: error
 
-      - name: Attach APK to existing GitHub Release (manual release event)
+      - name: Attach APK + AAB to existing GitHub Release (manual release event)
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          files: build/app/outputs/flutter-apk/lumin-*.apk
+          # AAB attached alongside the APK (2026-07-16): the Play upload is
+          # manual (docs/PLAYSTORE_BUILD.md), so the owner downloads the AAB
+          # straight from the Releases page instead of digging out a 30-day
+          # workflow artifact.
+          files: |
+            build/app/outputs/flutter-apk/lumin-*.apk
+            build/app/outputs/bundle/release/lumin-*.aab
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -497,7 +555,11 @@ jobs:
             Auto-build #${{ github.run_number }} from ${{ github.sha }}.
 
             Commit: ${{ github.event.head_commit.message }}
-          files: build/app/outputs/flutter-apk/lumin-*.apk
+          # APK feeds the in-app updater; the AAB rides along so the Play
+          # Console upload is a one-click download from the Releases page.
+          files: |
+            build/app/outputs/flutter-apk/lumin-*.apk
+            build/app/outputs/bundle/release/lumin-*.aab
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
