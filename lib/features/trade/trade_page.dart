@@ -33,13 +33,14 @@ import 'package:flutter/material.dart';
 import '../../app/foreground_refresh.dart';
 import '../../data/app_config.dart';
 import '../../data/mock_data.dart';
+import '../../data/order_log.dart';
 import '../../data/repository.dart';
 import '../../data/server_side_execution_models.dart';
 import '../../shared/format.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
 import '../../shared/widgets/preview_badge.dart';
-import '../settings/pages/symbol_preference_page.dart';
+import 'live_status_card.dart';
 import 'paper_trades_page.dart';
 
 class _TradeBundle {
@@ -121,6 +122,27 @@ class _TradePageState extends State<TradePage>
   List<DispatchEvent>? _recentDispatchEvents;
   StreamSubscription<List<DispatchEvent>>? _dispatchEventsSub;
 
+  // Orders placed from THIS phone via the device-key path (one-tap
+  // signal takes + alert takes) — read from the existing per-user
+  // OrderLogService so the Live feed shows everything the Binance API
+  // actually executed for this user, whichever path placed it
+  // (owner decision, 2026-07-17).
+  List<OrderLogEntry> _phoneOrders = const [];
+  final _phoneOrderLog = OrderLogService();
+
+  Future<void> _loadPhoneOrders() async {
+    final uid = AppConfigScope.of(context).userId;
+    if (uid == null) return;
+    try {
+      final entries = (await _phoneOrderLog.load(uid)).values.toList()
+        ..sort((a, b) => b.placedAt.compareTo(a.placedAt));
+      if (!mounted) return;
+      setState(() => _phoneOrders = entries.take(10).toList());
+    } catch (_) {
+      // Non-fatal — the phone-placed section just stays empty.
+    }
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -129,6 +151,7 @@ class _TradePageState extends State<TradePage>
       _lastRepo = repo;
       _resubscribe();
       _resubscribeAuxStreams();
+      _loadPhoneOrders();
     }
   }
 
@@ -206,7 +229,6 @@ class _TradePageState extends State<TradePage>
     _engineSub?.cancel();
     _bundleController?.close();
     final repo = AppConfigScope.of(context).repo;
-    final uid = AppConfigScope.of(context).userId;
     final controller = StreamController<_TradeBundle>();
     _bundleController = controller;
 
@@ -277,6 +299,7 @@ class _TradePageState extends State<TradePage>
     repo.invalidateRecentDispatchEventsCache(limit: 20);
     _resubscribe();
     _resubscribeAuxStreams();
+    _loadPhoneOrders();
   }
 
   Future<void> _refresh() async {
@@ -298,6 +321,7 @@ class _TradePageState extends State<TradePage>
     repo.invalidateRecentDispatchEventsCache(limit: 20);
     _resubscribe();
     _resubscribeAuxStreams();
+    _loadPhoneOrders();
     try {
       await completer.future.timeout(const Duration(seconds: 5));
     } on TimeoutException {
@@ -414,12 +438,15 @@ class _TradePageState extends State<TradePage>
         ),
       );
       await _refresh();
-    } catch (e) {
+    } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Refused: $e'),
-          duration: const Duration(seconds: 4),
+        const SnackBar(
+          content: Text(
+            'Could not change the mode — check your connection and '
+            'try again.',
+          ),
+          duration: Duration(seconds: 4),
           backgroundColor: LuminColors.loss,
         ),
       );
@@ -507,25 +534,21 @@ class _TradePageState extends State<TradePage>
     );
   }
 
-  /// Live-tab body.  Owner 2026-05-17 — no longer renders paper data
-  /// Live-tab body.  Post-server-side-execution cleanup (2026-05-19):
-  /// the old "Live auto-trade" toggle, the OLD Binance-keys check, and
-  /// the local user-positions card are all removed.  Server-side
-  /// execution is now the only auto-trade path:
+  /// Live-tab body — 2026-07-17 redesign.
   ///
-  ///   * Banner renders the engine-state (auto_trade_globally_enabled +
-  ///     per-user disable) via [_AutoTradeDisabledBanner].
-  ///   * Actionable CTA pointing at Settings → Server-side auto-trade
-  ///     when the user hasn't connected yet (we detect this indirectly
-  ///     via the activity card — if the engine has activity but the
-  ///     user has no positions yet, show the CTA).
-  ///   * Activity card streams the engine's signal events (global, not
-  ///     per-user) — useful informational view of what the engine is
-  ///     detecting.
-  ///
-  /// The Paper sub-tab is unchanged — it's the engine's paper trader
-  /// preview surface, which stays useful regardless of which auto-trade
-  /// path is in play.
+  /// Owner decisions behind this shape:
+  ///   * ONE status surface ([LiveStatusCard]) replaces the old
+  ///     three-card stack (disabled banner + auto-pause banner + armed
+  ///     checklist) that read like an ops console.  Same engine truth,
+  ///     one verdict + one next step; the full gate list lives behind
+  ///     its Details expander.
+  ///   * The Live feed is PER-USER ONLY: your open positions + what
+  ///     the Binance API actually executed for you (auto dispatches,
+  ///     one-tap takes, and phone-placed alert takes from the device
+  ///     order log).  The engine-wide signal stream is gone from this
+  ///     tab — that life belongs to the Signals/Pulse tabs.
+  ///   * One merged "no trades yet" state instead of two stacked empty
+  ///     cards.
   Widget _buildLiveBody(BuildContext context, _TradeBundle data) {
     final scope = AppConfigScope.of(context);
     final runtime = _runtimeStatus;
@@ -539,16 +562,14 @@ class _TradePageState extends State<TradePage>
     final activeMode = data.userSettings.mode ?? 'off';
     final liveActive = activeMode == 'live' || activeMode == 'both';
     final paperActive = activeMode == 'paper' || activeMode == 'both';
-    // Non-traders get a stripped-down Live tab: just the gate checklist
-    // pointing them at what they need to enable.  The dispatch-event
-    // history + engine signal stream + open positions card are noise
-    // when there's no Binance key connected — there's nothing to
-    // surface in any of them, and stacking three empty cards under the
-    // gates is the "Trade > Live tab became messy" symptom the owner
-    // reported 2026-05-23.  Once the user connects a key, these come
-    // back into view because the data they carry becomes meaningful.
+    // Non-traders get a stripped-down Live tab until a key is
+    // connected — the status card is the actionable surface and the
+    // trade cards would all be structurally empty.
     final hasBinanceKey =
         runtime != null && runtime.binanceKeyConnected;
+    final hasAnyTrades = (serverPositions?.isNotEmpty ?? false) ||
+        (recentEvents?.isNotEmpty ?? false) ||
+        _phoneOrders.isNotEmpty;
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(
         parent: BouncingScrollPhysics(),
@@ -567,7 +588,7 @@ class _TradePageState extends State<TradePage>
         _BinaryModeToggle(
           label: 'Live auto-trade',
           subtitle: liveActive
-              ? 'Engine places real Binance Futures orders on your key.'
+              ? 'Lumin places real Binance Futures orders on your account.'
               : 'Off — enable to place real orders on the next signal.',
           icon: Icons.bolt_rounded,
           activeColor: LuminColors.accent,
@@ -581,60 +602,38 @@ class _TradePageState extends State<TradePage>
             }
           },
         ),
-        if (!liveActive)
-          const _OffStateNotice(
-            label: 'Live trading off',
-            description: 'Enable the toggle above, or go to '
-                'Settings → Server-side auto-trade to configure '
-                'your Binance key and position size.',
-          ),
-        // Server-side auto-trade state banner.  Hidden when the user
-        // is fully enabled (operator has flipped the global flag AND
-        // this user's per-user circuit breaker hasn't tripped).
-        if (_autoTradeStatus != null && !_autoTradeStatus!.isFullyEnabled)
-          _AutoTradeDisabledBanner(status: _autoTradeStatus!),
-        // Insufficient-margin auto-pause banner (engine PR #479,
-        // 2026-05-24).  Renders when the engine has stamped the user's
-        // dispatcher as paused after N consecutive Binance -2019
-        // rejections.  Carries an inline "Resume" button that fires
-        // POST /api/auto-mode/resume-mine — the user-facing reset of
-        // the pause flag.  Owner-reported 2026-05-23: every signal
-        // was spamming the Recent Activity card with the same
-        // insufficient-margin error.
-        if (data.userSettings.isAutoPaused)
-          _AutoPauseBanner(
-            settings: data.userSettings,
-            onResumed: _refresh,
-          ),
         const SizedBox(height: LuminSpacing.md),
-        // Auto-trade armed card (PR-C 2026-05-19) — per-gate green/red
-        // checks + the symbol allowlist as a footnote.  Hidden until
-        // the first runtime-status fetch lands so the card doesn't
-        // flicker red→green during the initial RTT.
+        // Single status surface — hidden until the first runtime-status
+        // fetch lands so the card doesn't flicker red→green during the
+        // initial RTT.
         if (runtime != null) ...[
-          _AutoTradeArmedCard(
+          LiveStatusCard(
             runtime: runtime,
+            userStatus: _autoTradeStatus,
             userSettings: data.userSettings,
+            onResumed: _refresh,
           ),
           const SizedBox(height: LuminSpacing.md),
         ],
-        // The remaining cards (open positions, recent activity on
-        // YOUR account, engine signal stream) only render once the
-        // user has actually connected a Binance key.  Until then the
-        // gate checklist above is the actionable surface.
+        // Per-user trade surfaces, only once a key is connected.
         if (hasBinanceKey) ...[
-          if (serverPositions != null) ...[
-            _ServerPositionsCard(positions: serverPositions),
-            const SizedBox(height: LuminSpacing.md),
+          if (!hasAnyTrades &&
+              serverPositions != null &&
+              recentEvents != null)
+            const _NoTradesYetCard()
+          else ...[
+            if (serverPositions != null) ...[
+              _ServerPositionsCard(positions: serverPositions),
+              const SizedBox(height: LuminSpacing.md),
+            ],
+            if (recentEvents != null) ...[
+              _RecentDispatchEventsCard(
+                events: recentEvents,
+                phoneOrders: _phoneOrders,
+              ),
+              const SizedBox(height: LuminSpacing.md),
+            ],
           ],
-          if (recentEvents != null) ...[
-            _RecentDispatchEventsCard(events: recentEvents),
-            const SizedBox(height: LuminSpacing.md),
-          ],
-          // Engine signal stream — what the engine is detecting right
-          // now.  NOT user-specific.  Useful for traders to see
-          // momentum; pure noise to users who haven't enabled.
-          _ActivityCard(events: data.activity),
           const SizedBox(height: LuminSpacing.xl),
         ],
       ],
@@ -733,27 +732,6 @@ class _TradePageState extends State<TradePage>
     );
   }
 
-  static int _modeIndex(String mode) {
-    switch (mode) {
-      case 'paper':
-        return 1;
-      case 'live':
-        return 2;
-      default:
-        return 0;
-    }
-  }
-
-  static String _modeName(int idx) {
-    switch (idx) {
-      case 1:
-        return 'paper';
-      case 2:
-        return 'live';
-      default:
-        return 'off';
-    }
-  }
 }
 
 /// Live | Paper sub-tab strip — sits just below the AppBar and toggles
@@ -858,177 +836,6 @@ class _SubTabButton extends StatelessWidget {
                 ),
               ),
             ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ModeToggle extends StatelessWidget {
-  const _ModeToggle({
-    required this.mode,
-    required this.switching,
-    required this.onChanged,
-  });
-
-  final int mode;
-  final bool switching;
-  final ValueChanged<int> onChanged;
-
-  static const _labels = ['Off', 'Paper', 'Live'];
-  static const _icons = [
-    Icons.power_settings_new,
-    Icons.science_outlined,
-    Icons.bolt,
-  ];
-
-  Color _modeColor(int i) {
-    switch (i) {
-      case 0:
-        return LuminColors.textMuted;
-      case 1:
-        return LuminColors.warn;
-      case 2:
-        return LuminColors.loss;
-      default:
-        return LuminColors.textPrimary;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
-      child: LuminCard(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Text(
-                  'AUTO-EXECUTION MODE',
-                  style: TextStyle(
-                    color: LuminColors.textMuted,
-                    fontSize: 10,
-                    letterSpacing: 1.2,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                if (switching) ...[
-                  const SizedBox(width: LuminSpacing.sm),
-                  const SizedBox(
-                    width: 12,
-                    height: 12,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 1.5,
-                      color: LuminColors.accent,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-            const SizedBox(height: LuminSpacing.md),
-            Row(
-              children: [
-                for (int i = 0; i < 3; i++) ...[
-                  Expanded(
-                    child: _ModeButton(
-                      label: _labels[i],
-                      icon: _icons[i],
-                      selected: mode == i,
-                      color: _modeColor(i),
-                      onTap: switching ? null : () => onChanged(i),
-                    ),
-                  ),
-                  if (i < 2) const SizedBox(width: LuminSpacing.sm),
-                ],
-              ],
-            ),
-            const SizedBox(height: LuminSpacing.md),
-            Text(
-              _description(mode),
-              style: const TextStyle(
-                color: LuminColors.textSecondary,
-                fontSize: 12,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  String _description(int m) {
-    switch (m) {
-      case 0:
-        return 'Auto-trade disabled. Signals still publish to Telegram.';
-      case 1:
-        return 'Paper mode — fills are simulated, no real orders. Zero risk.';
-      case 2:
-        return 'Live — real orders on Binance Futures. Risk gates active.';
-      default:
-        return '';
-    }
-  }
-}
-
-class _ModeButton extends StatelessWidget {
-  const _ModeButton({
-    required this.label,
-    required this.icon,
-    required this.selected,
-    required this.color,
-    required this.onTap,
-  });
-
-  final String label;
-  final IconData icon;
-  final bool selected;
-  final Color color;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final disabled = onTap == null;
-    return Material(
-      color: Colors.transparent,
-      borderRadius: BorderRadius.circular(LuminRadii.md),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(LuminRadii.md),
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          padding: const EdgeInsets.symmetric(vertical: LuminSpacing.md),
-          decoration: BoxDecoration(
-            color: selected ? color.withOpacity(0.15) : LuminColors.bgElevated,
-            borderRadius: BorderRadius.circular(LuminRadii.md),
-            border: Border.all(
-              color: selected ? color.withOpacity(0.50) : LuminColors.cardBorder,
-            ),
-          ),
-          child: Opacity(
-            opacity: disabled ? 0.6 : 1.0,
-            child: Column(
-              children: [
-                Icon(
-                  icon,
-                  color: selected ? color : LuminColors.textSecondary,
-                  size: 22,
-                ),
-                const SizedBox(height: LuminSpacing.xs),
-                Text(
-                  label,
-                  style: TextStyle(
-                    color: selected ? color : LuminColors.textSecondary,
-                    fontSize: 12,
-                    fontWeight:
-                        selected ? FontWeight.w600 : FontWeight.w500,
-                    letterSpacing: 0.3,
-                  ),
-                ),
-              ],
-            ),
           ),
         ),
       ),
@@ -1413,134 +1220,6 @@ class _PositionRow extends StatelessWidget {
   }
 }
 
-class _ActivityCard extends StatelessWidget {
-  const _ActivityCard({required this.events});
-  final List<MockActivityEvent> events;
-
-  String _agoLabel(int m) {
-    if (m < 60) return '${m}m';
-    if (m < 1440) return '${(m / 60).round()}h';
-    return '${(m / 1440).round()}d';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
-      child: LuminCard(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: const [
-                Icon(Icons.list_alt_outlined,
-                    color: LuminColors.accent, size: 16),
-                SizedBox(width: LuminSpacing.xs),
-                Text(
-                  'ACTIVITY',
-                  style: TextStyle(
-                    color: LuminColors.textMuted,
-                    fontSize: 10,
-                    letterSpacing: 1.2,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: LuminSpacing.md),
-            if (events.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: LuminSpacing.lg),
-                child: Center(
-                  child: Text(
-                    'No activity yet',
-                    style: TextStyle(
-                      color: LuminColors.textMuted,
-                      fontSize: 13,
-                    ),
-                  ),
-                ),
-              )
-            else
-              for (int i = 0; i < events.length; i++) ...[
-                _ActivityRow(
-                  event: events[i],
-                  ago: _agoLabel(events[i].minutesAgo),
-                ),
-                if (i < events.length - 1)
-                  const SizedBox(height: LuminSpacing.md),
-              ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ActivityRow extends StatelessWidget {
-  const _ActivityRow({required this.event, required this.ago});
-  final MockActivityEvent event;
-  final String ago;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 32,
-          height: 32,
-          decoration: BoxDecoration(
-            color: event.color.withOpacity(0.15),
-            borderRadius: BorderRadius.circular(LuminRadii.sm),
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            event.kind,
-            style: TextStyle(
-              color: event.color,
-              fontSize: 9,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.5,
-            ),
-          ),
-        ),
-        const SizedBox(width: LuminSpacing.md),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                event.title,
-                style: const TextStyle(
-                  color: LuminColors.textPrimary,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                event.subtitle,
-                style: const TextStyle(
-                  color: LuminColors.textSecondary,
-                  fontSize: 11,
-                ),
-              ),
-            ],
-          ),
-        ),
-        Text(
-          ago,
-          style: const TextStyle(
-            color: LuminColors.textMuted,
-            fontSize: 11,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 /// Section-shaped skeleton rendered before the first engine emit lands
 /// (cold start with no cache).  Mirrors the Trade page layout: mode
 /// pill row + balance card + positions list (3 row placeholders) +
@@ -1904,601 +1583,6 @@ class _EmbeddedPaperTrades extends StatelessWidget {
 }
 
 
-/// Banner shown at the top of the Trade tab when the user can't
-/// currently auto-trade — engine PR-14 follow-up 3/3.
-///
-/// Two distinct messages:
-///   * Globally disabled (operator hasn't flipped
-///     ``auto_trade_globally_enabled``) — "Auto-trade is paused
-///     engine-wide".
-///   * User-specifically disabled (per-user circuit breaker tripped
-///     or operator manual action) — "Your auto-trade is disabled.
-///     Contact support to re-enable."  The disabledReason field
-///     when populated is appended for context.
-class _AutoTradeDisabledBanner extends StatelessWidget {
-  const _AutoTradeDisabledBanner({required this.status});
-
-  final AutoTradeUserStatus status;
-
-  @override
-  Widget build(BuildContext context) {
-    final isUserSpecific = status.autoTradeUserDisabled;
-    final title = isUserSpecific
-        ? 'Your auto-trade is disabled'
-        : 'Auto-trade paused engine-wide';
-    final body = isUserSpecific
-        ? 'Your account has been auto-disabled by a safety check.  '
-            'Contact support via the Lumin Telegram channel to '
-            're-enable.${status.disabledReason.isNotEmpty ? "\n\nReason: ${status.disabledReason}" : ""}'
-        : 'The operator has not enabled auto-trade engine-wide yet.  '
-            'New positions will not be placed until the global '
-            'enable flag is flipped.';
-    return Container(
-      margin: const EdgeInsets.symmetric(
-        horizontal: LuminSpacing.lg,
-        vertical: LuminSpacing.sm,
-      ),
-      padding: const EdgeInsets.all(LuminSpacing.md),
-      decoration: BoxDecoration(
-        color: LuminColors.bgCard,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: isUserSpecific ? LuminColors.loss : LuminColors.warn,
-          width: 1,
-        ),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(
-            isUserSpecific ? Icons.block : Icons.pause_circle_outline,
-            color: isUserSpecific ? LuminColors.loss : LuminColors.warn,
-            size: 20,
-          ),
-          const SizedBox(width: LuminSpacing.sm),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: TextStyle(
-                    color: isUserSpecific
-                        ? LuminColors.loss
-                        : LuminColors.warn,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 13,
-                  ),
-                ),
-                const SizedBox(height: LuminSpacing.xs),
-                Text(
-                  body,
-                  style: const TextStyle(
-                    color: LuminColors.textPrimary,
-                    fontSize: 12,
-                    height: 1.4,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-
-/// Per-user auto-pause banner (engine PR #479).
-///
-/// Renders on the Live tab when ``data.userSettings.pausedReason`` is set,
-/// which happens after the engine sees N consecutive Binance ``-2019``
-/// (insufficient margin) rejections for this user. Carries an inline
-/// "Resume" button that fires :meth:`LuminRepository.resumeMineAutoTrade`
-/// to clear the pause; the parent's ``onResumed`` callback triggers a
-/// refresh so the banner disappears and Recent Activity starts updating
-/// again on the next signal.
-///
-/// Why a separate banner rather than reusing ``_AutoTradeDisabledBanner``:
-/// the existing banner is sourced from ``AutoTradeUserStatus`` (the
-/// engine-wide + per-user safety-gate result), and its messaging is
-/// "contact support" — the user can't self-recover. Auto-pause is the
-/// opposite: it IS the user's job to fix (top up Futures wallet) and
-/// they CAN self-recover (tap Resume).  Sharing the widget would force
-/// awkward branches; cleaner to keep them as sibling banners.
-class _AutoPauseBanner extends StatefulWidget {
-  const _AutoPauseBanner({
-    required this.settings,
-    required this.onResumed,
-  });
-
-  final AutoTradeSettings settings;
-  final Future<void> Function() onResumed;
-
-  @override
-  State<_AutoPauseBanner> createState() => _AutoPauseBannerState();
-}
-
-class _AutoPauseBannerState extends State<_AutoPauseBanner> {
-  bool _resuming = false;
-
-  /// Plain-English copy keyed off the engine's typed reason string.
-  /// Forward-compatible default: when the engine introduces a new
-  /// reason (e.g. ``'binance_key_revoked'``), the app renders a
-  /// generic banner instead of a blank — the raw reason becomes the
-  /// subtitle so the operator can still see what happened.
-  String get _title {
-    switch (widget.settings.pausedReason) {
-      case 'insufficient_margin':
-        return 'Auto-trade paused — wallet empty';
-      default:
-        return 'Auto-trade paused';
-    }
-  }
-
-  String get _body {
-    switch (widget.settings.pausedReason) {
-      case 'insufficient_margin':
-        return 'Your Binance Futures wallet does not have enough '
-            'USDT to open positions at your current notional. '
-            'Top up the Futures wallet, then tap Resume.';
-      default:
-        return 'The engine paused dispatching for this account. '
-            'Reason: ${widget.settings.pausedReason ?? "unknown"}. '
-            'Tap Resume to clear once the underlying issue is fixed.';
-    }
-  }
-
-  Future<void> _onResume() async {
-    if (_resuming) return;
-    setState(() => _resuming = true);
-    final repo = AppConfigScope.of(context).repo;
-    try {
-      final cleared = await repo.resumeMineAutoTrade();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            cleared
-                ? 'Auto-trade resumed. Next signal will dispatch.'
-                : 'Already active — no pause to clear.',
-          ),
-          duration: const Duration(seconds: 3),
-          backgroundColor: LuminColors.success,
-        ),
-      );
-      await widget.onResumed();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Resume failed: $e'),
-          duration: const Duration(seconds: 4),
-          backgroundColor: LuminColors.loss,
-        ),
-      );
-    } finally {
-      if (mounted) setState(() => _resuming = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.symmetric(
-        horizontal: LuminSpacing.lg,
-        vertical: LuminSpacing.sm,
-      ),
-      padding: const EdgeInsets.all(LuminSpacing.md),
-      decoration: BoxDecoration(
-        color: LuminColors.bgCard,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: LuminColors.warn, width: 1),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Icon(
-                Icons.pause_circle_outline,
-                color: LuminColors.warn,
-                size: 20,
-              ),
-              const SizedBox(width: LuminSpacing.sm),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _title,
-                      style: const TextStyle(
-                        color: LuminColors.warn,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13,
-                      ),
-                    ),
-                    const SizedBox(height: LuminSpacing.xs),
-                    Text(
-                      _body,
-                      style: const TextStyle(
-                        color: LuminColors.textPrimary,
-                        fontSize: 12,
-                        height: 1.4,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: LuminSpacing.sm),
-          Align(
-            alignment: Alignment.centerRight,
-            child: FilledButton.icon(
-              style: FilledButton.styleFrom(
-                backgroundColor: LuminColors.warn,
-                foregroundColor: LuminColors.bgDeep,
-              ),
-              onPressed: _resuming ? null : _onResume,
-              icon: _resuming
-                  ? const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 1.6,
-                        color: LuminColors.bgDeep,
-                      ),
-                    )
-                  : const Icon(Icons.play_arrow, size: 16),
-              label: const Text(
-                'Resume',
-                style: TextStyle(fontWeight: FontWeight.w700),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-
-/// Live-tab gate-state card: shows the four configurable auto-trade
-/// gates the FSM checks before placing any order, plus the symbol
-/// allowlist as a footnote.  Card colour reflects ``armed`` —
-/// green when all four gates pass + user_mode == 'live', warn-yellow
-/// otherwise.
-class _AutoTradeArmedCard extends StatelessWidget {
-  const _AutoTradeArmedCard({
-    required this.runtime,
-    required this.userSettings,
-  });
-
-  final AutoTradeRuntimeStatus runtime;
-
-  /// Per-user settings — carries the engine PR #479 ``pausedReason``
-  /// flag the dispatcher sets after consecutive ``-2019`` rejections.
-  /// Folded into the "Your account not paused" gate below so the card
-  /// matches the [_AutoPauseBanner] sibling above it (pre-2026-05-24,
-  /// the card read ``autoTradeUserDisabled`` only and would show "not
-  /// paused ✓" while the banner above declared the user paused —
-  /// owner-reported contradiction).
-  final AutoTradeSettings userSettings;
-
-  /// True when EITHER the engine-wide per-user circuit breaker has
-  /// tripped (operator-managed, ``contact support`` flow) OR the
-  /// dispatcher has auto-paused this user (#479, self-recoverable
-  /// via the Resume button on the banner above) — read from BOTH the
-  /// user-settings row and the server's runtime-status ``auto_paused``
-  /// field (2026-07-17 truth fields; the server value is what dispatch
-  /// actually checks). Any of these stops live orders — collapsing
-  /// them under one gate row keeps the card honest about whether
-  /// dispatch can fire.
-  bool get _isPaused =>
-      runtime.autoTradeUserDisabled ||
-      userSettings.isAutoPaused ||
-      (runtime.autoPaused ?? false);
-
-  /// Card-level "armed" state: the engine's snapshot AND no per-user
-  /// pause. The engine's ``armed`` already accounts for
-  /// ``autoTradeUserDisabled``; we AND-in ``isAutoPaused`` because
-  /// the engine's runtime status is engine-wide-stack snapshot, not
-  /// per-user pause state.
-  bool get _armed => runtime.armed && !userSettings.isAutoPaused;
-
-  @override
-  Widget build(BuildContext context) {
-    final accent = _armed ? LuminColors.success : LuminColors.warn;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
-      child: LuminCard(
-        padding: const EdgeInsets.all(LuminSpacing.md),
-        border: Border.all(color: accent.withOpacity(0.40)),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  _armed
-                      ? Icons.shield_outlined
-                      : Icons.shield_moon_outlined,
-                  size: 18,
-                  color: accent,
-                ),
-                const SizedBox(width: LuminSpacing.sm),
-                Text(
-                  _armed
-                      ? 'Auto-trade ARMED'
-                      : 'Auto-trade not armed',
-                  style: TextStyle(
-                    color: accent,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.4,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: LuminSpacing.sm),
-            _gateRow(
-              label: 'Engine-wide enabled',
-              ok: runtime.autoTradeGloballyEnabled,
-              hint: runtime.autoTradeGloballyEnabled
-                  ? null
-                  : 'Operator hasn\'t flipped the global flag yet.',
-            ),
-            _gateRow(
-              label: 'Your account not paused',
-              ok: !_isPaused,
-              hint: _isPaused
-                  ? (userSettings.isAutoPaused
-                      ? (userSettings.pausedReason == 'insufficient_margin'
-                          ? 'Wallet empty — top up + tap Resume above.'
-                          : 'Auto-paused: ${userSettings.pausedReason ?? "unknown"}. '
-                              'Tap Resume above.')
-                      : (runtime.autoPaused ?? false)
-                          ? 'Dispatcher paused your account — top up if '
-                              'needed, then tap Resume above.'
-                          : 'Per-user circuit breaker tripped.')
-                  : null,
-            ),
-            _gateRow(
-              label: 'Binance key connected',
-              ok: runtime.binanceKeyConnected,
-              hint: runtime.binanceKeyConnected
-                  ? null
-                  : 'Settings → Server-side auto-trade.',
-            ),
-            _gateRow(
-              label: 'Mode = live',
-              ok: runtime.userMode == 'live' || runtime.userMode == 'both',
-              hint: (runtime.userMode == 'live' || runtime.userMode == 'both')
-                  ? null
-                  : runtime.userMode == null
-                      ? 'Settings → Auto-trade → enable Live.'
-                      : 'Currently ${runtime.userMode!.toUpperCase()} — '
-                          'enable Live in Auto-trade settings.',
-            ),
-            // Tier gate (2026-07-17 truth fields) — the dispatcher skips
-            // non-AUTO-tier users silently BEFORE writing any activity
-            // row, so this card is the only place a lapsed/free account
-            // learns why nothing trades. Hidden on older engines that
-            // don't send the field (null = unknown ≠ false).
-            if (runtime.tierAllowsAuto != null)
-              _gateRow(
-                label: 'Plan allows auto-trade',
-                ok: runtime.tierAllowsAuto!,
-                hint: runtime.tierAllowsAuto!
-                    ? null
-                    : 'Hands-off auto-trade needs the Auto plan '
-                        '(current: ${runtime.userTier ?? "free"}). '
-                        'Menu → Subscription.',
-              ),
-            // Block-all eligibility filters — an explicit empty
-            // path/regime preference set matches NO signal, guaranteed
-            // zero orders; render as a failing gate, not a footnote.
-            if (runtime.preferencesBlockAll)
-              _gateRow(
-                label: 'Eligibility filters allow signals',
-                ok: false,
-                hint: 'Your path/regime filters exclude every signal. '
-                    'Settings → Auto-trade → What live-trades for me.',
-              ),
-            // Symbol allowlist — only meaningful once the user has a
-            // Binance key connected (otherwise no orders flow through
-            // anyway, so showing "85 active symbols" is just clutter).
-            // When shown, render as a compact count + "view details"
-            // link to Settings → Symbol preference rather than dumping
-            // the full 85-pair list as a wall of text.  Owner-reported
-            // 2026-05-23: "pairs list is ugly".
-            if (runtime.binanceKeyConnected &&
-                runtime.allowedSymbols.isNotEmpty) ...[
-              const SizedBox(height: LuminSpacing.sm),
-              _SymbolAllowlistSummary(runtime: runtime),
-            ],
-            // Restrictive-but-non-empty eligibility filters: orders are
-            // still possible (per-signal filter, doesn't unarm) — shown
-            // as a muted footnote so a "why did that signal not trade
-            // for me" question answers itself.
-            if (!runtime.preferencesBlockAll &&
-                (runtime.pathPreference != null ||
-                    runtime.regimePreference != null)) ...[
-              const SizedBox(height: LuminSpacing.xs),
-              Text(
-                _prefsFootnote(),
-                style: const TextStyle(
-                  color: LuminColors.textMuted,
-                  fontSize: 11,
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// One-line summary of the user's live eligibility filters, e.g.
-  /// "Filtered: 3 of 7 paths · 2 regimes auto-trade for you."
-  String _prefsFootnote() {
-    final parts = <String>[];
-    final paths = runtime.pathPreference;
-    if (paths != null) {
-      final total = runtime.allowedPaths.length;
-      parts.add(
-        total > 0
-            ? '${paths.length} of $total paths'
-            : '${paths.length} path${paths.length == 1 ? "" : "s"}',
-      );
-    }
-    final regimes = runtime.regimePreference;
-    if (regimes != null) {
-      parts.add('${regimes.length} regime${regimes.length == 1 ? "" : "s"}');
-    }
-    return 'Filtered: ${parts.join(" · ")} auto-trade for you.';
-  }
-
-  Widget _gateRow({
-    required String label,
-    required bool ok,
-    String? hint,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(
-            ok ? Icons.check_circle_outline : Icons.cancel_outlined,
-            size: 14,
-            color: ok ? LuminColors.success : LuminColors.warn,
-          ),
-          const SizedBox(width: LuminSpacing.sm),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: const TextStyle(
-                    color: LuminColors.textPrimary,
-                    fontSize: 12,
-                  ),
-                ),
-                if (hint != null)
-                  Text(
-                    hint,
-                    style: const TextStyle(
-                      color: LuminColors.textMuted,
-                      fontSize: 10,
-                      height: 1.3,
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-
-/// Compact replacement for the pre-2026-05-23 80-pair wall-of-text
-/// inside :class:`_AutoTradeArmedCard`.  Renders one line summarising
-/// the user's effective allowlist + a single-line variant of the
-/// "blast-radius cap" footnote.  Detail belongs on Settings → Symbol
-/// preference, not on the Live tab.
-///
-/// Three states:
-///   * Effective list empty: explicit "opted out of everything" note.
-///   * Effective < engine cap (user has narrowed): "N of M symbols".
-///   * Effective == engine cap: "N symbols allowed".
-class _SymbolAllowlistSummary extends StatelessWidget {
-  const _SymbolAllowlistSummary({required this.runtime});
-
-  final AutoTradeRuntimeStatus runtime;
-
-  @override
-  Widget build(BuildContext context) {
-    final effective = runtime.effectiveAllowedSymbols.length;
-    final total = runtime.allowedSymbols.length;
-    final narrowed = effective != total;
-    final String headline;
-    final Color headlineColor;
-    if (effective == 0) {
-      headline = 'You opted out of every symbol';
-      headlineColor = LuminColors.loss;
-    } else if (narrowed) {
-      headline = '$effective of $total symbols enabled';
-      headlineColor = LuminColors.accent;
-    } else {
-      headline = '$total symbols enabled — engine allowlist';
-      headlineColor = LuminColors.textSecondary;
-    }
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(LuminRadii.sm),
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => const SymbolPreferencePage(),
-          ),
-        ),
-        child: Container(
-          padding: const EdgeInsets.symmetric(
-            horizontal: LuminSpacing.sm,
-            vertical: LuminSpacing.xs,
-          ),
-          decoration: BoxDecoration(
-            color: LuminColors.bgDeep,
-            borderRadius: BorderRadius.circular(LuminRadii.sm),
-          ),
-          child: Row(
-            children: [
-              const Icon(
-                Icons.filter_list,
-                size: 14,
-                color: LuminColors.textMuted,
-              ),
-              const SizedBox(width: LuminSpacing.xs),
-              Expanded(
-                child: Text(
-                  headline,
-                  style: TextStyle(
-                    color: headlineColor,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.2,
-                  ),
-                ),
-              ),
-              const Text(
-                'Edit',
-                style: TextStyle(
-                  color: LuminColors.accent,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(width: 2),
-              const Icon(
-                Icons.arrow_forward,
-                size: 12,
-                color: LuminColors.accent,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-
 /// Live-tab open-positions card backed by ``/api/auto-trade/positions``.
 /// Empty list → empty-state copy explaining that auto-trade will
 /// surface positions here when a whitelisted signal fires.
@@ -2549,9 +1633,9 @@ class _ServerPositionsCard extends StatelessWidget {
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: LuminSpacing.sm),
                 child: Text(
-                  'No open positions yet.  When a whitelisted signal '
-                  'fires and every gate above is green, Lumin places the '
-                  'order on Binance and it shows up here.',
+                  'No open positions right now.  When an eligible signal '
+                  'fires, Lumin places the order on your Binance account '
+                  'and it shows up here.',
                   style: TextStyle(
                     color: LuminColors.textSecondary,
                     fontSize: 11,
@@ -2697,12 +1781,28 @@ class _ServerPositionRow extends StatelessWidget {
 /// natural follow-on from "what's open on my account" and natural
 /// precursor to "what's the engine seeing globally".
 class _RecentDispatchEventsCard extends StatelessWidget {
-  const _RecentDispatchEventsCard({required this.events});
+  const _RecentDispatchEventsCard({
+    required this.events,
+    this.phoneOrders = const [],
+  });
 
   final List<DispatchEvent> events;
 
+  /// Orders placed from this phone via device keys (one-tap signal
+  /// takes + alert takes), merged chronologically with the server-side
+  /// events so the card is the complete "what actually executed on my
+  /// Binance account" record (owner decision, 2026-07-17).
+  final List<OrderLogEntry> phoneOrders;
+
   @override
   Widget build(BuildContext context) {
+    // Merge the two sources newest-first.
+    final rows = <(DateTime, Widget)>[
+      for (final e in events)
+        (e.timestamp, _DispatchEventRow(event: e)),
+      for (final o in phoneOrders)
+        (o.placedAt, _PhoneOrderRow(entry: o)),
+    ]..sort((a, b) => b.$1.compareTo(a.$1));
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
       child: LuminCard(
@@ -2719,7 +1819,7 @@ class _RecentDispatchEventsCard extends StatelessWidget {
                 ),
                 const SizedBox(width: LuminSpacing.sm),
                 const Text(
-                  'RECENT ACTIVITY ON YOUR ACCOUNT',
+                  'YOUR TRADES',
                   style: TextStyle(
                     color: LuminColors.textMuted,
                     fontSize: 10,
@@ -2729,7 +1829,7 @@ class _RecentDispatchEventsCard extends StatelessWidget {
                 ),
                 const Spacer(),
                 Text(
-                  '${events.length}',
+                  '${rows.length}',
                   style: const TextStyle(
                     color: LuminColors.textSecondary,
                     fontSize: 11,
@@ -2739,13 +1839,13 @@ class _RecentDispatchEventsCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: LuminSpacing.sm),
-            if (events.isEmpty)
+            if (rows.isEmpty)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: LuminSpacing.sm),
                 child: Text(
-                  'No order activity on your account yet.  Each time the '
-                  'engine tries to place an order for you — successful or '
-                  'rejected — it will show up here with the reason.',
+                  'No trades on your account yet.  Every order Lumin '
+                  'places — or skips — for you shows up here with the '
+                  'reason.',
                   style: TextStyle(
                     color: LuminColors.textSecondary,
                     fontSize: 11,
@@ -2754,7 +1854,150 @@ class _RecentDispatchEventsCard extends StatelessWidget {
                 ),
               )
             else
-              for (final e in events) _DispatchEventRow(event: e),
+              for (final (_, w) in rows) w,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
+/// One trade you place from THIS phone (device-key path: one-tap
+/// signal takes and alert takes) — read from the local order log,
+/// which records what Binance actually accepted.
+class _PhoneOrderRow extends StatelessWidget {
+  const _PhoneOrderRow({required this.entry});
+
+  final OrderLogEntry entry;
+
+  @override
+  Widget build(BuildContext context) {
+    final isBuy = entry.side == 'BUY';
+    final dirColor = isBuy ? LuminColors.success : LuminColors.loss;
+    final isAlert = entry.signalId.startsWith('alert-');
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: LuminColors.accent.withOpacity(0.16),
+              borderRadius: BorderRadius.circular(LuminRadii.sm),
+            ),
+            child: const Text(
+              'PHONE',
+              style: TextStyle(
+                color: LuminColors.accent,
+                fontSize: 9,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ),
+          const SizedBox(width: LuminSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      entry.symbol,
+                      style: const TextStyle(
+                        color: LuminColors.textPrimary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(width: LuminSpacing.sm),
+                    Text(
+                      isBuy ? 'LONG' : 'SHORT',
+                      style: TextStyle(
+                        color: dirColor,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      _DispatchEventRow._formatRelativeTime(entry.placedAt),
+                      style: const TextStyle(
+                        color: LuminColors.textMuted,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  isAlert
+                      ? 'Placed from this phone (alert take)'
+                      : 'Placed from this phone (signal take)',
+                  style: const TextStyle(
+                    color: LuminColors.textSecondary,
+                    fontSize: 11,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+/// Merged empty state — replaces the two stacked verbose empty cards
+/// (positions + activity) that made a fresh account's Live tab read
+/// like a wall of warnings (owner screenshots, 2026-07-17).
+class _NoTradesYetCard extends StatelessWidget {
+  const _NoTradesYetCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
+      child: LuminCard(
+        padding: const EdgeInsets.all(LuminSpacing.lg),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: const [
+            Row(
+              children: [
+                Icon(
+                  Icons.hourglass_empty_rounded,
+                  size: 16,
+                  color: LuminColors.textSecondary,
+                ),
+                SizedBox(width: LuminSpacing.sm),
+                Text(
+                  'NO TRADES YET',
+                  style: TextStyle(
+                    color: LuminColors.textMuted,
+                    fontSize: 10,
+                    letterSpacing: 1.2,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: LuminSpacing.sm),
+            Text(
+              'When Lumin places — or skips — a trade on your account, '
+              'your positions and full activity appear here with the '
+              'reason for every decision.',
+              style: TextStyle(
+                color: LuminColors.textSecondary,
+                fontSize: 12,
+                height: 1.5,
+              ),
+            ),
           ],
         ),
       ),
@@ -2820,6 +2063,18 @@ class _DispatchEventRow extends StatelessWidget {
                         letterSpacing: 0.4,
                       ),
                     ),
+                    if (event.source == 'manual_take' ||
+                        event.source == 'auto') ...[
+                      const SizedBox(width: LuminSpacing.sm),
+                      Text(
+                        event.source == 'manual_take' ? 'One-tap' : 'Auto',
+                        style: const TextStyle(
+                          color: LuminColors.textMuted,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
                     const Spacer(),
                     Text(
                       _formatRelativeTime(event.timestamp),

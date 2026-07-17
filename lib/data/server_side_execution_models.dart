@@ -414,6 +414,7 @@ class DispatchEvent {
     this.rejectDetail,
     this.rejectBinanceCode,
     this.rejectBinanceMsg,
+    this.source,
   });
 
   final String eventId;
@@ -428,6 +429,11 @@ class DispatchEvent {
   final String? rejectDetail;
   final int? rejectBinanceCode;
   final String? rejectBinanceMsg;
+
+  /// How the order originated: 'auto' (hands-off dispatch) or
+  /// 'manual_take' (one-tap take).  Null on engines that pre-date the
+  /// field (2026-07-17).
+  final String? source;
 
   bool get isPlaced => outcome == 'placed';
   bool get isRejected => outcome == 'rejected';
@@ -447,6 +453,7 @@ class DispatchEvent {
         rejectDetail: j['reject_detail'] as String?,
         rejectBinanceCode: (j['reject_binance_code'] as num?)?.toInt(),
         rejectBinanceMsg: j['reject_binance_msg'] as String?,
+        source: j['source'] as String?,
       );
 }
 
