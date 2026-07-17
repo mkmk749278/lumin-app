@@ -16,6 +16,7 @@ import 'data/app_config.dart';
 import 'data/auth_service.dart';
 import 'data/consent_storage.dart';
 import 'data/notification_service.dart';
+import 'data/repository.dart';
 import 'features/auth/pages/phone_signin_page.dart';
 import 'features/onboarding/pages/welcome_consent_page.dart';
 import 'features/onboarding/pages/welcome_page.dart';
@@ -246,6 +247,33 @@ class _AuthGateState extends State<_AuthGate> {
     });
   }
 
+  /// Restore the engine metadata (tier / user_id / paid_until) for a
+  /// returning session: persisted store first (instant, offline-safe),
+  /// then a background `GET /api/profile` refresh so the engine's
+  /// current truth wins.  A network failure is non-fatal — the
+  /// persisted values already hydrated, and every server-side gate
+  /// enforces entitlement regardless of what the client believes.
+  Future<void> _hydrateEngineMetadata(
+    AuthService auth,
+    LuminRepository repo,
+  ) async {
+    try {
+      await auth.hydrateEngineMetadata();
+    } catch (_) {}
+    try {
+      final p = await repo.fetchProfile();
+      auth.cacheEngineMetadata(
+        userId: p.userId,
+        tier: p.tier,
+        paidUntil: p.paidUntil,
+        needsOnboarding: p.needsOnboarding,
+        displayName: p.displayName,
+      );
+    } catch (_) {
+      // Offline / engine unreachable — keep the hydrated values.
+    }
+  }
+
   Widget _blankSplash() => const Scaffold(
         backgroundColor: Color(0xFF0A0E1A),
         body: SizedBox.shrink(),
@@ -297,10 +325,21 @@ class _AuthGateState extends State<_AuthGate> {
         // a build; the SwrCache's in-flight dedup handles any race where the
         // user taps a tab during the prewarm. If the background verify later
         // fails, signOut clears the cache, so warming optimistically is safe.
+        //
+        // Entitlement hydration (2026-07-17 fix) rides the same one-shot:
+        // the tier / user_id cache is memory-only inside AuthService, so a
+        // cold start with a restored Firebase session used to render every
+        // paid subscriber as free ("Sign in with phone first", upsell
+        // sheets) until they visited the Profile page.  Hydrate instantly
+        // from the persisted per-UID store, then refresh from the engine —
+        // which stays the entitlement source of truth.
         if (!_prewarmed) {
           _prewarmed = true;
+          final auth = scope.auth!;
+          final repo = scope.repo;
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            scope.repo.prewarmCaches();
+            repo.prewarmCaches();
+            _hydrateEngineMetadata(auth, repo);
           });
         }
         return const NavShell();
