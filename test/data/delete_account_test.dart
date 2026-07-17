@@ -10,9 +10,9 @@
 ///   matching on ``tag`` can reliably distinguish failure modes.
 ///
 /// HttpRepository.deleteAccount + the ApiError-to-DeleteAccountException
-/// translation is exercised manually against the live backend (the
-/// existing lumin-app test suite does not have an HttpRepository test
-/// scaffolding, and introducing one is out of scope).
+/// translation is covered in test/data/http_repository_test.dart (the
+/// HttpRepository scaffolding this header once declared out of scope
+/// shipped 2026-07-17).
 library;
 
 import 'package:flutter_test/flutter_test.dart';

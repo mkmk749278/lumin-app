@@ -200,9 +200,36 @@ jobs:
         # First-wave money-path coverage: HMAC signing in BinanceClient,
         # idempotency + capacity-prune in OrderLogService, settings
         # validation + idempotency short-circuit in OrderExecutor.
+        # Second wave (2026-07-17): per-user Binance key custody, the
+        # sideload self-updater, Play Billing verify glue, boot config
+        # selection, and HTTP-level LuminApiClient / HttpRepository tests.
         # Adding tests gates this build job so a regression in the
         # money-moving layer blocks the APK before subscribers install.
-        run: flutter test --reporter=expanded
+        # --coverage writes coverage/lcov.info for the summary step below;
+        # coverage is reported, never gated — a dip must not block a fix.
+        run: flutter test --reporter=expanded --coverage
+
+      - name: Coverage summary
+        if: always()
+        run: |
+          if [ -f coverage/lcov.info ]; then
+            echo '## Test coverage' >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            awk -F'[:,]' '
+              /^SF:/ { file=$2 }
+              /^LF:/ { lf=$2 }
+              /^LH:/ { lh=$2 }
+              /^end_of_record/ {
+                total_lf+=lf; total_lh+=lh;
+                pct = (lf>0) ? 100*lh/lf : 0;
+                printf "%6.1f%%  %s\n", pct, file;
+              }
+              END {
+                if (total_lf>0) printf "%6.1f%%  TOTAL\n", 100*total_lh/total_lf;
+              }
+            ' coverage/lcov.info | sort -n >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Decode keystore (release only)
         if: env.ANDROID_KEYSTORE_B64 != ''
