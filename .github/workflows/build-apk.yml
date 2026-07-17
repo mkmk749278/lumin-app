@@ -330,8 +330,24 @@ jobs:
           # or strips them without an explicit keep.
           -keep class com.google.android.play.core.** { *; }
           -dontwarn com.google.android.play.core.**
-          # Firebase / Play services / Billing ship consumer keep rules inside
-          # their AARs — no extra rules required here.
+          # Firebase Phone Auth app verification (2026-07-17): the first full-R8
+          # release (v287) broke sign-in on SIDELOADED installs with "missing a
+          # valid app identifier … Play Integrity checks, and reCAPTCHA checks
+          # were unsuccessful" — pre-R8 builds sign in fine, Play installs pass
+          # via Play Integrity.  A sideloaded install can only authenticate
+          # through the reCAPTCHA fallback, and R8 full mode strips/renames
+          # parts of that path despite the AARs' consumer rules.  Keep the
+          # reCAPTCHA client SDK and the Firebase Auth surface — these are
+          # public Google SDKs, so keeping their names costs no meaningful
+          # obfuscation (our own code is protected by --obfuscate on the Dart
+          # side).  The sideload GitHub-Releases channel is production for
+          # pre-Play installs, not just a test convenience.
+          -keep class com.google.android.recaptcha.** { *; }
+          -dontwarn com.google.android.recaptcha.**
+          -keep class com.google.firebase.auth.** { *; }
+          # Other Firebase / Play services / Billing libs ship consumer keep
+          # rules inside their AARs that full mode does honour — no further
+          # blanket keeps unless a regression proves otherwise.
           RULES
           python3 << 'PYEOF'
           from pathlib import Path
