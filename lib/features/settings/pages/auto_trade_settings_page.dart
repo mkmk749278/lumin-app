@@ -1081,9 +1081,11 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
             SizedBox(width: LuminSpacing.sm),
             Expanded(
               child: Text(
-                'Live mode requires API keys connected. '
-                'B12 caps leverage at 30×. '
-                'Set notional ≤ (Futures wallet ÷ leverage) to avoid -2019.',
+                'Live mode requires a connected Binance key. '
+                'Leverage is capped at 30× for safety. '
+                'Keep your position size at or below (Futures wallet ÷ '
+                'leverage) so Binance doesn\'t reject orders for '
+                'insufficient margin.',
                 style: TextStyle(
                   color: LuminColors.warn,
                   fontSize: 11,

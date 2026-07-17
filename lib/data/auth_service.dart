@@ -30,6 +30,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 
+import 'engine_metadata_store.dart';
+
 /// Result of a successful `POST /api/auth/telegram-otp/issue`.
 ///
 /// `channelUsed` is always `"telegram"` for this path — kept as a
@@ -72,11 +74,12 @@ class AuthService {
   final FlutterSecureStorage _storage;
   final http.Client _client;
 
-  // Cached metadata from the most recent telegram-otp verify response.
-  // Populated on signin via custom token; survives until signOut /
-  // process restart.  SMS-only signins leave this null — call sites
-  // already tolerate that (they treat null as "not yet known, render
-  // the safe default").
+  // Cached metadata from the most recent engine round-trip (telegram
+  // verify / profile fetch / Play purchase).  Mirrored to
+  // [EngineMetadataStore] on every write and re-hydrated on cold start
+  // via [hydrateEngineMetadata] so a paying subscriber's tier survives
+  // an app restart (2026-07-17 fix — before this, restart made every
+  // paid user look free until they visited the Profile page).
   int? _cachedUserId;
   String? _cachedTier;
   String? _cachedPaidUntil;
@@ -245,14 +248,24 @@ class AuthService {
     _cachedTier = j['tier'] as String?;
     _cachedPaidUntil = j['paid_until'] as String?;
     _cachedNeedsOnboarding = j['needs_onboarding'] as bool? ?? false;
-    return await _auth.signInWithCustomToken(customToken);
+    final credential = await _auth.signInWithCustomToken(customToken);
+    _persistEngineMetadata();
+    return credential;
   }
 
   // ---- Sign out + legacy cleanup ---------------------------------------
 
-  /// Wipe the Firebase session.  Drops the cached engine metadata
-  /// alongside so the next signin's getters don't surface stale tier.
+  /// Wipe the Firebase session.  Drops the cached engine metadata —
+  /// in-memory AND persisted — so the next signin's getters don't
+  /// surface stale tier (and a different account on the same device
+  /// can never hydrate this user's entitlement).
   Future<void> signOut() async {
+    final uid = _auth.currentUser?.uid;
+    if (uid != null) {
+      try {
+        await EngineMetadataStore.clear(uid);
+      } catch (_) {}
+    }
     _cachedUserId = null;
     _cachedTier = null;
     _cachedPaidUntil = null;
@@ -303,6 +316,52 @@ class AuthService {
   /// what the engine now stores.
   Future<void> markOnboarded() async {
     _cachedNeedsOnboarding = false;
+    _persistEngineMetadata();
+  }
+
+  /// Cold-start hydration: repopulate the in-memory cache from the
+  /// persisted [EngineMetadataStore] entry for the current Firebase
+  /// user.  Instant and offline-safe — the AuthGate calls this the
+  /// moment a restored session is observed, then refreshes from
+  /// `GET /api/profile` in the background (engine stays the source of
+  /// truth; this only prevents the "paid user looks free after every
+  /// restart" window).  No-op when the cache is already populated
+  /// (fresh sign-in) or no user is signed in.
+  Future<void> hydrateEngineMetadata() async {
+    if (_cachedTier != null || _cachedUserId != null) return;
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+    final meta = await EngineMetadataStore.load(uid);
+    if (meta == null) return;
+    _cachedUserId = meta.userId;
+    _cachedTier = meta.tier;
+    _cachedPaidUntil = meta.paidUntil;
+    _cachedNeedsOnboarding = meta.needsOnboarding;
+    if (meta.displayName != null && meta.displayName!.isNotEmpty) {
+      _cachedDisplayName = meta.displayName;
+    }
+    _bumpTier();
+  }
+
+  /// Mirror the in-memory cache to disk, keyed by the current Firebase
+  /// UID.  Fire-and-forget: persistence failing must never block or
+  /// fail a sign-in / purchase path (the engine re-serves the truth on
+  /// the next profile fetch anyway).
+  void _persistEngineMetadata() {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+    unawaited(
+      EngineMetadataStore.save(
+        uid,
+        EngineMetadata(
+          userId: _cachedUserId,
+          tier: _cachedTier,
+          paidUntil: _cachedPaidUntil,
+          needsOnboarding: _cachedNeedsOnboarding,
+          displayName: _cachedDisplayName,
+        ),
+      ).catchError((_) {}),
+    );
   }
 
   /// Hydrate the cached engine metadata from a `GET /api/profile`
@@ -325,6 +384,7 @@ class AuthService {
       _cachedDisplayName = displayName;
     }
     _bumpTier();
+    _persistEngineMetadata();
   }
 
   /// Apply a fresh entitlement after a Google Play purchase verifies
@@ -336,13 +396,17 @@ class AuthService {
     _cachedTier = tier;
     _cachedPaidUntil = paidUntil;
     _bumpTier();
+    _persistEngineMetadata();
   }
 
   /// Cache the user's display name independently — called after signup
   /// completes so the greeting on Pulse renders immediately without a
   /// follow-up profile fetch.
   void cacheDisplayName(String name) {
-    if (name.isNotEmpty) _cachedDisplayName = name;
+    if (name.isNotEmpty) {
+      _cachedDisplayName = name;
+      _persistEngineMetadata();
+    }
   }
 
   /// Display name from the most recent profile fetch or signup, or null

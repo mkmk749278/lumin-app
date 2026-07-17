@@ -7,8 +7,11 @@ import 'package:flutter/material.dart';
 import '../../../data/app_config.dart';
 import '../../../data/country_codes.dart';
 import '../../../data/repository.dart';
+import '../../../shared/format.dart';
 import '../../../shared/tokens.dart';
+import '../../../shared/widgets/free_tier_gate.dart';
 import '../../../shared/widgets/lumin_card.dart';
+import 'subscription_page.dart';
 
 class ProfileSettingsPage extends StatefulWidget {
   const ProfileSettingsPage({super.key});
@@ -47,9 +50,18 @@ class _ProfileSettingsPageState extends State<ProfileSettingsPage> {
   }
 
   Future<void> _load() async {
-    final repo = AppConfigScope.of(context).repo;
+    final scope = AppConfigScope.of(context);
     try {
-      final p = await repo.fetchProfile();
+      final p = await scope.repo.fetchProfile();
+      // Keep the app-wide entitlement cache in lockstep with what this
+      // page renders — a Profile visit doubles as a tier refresh.
+      scope.auth?.cacheEngineMetadata(
+        userId: p.userId,
+        tier: p.tier,
+        paidUntil: p.paidUntil,
+        needsOnboarding: p.needsOnboarding,
+        displayName: p.displayName,
+      );
       if (!mounted) return;
       setState(() {
         _profile = p;
@@ -62,11 +74,12 @@ class _ProfileSettingsPageState extends State<ProfileSettingsPage> {
         _loading = false;
         _loadError = null;
       });
-    } catch (e) {
+    } catch (_) {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _loadError = '$e';
+        _loadError =
+            'Check your connection and try again in a moment.';
       });
     }
   }
@@ -246,6 +259,8 @@ class _ProfileSettingsPageState extends State<ProfileSettingsPage> {
         const SizedBox(height: LuminSpacing.md),
         _phoneRow(),
         const SizedBox(height: LuminSpacing.md),
+        _subscriptionCard(),
+        const SizedBox(height: LuminSpacing.md),
         _displayNameCard(),
         const SizedBox(height: LuminSpacing.md),
         _pickerRow(
@@ -305,23 +320,85 @@ class _ProfileSettingsPageState extends State<ProfileSettingsPage> {
                 ],
               ),
             ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: LuminColors.accent.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(LuminRadii.pill),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// The user's plan, stated plainly.  Replaces the old unlabeled
+  /// "AUTO" pill on the phone row that paying subscribers didn't
+  /// recognise as their subscription status (owner screenshots,
+  /// 2026-07-17).  Taps through to the Subscription page.
+  Widget _subscriptionCard() {
+    final p = _profile;
+    final paid = isPaidTier(p?.tier);
+    final renewal = formatPaidUntil(p?.paidUntil);
+    final title = paid
+        ? '${tierDisplayName(p?.tier)} plan — active'
+        : 'Free plan';
+    final subtitle = paid
+        ? (renewal != null
+            ? 'Renews via Google Play · paid until $renewal'
+            : 'Renews via Google Play')
+        : 'Upgrade to automate your trades';
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
+      child: LuminCard(
+        child: InkWell(
+          borderRadius: BorderRadius.circular(LuminRadii.md),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute<bool>(
+              builder: (_) => const SubscriptionPage(),
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                paid ? Icons.verified_rounded : Icons.workspace_premium_outlined,
+                color: paid ? LuminColors.success : LuminColors.textMuted,
+                size: 18,
               ),
-              child: Text(
-                (p?.tier ?? '—').toUpperCase(),
-                style: const TextStyle(
-                  color: LuminColors.accent,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.6,
+              const SizedBox(width: LuminSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'SUBSCRIPTION',
+                      style: TextStyle(
+                        color: LuminColors.textMuted,
+                        fontSize: 10,
+                        letterSpacing: 1.2,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      title,
+                      style: TextStyle(
+                        color: paid
+                            ? LuminColors.success
+                            : LuminColors.textPrimary,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(
+                        color: LuminColors.textSecondary,
+                        fontSize: 11.5,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ),
-          ],
+              const Icon(Icons.chevron_right,
+                  color: LuminColors.textMuted, size: 18),
+            ],
+          ),
         ),
       ),
     );

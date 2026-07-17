@@ -37,6 +37,7 @@ class BinanceMarketData {
     '15m': '15m',
     '1h': '1h',
     '4h': '4h',
+    '1D': '1d',
   };
 
   /// OHLCV history for [symbol] at [interval] (Binance code, e.g. `15m`).
@@ -81,6 +82,19 @@ class BinanceMarketData {
       if (row is Map<String, dynamic>) out.add(MarketTicker.fromJson(row));
     }
     return out;
+  }
+
+  /// 24h ticker for ONE symbol — the chart header's live price + 24h %
+  /// context (a fraction of the all-symbol payload the pair list pulls).
+  Future<MarketTicker> symbolTicker24h(String symbol) async {
+    final uri = Uri.parse('$baseUrl/fapi/v1/ticker/24hr?symbol=$symbol');
+    final resp = await _http.get(uri).timeout(const Duration(seconds: 12));
+    _ensureOk(resp, '/ticker/24hr?symbol');
+    final decoded = jsonDecode(resp.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw BinanceMarketDataError('unexpected single-ticker payload');
+    }
+    return MarketTicker.fromJson(decoded);
   }
 
   /// The tradable USDT-M **perpetual** universe (symbol strings), for the

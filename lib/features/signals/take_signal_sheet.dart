@@ -23,6 +23,7 @@ import '../../data/mock_data.dart';
 import '../../data/order_executor.dart';
 import '../../data/order_log.dart';
 import '../../data/repository.dart';
+import '../../data/take_error_mapper.dart';
 import '../../shared/format.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
@@ -253,16 +254,15 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
             'Take queued — the result will appear in Recent Activity '
                 'on the Trade tab.';
       } else {
-        // Business rejection — the engine's reject_detail is already
-        // written for users (same copy the Recent Activity card shows).
-        message = result.rejectDetail ??
-            result.rejectBinanceMsg ??
-            'Take rejected (${result.rejectClass ?? "unknown"}).';
+        // Business rejection — route through the same translation the
+        // Recent Activity card uses, never the raw engine detail (which
+        // can embed Firebase UIDs and internal error framing).
+        message = translateTakeRejection(result).combined;
       }
     } on ApiError catch (e) {
-      message = e.message;
-    } catch (e) {
-      message = 'Take failed: $e';
+      message = translateTakeHttpError(e.statusCode, e.message).combined;
+    } catch (_) {
+      message = translateTakeUnexpected().combined;
     }
     if (!mounted) return;
     setState(() {
@@ -459,8 +459,9 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
             SizedBox(width: LuminSpacing.sm),
             Expanded(
               child: Text(
-                'SERVER-SIDE — Lumin places this on your connected key '
-                'and manages SL/TPs. Real money.',
+                'Placed by Lumin on your connected Binance account — '
+                'entry, stop-loss and take-profits managed for you. '
+                'Real money.',
                 style: TextStyle(
                   color: LuminColors.accent,
                   fontSize: 12,
@@ -556,10 +557,10 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
             const Padding(
               padding: EdgeInsets.symmetric(vertical: LuminSpacing.xs),
               child: Text(
-                'The engine sizes the quantity from your notional, places '
+                'Lumin sizes the order from your position size, places '
                 'the entry + stop-loss + take-profits on Binance, and '
-                'manages the position. Change the notional in Settings → '
-                'Auto-trade.',
+                'manages the position. Change your position size in '
+                'Settings → Auto-trade.',
                 style: TextStyle(
                   color: LuminColors.textSecondary,
                   fontSize: 11,

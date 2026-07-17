@@ -78,6 +78,7 @@ void main() {
       int? code,
       String? msg,
       String rejectClass = 'OrderRejectedByBinance',
+      String detail = 'engine-side diagnostic',
     }) =>
         DispatchEvent(
           eventId: 'x',
@@ -89,7 +90,7 @@ void main() {
           entryPrice: 29000.0,
           totalQty: 0.0,
           rejectClass: rejectClass,
-          rejectDetail: 'engine-side diagnostic',
+          rejectDetail: detail,
           rejectBinanceCode: code,
           rejectBinanceMsg: msg,
         );
@@ -192,12 +193,24 @@ void main() {
       expect(tx.severity, DispatchEventSeverity.transient);
     });
 
-    test('GlobalKillSwitchActiveError → system (operator-side)', () {
+    test('GlobalKillSwitchActiveError → system, consumer copy only', () {
+      // 2026-07-17: the old copy said "global kill switch" — engine
+      // vocabulary that reads as alarming jargon to a subscriber.  Pin
+      // the consumer phrasing instead.
       final tx = DispatchEventTranslation.forEvent(
         _rejected(rejectClass: 'GlobalKillSwitchActiveError'),
       );
       expect(tx.severity, DispatchEventSeverity.system);
-      expect(tx.action, contains('kill switch'));
+      expect(tx.action.toLowerCase(), isNot(contains('kill switch')));
+      expect(tx.action, contains('paused for everyone'));
+    });
+
+    test('GlobalKillSwitchEngaged (take-path class name) maps the same', () {
+      final tx = DispatchEventTranslation.forEvent(
+        _rejected(rejectClass: 'GlobalKillSwitchEngaged'),
+      );
+      expect(tx.severity, DispatchEventSeverity.system);
+      expect(tx.action.toLowerCase(), isNot(contains('kill switch')));
     });
 
     test('OrderRejectedByBinance without a numeric code → falls back to detail',
@@ -213,12 +226,62 @@ void main() {
       expect(tx.action, contains('Service unavailable.'));
     });
 
-    test('Unknown reject class → system severity with raw detail', () {
+    test('Unknown reject class → generic headline, class name never leaks',
+        () {
+      // 2026-07-17: the old default branch rendered the raw Python
+      // exception class name as the headline.  Now: generic headline +
+      // sanitized detail only.
       final tx = DispatchEventTranslation.forEvent(_rejected(
         rejectClass: 'SomeNewExceptionEngineSideDoesntKnowAbout',
       ));
       expect(tx.severity, DispatchEventSeverity.system);
-      expect(tx.headline, contains('SomeNew'));
+      expect(tx.headline, 'Trade not placed');
+      expect(tx.headline, isNot(contains('SomeNew')));
+      expect(tx.action, isNot(contains('SomeNew')));
+    });
+
+    test('forEvent and forReject produce identical copy for the same reject',
+        () {
+      final e = _rejected(
+        rejectClass: 'OrderRejectedByBinance',
+        code: -4411,
+        msg: 'Please sign TradFi-Perps agreement contract fapi.',
+      );
+      final a = DispatchEventTranslation.forEvent(e);
+      final b = DispatchEventTranslation.forReject(
+        rejectClass: e.rejectClass,
+        rejectDetail: e.rejectDetail,
+        binanceCode: e.rejectBinanceCode,
+        binanceMsg: e.rejectBinanceMsg,
+        symbol: e.symbol,
+      );
+      expect(a.headline, b.headline);
+      expect(a.action, b.action);
+      expect(a.severity, b.severity);
+    });
+
+    test('-4411 → Futures-agreement guidance (the 2026-07-17 subscriber '
+        'failure)', () {
+      final tx = DispatchEventTranslation.forEvent(_rejected(
+        rejectClass: 'OrderRejectedByBinance',
+        code: -4411,
+        msg: 'Please sign TradFi-Perps agreement contract fapi.',
+      ));
+      expect(tx.severity, DispatchEventSeverity.userAction);
+      expect(tx.headline, contains('Futures agreement'));
+      expect(tx.action.toLowerCase(), contains('accept the agreement'));
+    });
+
+    test('UserAutoDisabled never surfaces the UID-bearing detail', () {
+      const uid = 'RYhAWEcwsNXU2gGROCpbFD95svc2';
+      final tx = DispatchEventTranslation.forEvent(_rejected(
+        rejectClass: 'UserAutoDisabled',
+        detail: 'user $uid is auto-disabled',
+      ));
+      expect(tx.severity, DispatchEventSeverity.userAction);
+      expect(tx.headline, isNot(contains(uid)));
+      expect(tx.action, isNot(contains(uid)));
+      expect(tx.action.toLowerCase(), contains('support'));
     });
   });
 }

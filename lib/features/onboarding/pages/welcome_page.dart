@@ -195,7 +195,7 @@ class _Slide1 extends StatelessWidget {
             runSpacing: LuminSpacing.sm,
             children: const [
               _StatChip(label: '75+ pairs', icon: Icons.radar_outlined),
-              _StatChip(label: '15 AI evaluators', icon: Icons.smart_toy_outlined),
+              _StatChip(label: '15 AI analysts', icon: Icons.smart_toy_outlined),
               _StatChip(label: 'Paper mode first', icon: Icons.science_outlined),
             ],
           ),
@@ -286,7 +286,7 @@ class _Slide2 extends StatelessWidget {
           const SizedBox(height: LuminSpacing.lg),
           _Step(
             number: '2',
-            title: '15 AI evaluators score each signal',
+            title: '15 AI analysts score each signal',
             body: 'Momentum, structure, volume profile, regime — '
                 'every angle checked before a signal fires.',
           ),

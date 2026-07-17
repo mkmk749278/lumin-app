@@ -114,9 +114,9 @@ class _TakeAlertTradeSheetState extends State<TakeAlertTradeSheet> {
           _loadError =
               'Taking an alert places the order from this phone, which '
               'needs API keys stored on the device: Settings → API keys. '
-              'Note: a key IP-whitelisted for Lumin server-side '
-              'auto-trade will NOT work from the phone — use a separate '
-              'key without IP restriction.';
+              'Note: a key locked to Lumin\'s server (the recommended '
+              'auto-trade setup) will not work from the phone — use a '
+              'separate key without an IP restriction.';
         });
         return;
       }

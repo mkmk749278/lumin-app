@@ -414,6 +414,7 @@ class DispatchEvent {
     this.rejectDetail,
     this.rejectBinanceCode,
     this.rejectBinanceMsg,
+    this.source,
   });
 
   final String eventId;
@@ -428,6 +429,11 @@ class DispatchEvent {
   final String? rejectDetail;
   final int? rejectBinanceCode;
   final String? rejectBinanceMsg;
+
+  /// How the order originated: 'auto' (hands-off dispatch) or
+  /// 'manual_take' (one-tap take).  Null on engines that pre-date the
+  /// field (2026-07-17).
+  final String? source;
 
   bool get isPlaced => outcome == 'placed';
   bool get isRejected => outcome == 'rejected';
@@ -447,6 +453,7 @@ class DispatchEvent {
         rejectDetail: j['reject_detail'] as String?,
         rejectBinanceCode: (j['reject_binance_code'] as num?)?.toInt(),
         rejectBinanceMsg: j['reject_binance_msg'] as String?,
+        source: j['source'] as String?,
       );
 }
 
@@ -494,13 +501,32 @@ class DispatchEventTranslation {
     if (e.isPlaced) {
       return DispatchEventTranslation(
         headline: 'Placed on Binance',
-        action: 'Position is open and tracked by the engine.',
+        action: 'Position is open — Lumin manages it from here.',
         severity: DispatchEventSeverity.success,
       );
     }
+    return forReject(
+      rejectClass: e.rejectClass,
+      rejectDetail: e.rejectDetail,
+      binanceCode: e.rejectBinanceCode,
+      binanceMsg: e.rejectBinanceMsg,
+      symbol: e.symbol,
+    );
+  }
+
+  /// Core rejection→copy mapping, shared by the Recent Activity rows
+  /// ([forEvent]) and the take sheet (`take_error_mapper.dart`) so the
+  /// same failure never reads differently on two surfaces.
+  static DispatchEventTranslation forReject({
+    String? rejectClass,
+    String? rejectDetail,
+    int? binanceCode,
+    String? binanceMsg,
+    String symbol = '',
+  }) {
     // Binance-side rejections are switched on by code (stable
     // numeric contract from Binance Futures docs).
-    final code = e.rejectBinanceCode;
+    final code = binanceCode;
     if (code != null) {
       switch (code) {
         case -2019:
@@ -535,8 +561,8 @@ class DispatchEventTranslation {
             headline: 'Order outside allowed price range',
             action:
                 'Binance rejected the stop-loss or take-profit because the '
-                'price moved too far from the entry. The engine will retry '
-                'on the next signal.',
+                'price moved too far from the entry. Lumin will retry on '
+                'the next signal.',
             severity: DispatchEventSeverity.transient,
           );
         case -1111:
@@ -544,8 +570,9 @@ class DispatchEventTranslation {
           return DispatchEventTranslation(
             headline: 'Order precision rejected',
             action:
-                'The engine rounded the order incorrectly for this symbol. '
-                'This is a bug — please report it if it keeps happening.',
+                'The order size was rounded incorrectly for this symbol. '
+                'This is a bug on our side — please report it if it keeps '
+                'happening.',
             severity: DispatchEventSeverity.system,
           );
         case -2021:
@@ -553,8 +580,23 @@ class DispatchEventTranslation {
             headline: 'Stop order would trigger immediately',
             action:
                 'The SL or TP was already past the current mark price when '
-                'placed. The engine will retry on the next signal.',
+                'placed. Lumin will retry on the next signal.',
             severity: DispatchEventSeverity.transient,
+          );
+        case -4411:
+          // "Please sign TradFi-Perps agreement contract fapi." — the
+          // user's Binance account has never accepted the Futures
+          // trading agreement, so EVERY order is refused until they do.
+          // This is the exact failure behind the 2026-07-17 subscriber
+          // screenshots.
+          return DispatchEventTranslation(
+            headline: 'Binance Futures agreement needed',
+            action:
+                'Your Binance account hasn\'t accepted the Futures trading '
+                'agreement yet, so Binance refuses every order. Open the '
+                'Binance app → Futures, accept the agreement, then try '
+                'again.',
+            severity: DispatchEventSeverity.userAction,
           );
         case -4164:
           return DispatchEventTranslation(
@@ -565,25 +607,26 @@ class DispatchEventTranslation {
             severity: DispatchEventSeverity.userAction,
           );
         default:
-          final msg = (e.rejectBinanceMsg ?? '').trim();
+          final msg = (binanceMsg ?? '').trim();
           return DispatchEventTranslation(
             headline: 'Binance rejected the order ($code)',
             action: msg.isNotEmpty
                 ? msg
                 : 'Binance returned a rejection without a message. '
-                    'The engine will retry on the next signal.',
+                    'Lumin will retry on the next signal.',
             severity: DispatchEventSeverity.transient,
           );
       }
     }
     // Engine-side rejections — switch on the typed exception class.
-    switch (e.rejectClass) {
+    switch (rejectClass) {
       case 'SymbolNotInUserPreference':
         return DispatchEventTranslation(
           headline: 'Symbol not in your picker',
           action:
-              '${e.symbol} is not enabled in your symbol preference. Enable '
-              'it on the Symbol Preference page to receive these signals.',
+              '${symbol.isEmpty ? 'This symbol' : symbol} is not enabled in '
+              'your symbol preference. Enable it on the Symbol Preference '
+              'page to receive these signals.',
           severity: DispatchEventSeverity.userAction,
         );
       case 'UserNotConnectedError':
@@ -599,8 +642,8 @@ class DispatchEventTranslation {
         return DispatchEventTranslation(
           headline: 'Rate limit reached',
           action:
-              'Too many dispatches in a short window. The engine will '
-              'resume on the next signal.',
+              'Too many orders in a short window — a built-in safety '
+              'limit. Lumin will resume on the next signal.',
           severity: DispatchEventSeverity.transient,
         );
       case 'PositionCapExceededError':
@@ -611,49 +654,129 @@ class DispatchEventTranslation {
               'allowed by the per-user cap.',
           severity: DispatchEventSeverity.transient,
         );
+      case 'GlobalKillSwitchEngaged':
       case 'GlobalKillSwitchActiveError':
         return DispatchEventTranslation(
-          headline: 'Trading paused by operator',
+          headline: 'Trading temporarily paused',
           action:
-              'The global kill switch is on — no orders are being placed '
-              'on any account right now.',
+              'Trading is paused for everyone right now as a safety '
+              'measure. No action needed — it resumes automatically.',
           severity: DispatchEventSeverity.system,
+        );
+      case 'UserAutoDisabled':
+        // The engine's raw detail embeds the Firebase UID ("user <uid>
+        // is auto-disabled") — never surface it.
+        return DispatchEventTranslation(
+          headline: 'Trading is switched off on your account',
+          action:
+              'A safety check paused trading on your account after '
+              'repeated order failures. Fix the underlying issue shown in '
+              'your recent activity, then email support to re-enable.',
+          severity: DispatchEventSeverity.userAction,
+        );
+      case 'SignalClosed':
+        return DispatchEventTranslation(
+          headline: 'Signal already closed',
+          action:
+              'This signal finished before the order could be placed — '
+              'entering now would be a trade without its setup.',
+          severity: DispatchEventSeverity.transient,
+        );
+      case 'TakeRequestStale':
+        return DispatchEventTranslation(
+          headline: 'Request took too long',
+          action:
+              'Your take arrived late and was refused for your safety — '
+              'a delayed market order could fill far from the signal '
+              'price. Try again.',
+          severity: DispatchEventSeverity.transient,
+        );
+      case 'OrderPlacementUnreachable':
+      case 'OrderPlacementKeyError':
+      case 'OrderPlacementError':
+        return DispatchEventTranslation(
+          headline: 'Order could not be placed',
+          action:
+              'Binance could not be reached with your key just now. '
+              'Lumin will retry on the next signal; if this keeps '
+              'happening, re-connect your key in Settings.',
+          severity: DispatchEventSeverity.transient,
         );
       case 'NotGloballyEnabledError':
         return DispatchEventTranslation(
           headline: 'Auto-trade not yet enabled',
           action:
-              'Server-side execution is in beta and not yet enabled for '
-              'your account.',
+              'Server-side execution is not switched on right now. '
+              'No action needed on your side.',
           severity: DispatchEventSeverity.system,
         );
       case 'NotionalTooSmall':
         return DispatchEventTranslation(
           headline: 'Position size too small',
           action:
-              'Your notional (position size) is too small to open a '
-              '${e.symbol} order at the current price after lot-size '
-              'rounding. Go to Settings → Server-side auto-trade and '
-              'increase your notional to at least \$10.',
+              'Your position size is too small to open '
+              '${symbol.isEmpty ? 'this' : 'a $symbol'} order at the '
+              'current price after lot-size rounding. Go to Settings → '
+              'Auto-trade and increase your position size to at least '
+              '\$10.',
           severity: DispatchEventSeverity.userAction,
         );
       case 'OrderRejectedByBinance':
         // Fell through code-switch (Binance returned an error
-        // without a parseable numeric code).  Surface the detail.
+        // without a parseable numeric code).  Surface the Binance
+        // message only — never the raw engine detail, which carries
+        // internal phase/code framing.
+        final msg = (binanceMsg ?? '').trim();
         return DispatchEventTranslation(
           headline: 'Binance rejected the order',
-          action:
-              (e.rejectBinanceMsg ?? e.rejectDetail ?? 'Unknown reason').trim(),
+          action: msg.isNotEmpty
+              ? msg
+              : 'Binance did not accept the order. Lumin will retry on '
+                  'the next signal.',
           severity: DispatchEventSeverity.transient,
         );
       default:
+        // Unknown class — never leak the raw exception name as the
+        // headline (pre-2026-07-17 this rendered e.g.
+        // "UserAutoDisabled" verbatim).  Sanitized detail only.
         return DispatchEventTranslation(
-          headline: e.rejectClass ?? 'Rejected',
-          action:
-              (e.rejectDetail ?? 'No detail available from the engine.').trim(),
+          headline: 'Trade not placed',
+          action: sanitizeEngineDetail(rejectDetail) ??
+              'Something unexpected stopped this trade. Lumin will retry '
+                  'on the next signal.',
           severity: DispatchEventSeverity.system,
         );
     }
+  }
+
+  /// Strip engine internals from a free-text `detail` string before it
+  /// can reach a widget: Firebase UIDs, "user <uid> is auto-disabled"
+  /// framing, kill-switch/circuit-breaker vocabulary.  Returns null
+  /// when nothing safely presentable remains so the caller falls back
+  /// to its own generic copy.
+  static String? sanitizeEngineDetail(String? detail) {
+    var s = (detail ?? '').trim();
+    if (s.isEmpty) return null;
+    // Firebase UIDs are 20-40 char base62 tokens; the engine embeds
+    // them as "user <uid> is auto-disabled" / "user <uid> auto-disabled
+    // by circuit breaker (...)".
+    s = s.replaceAll(
+      RegExp(r'user\s+[A-Za-z0-9]{16,40}\s+(is\s+)?auto-disabled'
+          r'(\s+by\s+circuit\s+breaker)?(\s*\([^)]*\))?'),
+      'trading is switched off on your account',
+    );
+    // Any residual bare UID-shaped token.
+    s = s.replaceAll(RegExp(r'\b[A-Za-z0-9]{24,40}\b'), '');
+    // If the residue still reads like engine internals, drop it.
+    final internal = RegExp(
+      r'kill switch|circuit breaker|globally disabled|Firestore|'
+      r'phase=|code=[A-Z_]+|Traceback|Exception',
+      caseSensitive: false,
+    );
+    if (internal.hasMatch(s)) return null;
+    s = s.replaceAll(RegExp(r'\s{2,}'), ' ').trim();
+    if (s.length < 4) return null;
+    return s;
   }
 }
 

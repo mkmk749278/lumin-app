@@ -166,9 +166,9 @@ class _TosAcceptancePageState extends State<TosAcceptancePage> {
                   'Even in a worst-case breach of Lumin\'s infrastructure, '
                   'an attacker cannot withdraw your funds (withdraw is '
                   'disabled on the key).  They cannot trade from outside '
-                  'Lumin\'s servers (the IP whitelist on your key only '
-                  'permits Lumin\'s engine VPS).  They cannot trade '
-                  'arbitrary symbols (symbol allowlist).  They cannot '
+                  'Lumin\'s servers (your key\'s IP access list only '
+                  'permits Lumin\'s server).  They cannot trade '
+                  'arbitrary symbols (a fixed symbol list).  They cannot '
                   'exceed your configured position cap (default \$500).  '
                   'They cannot fire orders faster than 5/min, 30/hour.',
             ),

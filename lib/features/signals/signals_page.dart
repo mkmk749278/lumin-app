@@ -354,7 +354,7 @@ class _SignalsPageState extends State<SignalsPage>
           child: Padding(
             padding: const EdgeInsets.only(bottom: 6),
             child: Text(
-              'Engine-wide feed  •  Your open positions → Trade tab',
+              'All Lumin signals  •  Your own trades → Trade tab',
               style: const TextStyle(
                 color: LuminColors.textMuted,
                 fontSize: 11,
@@ -1212,8 +1212,8 @@ class _SignalDetailSheetState extends State<_SignalDetailSheet> {
         SnackBar(
           content: Text(
             mode == 'entry'
-                ? '${widget.sig.symbol}: entry-only — engine places entry + SL, you manage the rest'
-                : '${widget.sig.symbol}: full — engine manages the whole trade',
+                ? '${widget.sig.symbol}: entry-only — Lumin places entry + SL, you manage the rest'
+                : '${widget.sig.symbol}: full — Lumin manages the whole trade',
           ),
           duration: const Duration(seconds: 3),
         ),
@@ -1382,7 +1382,7 @@ class _SignalDetailSheetState extends State<_SignalDetailSheet> {
         const SizedBox(height: LuminSpacing.sm),
         _ManagementOption(
           title: 'Entry only',
-          subtitle: 'Engine places the entry + a protective SL, then you '
+          subtitle: 'Lumin places the entry + a protective SL, then you '
               'manage the exit. No pre-TP, no TP ladder, no auto-invalidation.',
           selected: _mgmtMode == 'entry',
           onTap: () => _setMgmt('entry'),

@@ -363,7 +363,7 @@ class _EligibilityPickerPageState extends State<_EligibilityPickerPage> {
   Widget _doctrineNote() {
     final act = _isPaper ? 'paper-trade in simulation' : 'place live orders';
     final body = _isPath
-        ? 'Choose which signal setups (evaluator paths) may $act for you — '
+        ? 'Choose which signal setups may $act for you — '
             'the path version of the symbol picker.  The engine offers '
             '${_universe.length} active paths.  Leaving this on "All" means '
             'every eligible signal is included.'

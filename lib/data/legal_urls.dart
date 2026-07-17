@@ -44,4 +44,20 @@ class LegalUrls {
   /// results, leverage amplifies both directions" warning that
   /// Cornix / 3Commas / Bitsgap all surface as a standalone doc.
   static const String riskUrl = '$_base/risk';
+
+  /// Support contact — the same address published in the legal docs
+  /// (privacy §12 / terms §13).  Every in-app "contact support"
+  /// surface routes here; Telegram is banned in-region and must never
+  /// be presented as the support channel.
+  static const String supportEmail = 'mulakapati446@gmail.com';
+
+  /// `mailto:` URI for [supportEmail] with an optional prefilled
+  /// subject, ready for `url_launcher`.
+  static Uri supportMailto({String? subject}) => Uri(
+        scheme: 'mailto',
+        path: supportEmail,
+        query: subject == null || subject.isEmpty
+            ? null
+            : 'subject=${Uri.encodeComponent(subject)}',
+      );
 }

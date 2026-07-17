@@ -34,6 +34,7 @@ import '../../data/mock_data.dart';
 import '../../data/repository.dart';
 import '../../shared/tokens.dart';
 import '../pulse/take_alert_trade_sheet.dart';
+import 'chart_stats.dart';
 import 'chart_webview.dart';
 import 'indicators.dart';
 import 'models/alert_overlay.dart';
@@ -98,6 +99,30 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
   bool _showRsi = false;
   late final Future<void> _prefsLoaded = _loadPrefs();
 
+  /// Signal-levels overlay visibility (session-scoped, default on) —
+  /// the "Levels" chip lets the user clear the entry/SL/TP lines to
+  /// read raw price action, then bring them back.
+  bool _showLevels = true;
+
+  /// 24h ticker for the header (true 24h % — the candle window on
+  /// small TFs doesn't span 24h, so it can't be derived from candles).
+  MarketTicker? _ticker;
+  Timer? _tickerTimer;
+
+  /// Latest traded price for the header — last candle close, updated by
+  /// the existing 2s poll; falls back to the ticker's lastPrice.
+  double? get _lastPrice =>
+      _candles.isNotEmpty ? _candles.last.close : _ticker?.lastPrice;
+
+  Future<void> _refreshTicker() async {
+    try {
+      final t = await _md.symbolTicker24h(widget.symbol);
+      if (mounted) setState(() => _ticker = t);
+    } catch (_) {
+      /* transient — header keeps its last value */
+    }
+  }
+
   /// How often the live last bar is refreshed from REST while the chart is open.
   static const Duration _pollInterval = Duration(seconds: 2);
 
@@ -109,7 +134,7 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
   /// the JSON bridge payload and indicator math stay comfortably bounded.
   static const int _maxBars = 3000;
 
-  static const List<String> _tfs = ['1m', '5m', '15m', '1h', '4h'];
+  static const List<String> _tfs = ['1m', '5m', '15m', '1h', '4h', '1D'];
 
   static const Map<String, int> _tfSeconds = {
     '1m': 60,
@@ -117,6 +142,7 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
     '15m': 900,
     '1h': 3600,
     '4h': 14400,
+    '1D': 86400,
   };
 
   @override
@@ -124,6 +150,11 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
     super.initState();
     _signal = widget.signal;
     WidgetsBinding.instance.addObserver(this);
+    _refreshTicker();
+    _tickerTimer = Timer.periodic(
+      const Duration(seconds: 60),
+      (_) => _refreshTicker(),
+    );
   }
 
   @override
@@ -137,6 +168,7 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _poll?.cancel();
     _overlayTimer?.cancel();
+    _tickerTimer?.cancel();
     _md.close();
     super.dispose();
   }
@@ -149,10 +181,17 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
         _startPoll();
         _startOverlayTimer();
       }
+      _refreshTicker();
+      _tickerTimer ??= Timer.periodic(
+        const Duration(seconds: 60),
+        (_) => _refreshTicker(),
+      );
     } else {
       // paused / inactive / hidden / detached — no polling off-screen.
       _poll?.cancel();
       _overlayTimer?.cancel();
+      _tickerTimer?.cancel();
+      _tickerTimer = null;
     }
   }
 
@@ -280,6 +319,8 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
         await bridge.updateCandle(c);
       }
       await _pushIndicatorTails();
+      // Header price tracks the freshest close.
+      if (mounted) setState(() {});
     } catch (_) {
       /* transient — next tick retries; history already on screen */
     } finally {
@@ -434,12 +475,25 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
   Future<void> _pushOverlay({bool force = false}) async {
     final bridge = _bridge;
     final sig = _signal;
-    if (bridge == null || sig == null) return;
+    if (bridge == null || sig == null || !_showLevels) return;
     final overlay = ChartOverlay.fromSignal(sig);
     final encoded = jsonEncode(overlay.toJson());
     if (!force && encoded == _lastOverlayJson) return;
     _lastOverlayJson = encoded;
     await bridge.setOverlay(overlay);
+  }
+
+  /// "Levels" chip — hide/show the signal's entry/SL/TP lines so the
+  /// user can read raw price action.  Uses the existing clearOverlay
+  /// bridge call; re-enabling force-pushes the latest overlay.
+  Future<void> _toggleLevels() async {
+    setState(() => _showLevels = !_showLevels);
+    if (_showLevels) {
+      await _pushOverlay(force: true);
+    } else {
+      _lastOverlayJson = '';
+      await _bridge?.clearOverlay();
+    }
   }
 
   /// Draw the alert's setup (zone box / level line / divergence segments /
@@ -490,34 +544,83 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    final price = _lastPrice;
+    final pct = _ticker?.changePct;
+    final pctColor = (pct ?? 0) >= 0 ? LuminColors.success : LuminColors.loss;
     return Scaffold(
-      appBar: AppBar(title: Text(widget.symbol)),
+      appBar: AppBar(
+        // Symbol + live price + true 24h % — the header a trading app is
+        // expected to have (2026-07-17 charts polish).
+        title: Row(
+          children: [
+            Text(widget.symbol),
+            if (price != null) ...[
+              const SizedBox(width: 12),
+              Text(
+                formatHeaderPrice(price, _precision),
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: LuminColors.textPrimary,
+                ),
+              ),
+            ],
+            if (pct != null) ...[
+              const SizedBox(width: 8),
+              Text(
+                formatHeaderPct(pct),
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: pctColor,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
       body: Column(
         children: [
+          // Timeframes on their own row — the old single scrolling row
+          // pushed half the chips off-screen (owner screenshots).
           SizedBox(
-            height: 44,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            height: 42,
+            child: Row(
               children: [
+                const SizedBox(width: 12),
                 for (final tf in _tfs)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: ChoiceChip(
-                      label: Text(tf),
-                      selected: tf == _tf,
-                      onSelected: (_) => _onTf(tf),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: ChoiceChip(
+                        label: SizedBox(
+                          width: double.infinity,
+                          child: Text(tf, textAlign: TextAlign.center),
+                        ),
+                        labelPadding: EdgeInsets.zero,
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        visualDensity: VisualDensity.compact,
+                        selected: tf == _tf,
+                        onSelected: (_) => _onTf(tf),
+                      ),
                     ),
                   ),
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 4),
-                  child: VerticalDivider(width: 1, color: Color(0x33FFFFFF)),
-                ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
+              ],
+            ),
+          ),
+          // Indicator + overlay toggles on a second row.
+          SizedBox(
+            height: 40,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              children: [
                 Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: FilterChip(
                     label: const Text('EMA'),
+                    visualDensity: VisualDensity.compact,
                     selected: _showEma,
                     onSelected: (_) =>
                         _toggleIndicator(() => _showEma = !_showEma),
@@ -527,6 +630,7 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
                   padding: const EdgeInsets.only(right: 8),
                   child: FilterChip(
                     label: const Text('MAs'),
+                    visualDensity: VisualDensity.compact,
                     selected: _showMaStack,
                     onSelected: (_) =>
                         _toggleIndicator(() => _showMaStack = !_showMaStack),
@@ -536,11 +640,22 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
                   padding: const EdgeInsets.only(right: 8),
                   child: FilterChip(
                     label: const Text('RSI'),
+                    visualDensity: VisualDensity.compact,
                     selected: _showRsi,
                     onSelected: (_) =>
                         _toggleIndicator(() => _showRsi = !_showRsi),
                   ),
                 ),
+                if (_signal != null)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: FilterChip(
+                      label: const Text('Levels'),
+                      visualDensity: VisualDensity.compact,
+                      selected: _showLevels,
+                      onSelected: (_) => _toggleLevels(),
+                    ),
+                  ),
               ],
             ),
           ),
