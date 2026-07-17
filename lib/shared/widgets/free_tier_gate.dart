@@ -44,6 +44,53 @@ bool canAssist(String? tier) => tierRank(tier) >= 1;
 /// May enable hands-off auto-execution — Auto tier (or higher).
 bool canAuto(String? tier) => tierRank(tier) >= 2;
 
+/// Any paying tier (mirrors the engine's `PlayVerifyResult.isPaid` set:
+/// assist / auto / legacy paid / all-access / owner).  Drives the
+/// "you're subscribed" surfaces — CurrentPlanCard, Profile subscription
+/// card, Menu subtitle.
+bool isPaidTier(String? tier) => tierRank(tier) >= 1;
+
+/// Consumer-facing plan name for a tier value.  Never returns engine
+/// vocabulary — unknown non-empty tiers fall back to a capitalised echo
+/// so a future tier renders decently on old builds.
+String tierDisplayName(String? tier) {
+  switch ((tier ?? '').toLowerCase()) {
+    case 'owner':
+    case 'all-access':
+      return 'All Access';
+    case 'auto':
+      return 'Auto';
+    case 'paid':
+      return 'Auto'; // legacy single paid tier == full automation
+    case 'assist':
+      return 'Assist';
+    case '':
+    case 'free':
+      return 'Free';
+    default:
+      final t = tier!.toLowerCase();
+      return t[0].toUpperCase() + t.substring(1);
+  }
+}
+
+/// Google Play subscription-management deep link for the user's current
+/// plan.  With a known Play SKU it lands directly on that subscription;
+/// otherwise on the account's subscriptions list (legacy / owner tiers
+/// have no Play SKU).
+String playManageSubscriptionUrl(String? tier) {
+  const pkg = 'org.luminapp.lumin';
+  final sku = switch ((tier ?? '').toLowerCase()) {
+    'assist' => kAssistMonthlyId,
+    'auto' => kAutoMonthlyId,
+    _ => null,
+  };
+  if (sku == null) {
+    return 'https://play.google.com/store/account/subscriptions';
+  }
+  return 'https://play.google.com/store/account/subscriptions'
+      '?sku=$sku&package=$pkg';
+}
+
 /// Show the upgrade bottom sheet from any context.
 void showUpgradeSheet(BuildContext context) {
   showModalBottomSheet(

@@ -3,7 +3,9 @@
 /// Version, attribution, terms link, privacy link, and full risk-disclosure
 /// content required for Google Play approval of a financial-services app.
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../../../data/legal_urls.dart';
 import '../../../shared/tokens.dart';
 import '../../../shared/widgets/lumin_card.dart';
 
@@ -89,8 +91,8 @@ class AboutPage extends StatelessWidget {
           children: [
             _kv('Version', _version),
             _kv('Build', _build),
-            _kv('Engine', '360 Crypto Eye'),
-            _kv('Channel', 'Telegram'),
+            _kv('Signals by', '360 Crypto Eye'),
+            _kv('Support', LegalUrls.supportEmail),
           ],
         ),
       ),
@@ -190,29 +192,73 @@ class AboutPage extends StatelessWidget {
       child: LuminCard(
         child: Column(
           children: [
-            _link(context, Icons.description_outlined, 'Terms of Service'),
+            _link(
+              context,
+              Icons.description_outlined,
+              'Terms of Service',
+              () => _openUrl(context, LegalUrls.termsUrl),
+            ),
             const Divider(color: LuminColors.cardBorder, height: 1),
-            _link(context, Icons.privacy_tip_outlined, 'Privacy Policy'),
+            _link(
+              context,
+              Icons.privacy_tip_outlined,
+              'Privacy Policy',
+              () => _openUrl(context, LegalUrls.privacyUrl),
+            ),
             const Divider(color: LuminColors.cardBorder, height: 1),
-            _link(context, Icons.gavel_outlined, 'Open-source licences'),
+            _link(
+              context,
+              Icons.gavel_outlined,
+              'Open-source licences',
+              () => showLicensePage(
+                context: context,
+                applicationName: 'Lumin',
+                applicationVersion: _version,
+              ),
+            ),
             const Divider(color: LuminColors.cardBorder, height: 1),
-            _link(context, Icons.mail_outline, 'Contact support'),
+            _link(
+              context,
+              Icons.mail_outline,
+              'Contact support',
+              () => _openMailto(context),
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _link(BuildContext context, IconData icon, String label) {
+  Future<void> _openUrl(BuildContext context, String url) async {
+    try {
+      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open $url')),
+      );
+    }
+  }
+
+  Future<void> _openMailto(BuildContext context) async {
+    try {
+      await launchUrl(LegalUrls.supportMailto(subject: 'Lumin support'));
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Email us at ${LegalUrls.supportEmail}')),
+      );
+    }
+  }
+
+  Widget _link(
+    BuildContext context,
+    IconData icon,
+    String label,
+    VoidCallback onTap,
+  ) {
     return InkWell(
-      onTap: () {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('$label opens once site is live'),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      },
+      onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: LuminSpacing.sm),
         child: Row(
@@ -240,7 +286,7 @@ class AboutPage extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
       child: Text(
         '© 2026 360 Crypto Eye.  All rights reserved.\n'
-        'Made for scalpers, with the 15-evaluator engine.',
+        'Powered by 360 Crypto Eye signal intelligence.',
         textAlign: TextAlign.center,
         style: TextStyle(
           color: LuminColors.textMuted.withOpacity(0.75),

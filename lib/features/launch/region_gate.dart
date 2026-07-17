@@ -132,8 +132,8 @@ class _RegionBlockedCard extends StatelessWidget {
             ),
             const SizedBox(height: LuminSpacing.sm),
             const Text(
-              'You can still receive signals via the paid Telegram '
-              'channel. Server-side order placement is disabled to '
+              'You can still browse every signal and its analysis in '
+              'the app. Automated order placement is disabled to '
               'comply with local regulations.',
               style: TextStyle(
                 color: LuminColors.textSecondary,

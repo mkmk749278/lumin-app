@@ -13,6 +13,7 @@ import '../../data/repository.dart';
 import '../agents/agents_page.dart';
 import '../auth/pages/phone_signin_page.dart';
 import '../../shared/tokens.dart';
+import '../../shared/widgets/free_tier_gate.dart';
 import '../../shared/widgets/lumin_card.dart';
 import 'pages/about_page.dart';
 import 'pages/notification_settings_page.dart';
@@ -110,11 +111,26 @@ class SettingsPage extends StatelessWidget {
                 subtitle: 'Name, country, display currency',
                 onTap: () => _push(context, const ProfileSettingsPage()),
               ),
-              _Row(
-                icon: Icons.workspace_premium_outlined,
-                label: 'Subscription',
-                subtitle: 'Free / Pro tiers',
-                onTap: () => _push(context, const SubscriptionPage()),
+              // Live plan subtitle — reads the cached tier under a
+              // tierRevision listener so a purchase (or the cold-start
+              // hydration) updates the row without leaving the tab.
+              ValueListenableBuilder<int>(
+                valueListenable: AppConfigScope.of(context).tierRevision,
+                builder: (context, _, __) {
+                  final tier = AppConfigScope.of(context).tier;
+                  final subtitle = switch (tierRank(tier)) {
+                    >= 3 => 'All Access — every feature unlocked',
+                    2 => 'Auto plan — hands-off auto-trading',
+                    1 => 'Assist plan — one-tap trades',
+                    _ => 'Free — upgrade to automate trades',
+                  };
+                  return _Row(
+                    icon: Icons.workspace_premium_outlined,
+                    label: 'Subscription',
+                    subtitle: subtitle,
+                    onTap: () => _push(context, const SubscriptionPage()),
+                  );
+                },
               ),
               _Row(
                 icon: Icons.person_add_alt_1_outlined,
@@ -203,7 +219,7 @@ class SettingsPage extends StatelessWidget {
     }
   }
 
-  Widget _section({required String title, required List<_Row> rows}) {
+  Widget _section({required String title, required List<Widget> rows}) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
       child: Column(

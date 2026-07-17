@@ -263,7 +263,7 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Engine IP $ip copied to clipboard'),
+        content: Text("Lumin's server IP $ip copied to clipboard"),
         backgroundColor: LuminColors.success,
         duration: const Duration(seconds: 2),
       ),
@@ -277,7 +277,7 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Engine IP $ip copied to clipboard'),
+        content: Text("Lumin's server IP $ip copied to clipboard"),
         backgroundColor: LuminColors.success,
         duration: const Duration(seconds: 2),
       ),
@@ -413,7 +413,7 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
           const SizedBox(height: LuminSpacing.sm),
           Text(
             '• Withdraw permission must be DISABLED on your Binance key.\n'
-            '• IP whitelist must include Lumin\'s engine IP'
+            '• Your key\'s IP access list must include Lumin\'s server IP'
             '${hasIp ? ' (below — one-tap copy).' : ' (shown on '
                 'validation failure with one-tap copy).'}\n'
             '• Lumin never sees your funds — only signs trade orders '
@@ -441,7 +441,7 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
         children: [
           const SizedBox(height: LuminSpacing.md),
           const Text(
-            'Add this engine IP to your Binance key whitelist:',
+            'Add Lumin\'s server IP to your Binance key\'s IP access list:',
             style: TextStyle(
               color: LuminColors.textPrimary,
               fontSize: 12,
@@ -481,8 +481,8 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
           ),
           const SizedBox(height: LuminSpacing.xs),
           const Text(
-            'This IP is safe to share — it\'s not a secret. Whitelisting '
-            'it locks your key so it only works from Lumin\'s server.',
+            'Adding this IP locks your key so it only works from Lumin\'s '
+            'server — an extra layer of protection for your account.',
             style: TextStyle(
               color: LuminColors.textSecondary,
               fontSize: 11,
@@ -547,7 +547,7 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
               ),
               _validationChip(
                 ok: status.ipWhitelistOk ?? false,
-                label: 'IP whitelist',
+                label: 'IP access list',
               ),
             ],
           ),
@@ -795,7 +795,7 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
             const SizedBox(height: LuminSpacing.sm),
             _checkRow('Withdraw disabled', success.withdrawDisabledOk),
             _checkRow('Futures enabled', success.futuresEnabledOk),
-            _checkRow('IP whitelist OK', success.ipWhitelistOk),
+            _checkRow('IP access list OK', success.ipWhitelistOk),
           ],
         ),
       );
@@ -828,9 +828,9 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
       case 'FUTURES_DISABLED':
         return 'Futures permission required';
       case 'IP_RESTRICT_DISABLED':
-        return 'IP whitelist required';
+        return 'IP restriction required';
       case 'IP_NOT_WHITELISTED':
-        return 'Add Lumin\'s engine IP to whitelist';
+        return 'Add Lumin\'s server IP to the key\'s IP access list';
       case 'KEY_INVALID':
         return 'API key invalid';
       case 'BINANCE_UNREACHABLE':

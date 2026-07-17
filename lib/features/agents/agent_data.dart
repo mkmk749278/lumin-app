@@ -53,6 +53,6 @@ const List<Agent> kAgents = [
     specialty: 'Tracks the opening range of major sessions and enters on the directional break with volume confirmation. Currently disabled pending session-anchored range logic rebuild.',
     icon: Icons.start_outlined),
   Agent(id: 'MA_CROSS_TREND_SHIFT', name: 'The Trend Shifter', tagline: 'EMA50 / EMA200 crossover regime change',
-    specialty: 'Watches the slow EMA stack for golden / death crosses on 4h. When EMA50 crosses EMA200 with confirming volume and structure, signals a regime shift — rare but high-conviction. The 15th evaluator, added 2026-05-06.',
+    specialty: 'Watches the slow EMA stack for golden / death crosses on 4h. When EMA50 crosses EMA200 with confirming volume and structure, signals a regime shift — rare but high-conviction. The 15th analyst, added 2026-05-06.',
     icon: Icons.swap_calls_outlined),
 ];

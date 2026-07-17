@@ -15,10 +15,15 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../data/app_config.dart';
+import '../../../data/auth_service.dart';
 import '../../../data/play_billing_service.dart';
+import '../../../data/repository.dart';
+import '../../../shared/format.dart';
 import '../../../shared/tokens.dart';
+import '../../../shared/widgets/free_tier_gate.dart';
 import '../../../shared/widgets/lumin_card.dart';
 
 /// Play Console subscription product ids (B16 two-tier model).  Keep in
@@ -47,6 +52,14 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
   String? _loadError;
   List<ProductDetails> _products = const [];
 
+  /// Current plan, rendered persistently (2026-07-17 — before this the
+  /// page showed the identical marketing pitch to a paying Auto
+  /// subscriber; the only status signal was a purchase-time snackbar).
+  /// Seeded from the cached tier for an instant first frame, then
+  /// refreshed from `GET /api/profile` — the engine's truth wins.
+  String? _tier;
+  String? _paidUntil;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -54,6 +67,8 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     _initialised = true;
     final scope = AppConfigScope.of(context);
     final auth = scope.auth;
+    _tier = scope.tier;
+    _paidUntil = auth?.currentPaidUntil();
     if (auth == null) {
       // Mock/preview mode (no live auth) — nothing to purchase against.
       setState(() {
@@ -68,6 +83,31 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     _eventSub = billing.events.listen(_onBillingEvent);
     billing.start();
     _bootstrap();
+    _refreshCurrentPlan(scope.repo, auth);
+  }
+
+  /// Engine-truth refresh of the current plan.  Also feeds the
+  /// AuthService cache so the Menu subtitle / tier gates update in
+  /// lockstep with what this page shows.
+  Future<void> _refreshCurrentPlan(LuminRepository repo, AuthService auth) async {
+    try {
+      final p = await repo.fetchProfile();
+      auth.cacheEngineMetadata(
+        userId: p.userId,
+        tier: p.tier,
+        paidUntil: p.paidUntil,
+        needsOnboarding: p.needsOnboarding,
+        displayName: p.displayName,
+      );
+      if (mounted) {
+        setState(() {
+          _tier = p.tier;
+          _paidUntil = p.paidUntil;
+        });
+      }
+    } catch (_) {
+      // Offline — keep the cached tier already seeded.
+    }
   }
 
   Future<void> _bootstrap() async {
@@ -101,7 +141,8 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
       if (mounted) {
         setState(() {
           _loading = false;
-          _loadError = 'Could not load plans: $e';
+          _loadError =
+              'Could not load plans — check your connection and try again.';
         });
       }
     }
@@ -115,10 +156,17 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
         _snack('Purchase pending…');
         break;
       case PlayBillingStatus.entitled:
-        setState(() => _purchaseInFlight = false);
-        final t = event.result?.tier == 'auto' ? 'Auto' : 'Assist';
+        // Stay on the page and flip it into its subscribed state —
+        // popping away used to be the only confirmation the user ever
+        // saw, which is how "am I even subscribed?" support screenshots
+        // happened.
+        setState(() {
+          _purchaseInFlight = false;
+          _tier = event.result?.tier ?? _tier;
+          _paidUntil = event.result?.paidUntil ?? _paidUntil;
+        });
+        final t = tierDisplayName(event.result?.tier);
         _snack('$t plan active — automation unlocked.');
-        Navigator.of(context).pop(true);
         break;
       case PlayBillingStatus.notEntitled:
         setState(() => _purchaseInFlight = false);
@@ -145,10 +193,10 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     setState(() => _purchaseInFlight = true);
     try {
       await _billing!.buy(product);
-    } catch (e) {
+    } catch (_) {
       if (mounted) {
         setState(() => _purchaseInFlight = false);
-        _snack('Could not start purchase: $e');
+        _snack('Could not start the purchase. Please try again.');
       }
     }
   }
@@ -157,8 +205,17 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     try {
       await _billing?.restore();
       _snack('Checking for previous purchases…');
-    } catch (e) {
-      _snack('Restore failed: $e');
+    } catch (_) {
+      _snack('Restore did not complete. Please try again.');
+    }
+  }
+
+  Future<void> _openPlayManage() async {
+    final uri = Uri.parse(playManageSubscriptionUrl(_tier));
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      _snack('Open Google Play › Subscriptions to manage your plan.');
     }
   }
 
@@ -177,7 +234,18 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
         physics: const BouncingScrollPhysics(),
         children: [
           const SizedBox(height: LuminSpacing.md),
-          _heroCard(),
+          if (isPaidTier(_tier))
+            Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
+              child: CurrentPlanCard(
+                tier: _tier,
+                paidUntil: _paidUntil,
+                onManage: _openPlayManage,
+              ),
+            )
+          else
+            _heroCard(),
           const SizedBox(height: LuminSpacing.md),
           _tierComparison(),
           const SizedBox(height: LuminSpacing.md),
@@ -258,7 +326,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
             ),
             const SizedBox(height: LuminSpacing.sm),
             _featureRow('Signals + entry / SL / TP', true, true, true),
-            _featureRow('Full 15-evaluator analysis', true, true, true),
+            _featureRow('Full 15-analyst breakdown', true, true, true),
             _featureRow('Paper trading', true, true, true),
             _featureRow('One-tap "take trade"', false, true, true),
             _featureRow('Hands-off auto-execution', false, false, true),
@@ -341,6 +409,17 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     final note = isAuto
         ? 'Hands-off — every eligible signal auto-executed'
         : 'One-tap — take any signal in a tap';
+    // Subscribed users never re-buy from this page: the owned tile is
+    // labelled CURRENT PLAN, and switching plans routes through Google
+    // Play's manage screen (a plain buy() would open a second parallel
+    // subscription — plan changes need Play-side proration).
+    final subscribed = isPaidTier(_tier);
+    final ownedProductId = switch ((_tier ?? '').toLowerCase()) {
+      'assist' => kAssistMonthlyId,
+      'auto' || 'paid' => kAutoMonthlyId,
+      _ => null,
+    };
+    final owned = product.id == ownedProductId;
     return Opacity(
       opacity: _purchaseInFlight ? 0.6 : 1.0,
       child: Material(
@@ -348,19 +427,27 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
         borderRadius: BorderRadius.circular(LuminRadii.md),
         child: InkWell(
           borderRadius: BorderRadius.circular(LuminRadii.md),
-          onTap: _purchaseInFlight ? null : () => _buy(product),
+          onTap: _purchaseInFlight
+              ? null
+              : subscribed
+                  ? _openPlayManage
+                  : () => _buy(product),
           child: Container(
             padding: const EdgeInsets.all(LuminSpacing.md),
             decoration: BoxDecoration(
-              color: isAuto
-                  ? LuminColors.accent.withOpacity(0.10)
-                  : LuminColors.bgCard,
+              color: owned
+                  ? LuminColors.success.withOpacity(0.08)
+                  : isAuto
+                      ? LuminColors.accent.withOpacity(0.10)
+                      : LuminColors.bgCard,
               borderRadius: BorderRadius.circular(LuminRadii.md),
               border: Border.all(
-                color: isAuto
-                    ? LuminColors.accent.withOpacity(0.50)
-                    : LuminColors.cardBorder,
-                width: isAuto ? 1.5 : 1,
+                color: owned
+                    ? LuminColors.success.withOpacity(0.55)
+                    : isAuto
+                        ? LuminColors.accent.withOpacity(0.50)
+                        : LuminColors.cardBorder,
+                width: (owned || isAuto) ? 1.5 : 1,
               ),
             ),
             child: Row(
@@ -379,34 +466,22 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                               fontWeight: FontWeight.w600,
                             ),
                           ),
-                          if (isAuto) ...[
+                          if (owned) ...[
                             const SizedBox(width: LuminSpacing.sm),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: LuminSpacing.sm,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: LuminColors.accent,
-                                borderRadius:
-                                    BorderRadius.circular(LuminRadii.pill),
-                              ),
-                              child: const Text(
-                                'RECOMMENDED',
-                                style: TextStyle(
-                                  color: LuminColors.bgDeep,
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 0.6,
-                                ),
-                              ),
-                            ),
+                            _pill('CURRENT PLAN', LuminColors.success),
+                          ] else if (isAuto && !subscribed) ...[
+                            const SizedBox(width: LuminSpacing.sm),
+                            _pill('RECOMMENDED', LuminColors.accent),
                           ],
                         ],
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        note,
+                        owned
+                            ? 'Your active plan — tap to manage in Google Play'
+                            : subscribed
+                                ? 'Switch plans in Google Play'
+                                : note,
                         style: const TextStyle(
                           color: LuminColors.textSecondary,
                           fontSize: 11,
@@ -476,6 +551,123 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
           fontSize: 10,
           height: 1.5,
         ),
+      ),
+    );
+  }
+}
+
+Widget _pill(String text, Color color) => Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: LuminSpacing.sm,
+        vertical: 2,
+      ),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(LuminRadii.pill),
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: LuminColors.bgDeep,
+          fontSize: 9,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.6,
+        ),
+      ),
+    );
+
+/// Persistent "you are subscribed" card shown at the top of the
+/// Subscription page (and pumped directly in widget tests).  Public so
+/// tests don't need billing / scope plumbing.
+class CurrentPlanCard extends StatelessWidget {
+  const CurrentPlanCard({
+    super.key,
+    required this.tier,
+    required this.paidUntil,
+    required this.onManage,
+  });
+
+  final String? tier;
+  final String? paidUntil;
+  final VoidCallback onManage;
+
+  @override
+  Widget build(BuildContext context) {
+    final renewal = formatPaidUntil(paidUntil);
+    return Container(
+      padding: const EdgeInsets.all(LuminSpacing.lg),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            LuminColors.success.withOpacity(0.16),
+            LuminColors.success.withOpacity(0.04),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(LuminRadii.lg),
+        border: Border.all(color: LuminColors.success.withOpacity(0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.verified_rounded,
+                  color: LuminColors.success, size: 22),
+              const SizedBox(width: LuminSpacing.sm),
+              const Text(
+                'CURRENT PLAN',
+                style: TextStyle(
+                  color: LuminColors.success,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.0,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: LuminSpacing.sm),
+          Text(
+            '${tierDisplayName(tier)} plan',
+            style: const TextStyle(
+              color: LuminColors.textPrimary,
+              fontSize: 22,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.5,
+            ),
+          ),
+          const SizedBox(height: LuminSpacing.xs),
+          Text(
+            renewal != null
+                ? 'Active — renews via Google Play · paid until $renewal'
+                : 'Active — renews via Google Play',
+            style: const TextStyle(
+              color: LuminColors.textSecondary,
+              fontSize: 12.5,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: LuminSpacing.md),
+          OutlinedButton.icon(
+            onPressed: onManage,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: LuminColors.textPrimary,
+              side: BorderSide(
+                color: LuminColors.success.withOpacity(0.45),
+              ),
+              padding: const EdgeInsets.symmetric(
+                horizontal: LuminSpacing.lg,
+                vertical: LuminSpacing.sm,
+              ),
+            ),
+            icon: const Icon(Icons.open_in_new_rounded, size: 15),
+            label: const Text(
+              'Manage in Google Play',
+              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
       ),
     );
   }

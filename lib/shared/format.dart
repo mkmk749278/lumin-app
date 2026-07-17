@@ -60,3 +60,20 @@ String formatAge(int minutes) {
   if (minutes < 1440) return '${(minutes / 60).round()}h';
   return '${(minutes / 1440).round()}d';
 }
+
+const List<String> _monthNames = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
+
+/// Human date for the engine's `paid_until` ISO-8601 timestamp:
+/// '17 Aug 2026'.  Null / unparseable → null so the caller can drop the
+/// renewal line entirely instead of rendering garbage (older backends
+/// may omit the field).
+String? formatPaidUntil(String? iso) {
+  if (iso == null || iso.isEmpty) return null;
+  final dt = DateTime.tryParse(iso);
+  if (dt == null) return null;
+  final local = dt.toLocal();
+  return '${local.day} ${_monthNames[local.month - 1]} ${local.year}';
+}
