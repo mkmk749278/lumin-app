@@ -104,8 +104,19 @@ class _TakeAlertTradeSheetState extends State<TakeAlertTradeSheet> {
       if (keys == null) {
         setState(() {
           _loading = false;
+          // Alert takes are entry-only (no SL/TP geometry exists on an
+          // alert), so they stay CLIENT-side — the engine's hard limit
+          // forbids stop-less server positions. That means device API
+          // keys, and those keys must NOT be IP-restricted to Lumin's
+          // engine (Binance would reject orders sent from this phone).
+          // Signal takes don't have this requirement — they run
+          // server-side on your connected key.
           _loadError =
-              'Connect your Binance keys on Settings → API keys first.';
+              'Taking an alert places the order from this phone, which '
+              'needs API keys stored on the device: Settings → API keys. '
+              'Note: a key IP-whitelisted for Lumin server-side '
+              'auto-trade will NOT work from the phone — use a separate '
+              'key without IP restriction.';
         });
         return;
       }

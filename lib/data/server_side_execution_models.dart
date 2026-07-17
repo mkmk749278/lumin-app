@@ -157,12 +157,42 @@ class AutoTradeRuntimeStatus {
     this.allowedPaths = const <String>[],
     this.regimeOptions = const <String>[],
     required this.armed,
+    this.userTier,
+    this.tierAllowsAuto,
+    this.autoPaused,
+    this.pathPreference,
+    this.regimePreference,
+    this.preferencesBlockAll = false,
   });
 
   final bool autoTradeGloballyEnabled;
   final bool autoTradeUserDisabled;
   final bool binanceKeyConnected;
   final String? userMode; // 'live' | 'paper' | 'off' | null
+
+  /// Effective subscription tier the dispatcher will apply (expiry-aware:
+  /// a lapsed paid window reads as 'free').  Null = older engine without
+  /// the 2026-07-17 truth fields → tier row hidden.
+  final String? userTier;
+
+  /// Whether the tier gate lets hands-off auto-execution run for this
+  /// user.  Null = older engine (unknown, row hidden) — never default a
+  /// tri-state to a bool, "unknown" must stay representable.
+  final bool? tierAllowsAuto;
+
+  /// Server-side dispatcher pause (paused_reason set after consecutive
+  /// -2019 rejections).  Null = older engine.
+  final bool? autoPaused;
+
+  /// LIVE eligibility filters.  Null = no preference (all eligible);
+  /// EMPTY list = explicit block-all — the distinction is semantic, so
+  /// these never collapse null into const [].
+  final List<String>? pathPreference;
+  final List<String>? regimePreference;
+
+  /// True when a preference set is the explicit empty set — guaranteed
+  /// zero orders, rendered as a failing gate row.
+  final bool preferencesBlockAll;
 
   /// Engine-wide allowlist (the security cap).  Symbol picker shows
   /// this as the universe the user can choose from.
@@ -195,6 +225,17 @@ class AutoTradeRuntimeStatus {
         ? parseList(j['effective_allowed_symbols'])
         : allowed;
     final mode = j['user_mode'];
+    // Preference lists: null ≠ [] (no-preference vs block-all), so only
+    // parse when the key is present AND a list — same guard style as
+    // effective_allowed_symbols above.
+    List<String>? parseNullableList(String key) {
+      final raw = j[key];
+      return raw is List
+          ? raw.map((s) => s.toString()).toList(growable: false)
+          : null;
+    }
+
+    final tier = j['user_tier'];
     return AutoTradeRuntimeStatus(
       autoTradeGloballyEnabled:
           j['auto_trade_globally_enabled'] as bool? ?? false,
@@ -206,8 +247,72 @@ class AutoTradeRuntimeStatus {
       allowedPaths: parseList(j['allowed_paths']),
       regimeOptions: parseList(j['regime_options']),
       armed: j['armed'] as bool? ?? false,
+      userTier: tier is String && tier.isNotEmpty ? tier : null,
+      tierAllowsAuto: j['tier_allows_auto'] as bool?,
+      autoPaused: j['auto_paused'] as bool?,
+      pathPreference: parseNullableList('path_preference'),
+      regimePreference: parseNullableList('regime_preference'),
+      preferencesBlockAll: j['preferences_block_all'] as bool? ?? false,
     );
   }
+}
+
+
+/// Outcome of ``POST /api/auto-trade/take`` — the server-side manual take
+/// (owner-approved 2026-07-17).  ``outcome`` is one of:
+///
+/// * ``placed``   — the engine placed the entry; fill fields populated.
+/// * ``rejected`` — a business rejection (tier, dup position, Binance
+///   error…); the reject fields mirror [DispatchEvent] so
+///   [DispatchEventTranslation] can render the same plain-English copy.
+/// * ``queued``   — the engine didn't answer inside the API's poll
+///   window; the outcome lands in Recent Activity.
+class TakeSignalResult {
+  const TakeSignalResult({
+    required this.outcome,
+    this.signalId = '',
+    this.symbol,
+    this.direction,
+    this.entryPrice,
+    this.totalQty,
+    this.rejectClass,
+    this.rejectDetail,
+    this.rejectBinanceCode,
+    this.rejectBinanceMsg,
+    this.detail,
+  });
+
+  final String outcome; // 'placed' | 'rejected' | 'queued'
+  final String signalId;
+  final String? symbol;
+  final String? direction;
+  final double? entryPrice;
+  final double? totalQty;
+  final String? rejectClass;
+  final String? rejectDetail;
+  final int? rejectBinanceCode;
+  final String? rejectBinanceMsg;
+
+  /// Server-provided guidance for the 'queued' outcome.
+  final String? detail;
+
+  bool get placed => outcome == 'placed';
+  bool get queued => outcome == 'queued';
+
+  factory TakeSignalResult.fromJson(Map<String, dynamic> j) =>
+      TakeSignalResult(
+        outcome: j['outcome'] as String? ?? 'rejected',
+        signalId: j['signal_id'] as String? ?? '',
+        symbol: j['symbol'] as String?,
+        direction: j['direction'] as String?,
+        entryPrice: (j['entry_price'] as num?)?.toDouble(),
+        totalQty: (j['total_qty'] as num?)?.toDouble(),
+        rejectClass: j['reject_class'] as String?,
+        rejectDetail: j['reject_detail'] as String?,
+        rejectBinanceCode: (j['reject_binance_code'] as num?)?.toInt(),
+        rejectBinanceMsg: j['reject_binance_msg'] as String?,
+        detail: j['detail'] as String?,
+      );
 }
 
 

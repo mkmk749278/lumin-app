@@ -2190,11 +2190,16 @@ class _AutoTradeArmedCard extends StatelessWidget {
   /// True when EITHER the engine-wide per-user circuit breaker has
   /// tripped (operator-managed, ``contact support`` flow) OR the
   /// dispatcher has auto-paused this user (#479, self-recoverable
-  /// via the Resume button on the banner above). Either condition
-  /// stops live orders — collapsing them under one gate row keeps
-  /// the card honest about whether dispatch can fire.
+  /// via the Resume button on the banner above) — read from BOTH the
+  /// user-settings row and the server's runtime-status ``auto_paused``
+  /// field (2026-07-17 truth fields; the server value is what dispatch
+  /// actually checks). Any of these stops live orders — collapsing
+  /// them under one gate row keeps the card honest about whether
+  /// dispatch can fire.
   bool get _isPaused =>
-      runtime.autoTradeUserDisabled || userSettings.isAutoPaused;
+      runtime.autoTradeUserDisabled ||
+      userSettings.isAutoPaused ||
+      (runtime.autoPaused ?? false);
 
   /// Card-level "armed" state: the engine's snapshot AND no per-user
   /// pause. The engine's ``armed`` already accounts for
@@ -2254,7 +2259,10 @@ class _AutoTradeArmedCard extends StatelessWidget {
                           ? 'Wallet empty — top up + tap Resume above.'
                           : 'Auto-paused: ${userSettings.pausedReason ?? "unknown"}. '
                               'Tap Resume above.')
-                      : 'Per-user circuit breaker tripped.')
+                      : (runtime.autoPaused ?? false)
+                          ? 'Dispatcher paused your account — top up if '
+                              'needed, then tap Resume above.'
+                          : 'Per-user circuit breaker tripped.')
                   : null,
             ),
             _gateRow(
@@ -2274,6 +2282,31 @@ class _AutoTradeArmedCard extends StatelessWidget {
                       : 'Currently ${runtime.userMode!.toUpperCase()} — '
                           'enable Live in Auto-trade settings.',
             ),
+            // Tier gate (2026-07-17 truth fields) — the dispatcher skips
+            // non-AUTO-tier users silently BEFORE writing any activity
+            // row, so this card is the only place a lapsed/free account
+            // learns why nothing trades. Hidden on older engines that
+            // don't send the field (null = unknown ≠ false).
+            if (runtime.tierAllowsAuto != null)
+              _gateRow(
+                label: 'Plan allows auto-trade',
+                ok: runtime.tierAllowsAuto!,
+                hint: runtime.tierAllowsAuto!
+                    ? null
+                    : 'Hands-off auto-trade needs the Auto plan '
+                        '(current: ${runtime.userTier ?? "free"}). '
+                        'Menu → Subscription.',
+              ),
+            // Block-all eligibility filters — an explicit empty
+            // path/regime preference set matches NO signal, guaranteed
+            // zero orders; render as a failing gate, not a footnote.
+            if (runtime.preferencesBlockAll)
+              _gateRow(
+                label: 'Eligibility filters allow signals',
+                ok: false,
+                hint: 'Your path/regime filters exclude every signal. '
+                    'Settings → Auto-trade → What live-trades for me.',
+              ),
             // Symbol allowlist — only meaningful once the user has a
             // Binance key connected (otherwise no orders flow through
             // anyway, so showing "85 active symbols" is just clutter).
@@ -2286,10 +2319,46 @@ class _AutoTradeArmedCard extends StatelessWidget {
               const SizedBox(height: LuminSpacing.sm),
               _SymbolAllowlistSummary(runtime: runtime),
             ],
+            // Restrictive-but-non-empty eligibility filters: orders are
+            // still possible (per-signal filter, doesn't unarm) — shown
+            // as a muted footnote so a "why did that signal not trade
+            // for me" question answers itself.
+            if (!runtime.preferencesBlockAll &&
+                (runtime.pathPreference != null ||
+                    runtime.regimePreference != null)) ...[
+              const SizedBox(height: LuminSpacing.xs),
+              Text(
+                _prefsFootnote(),
+                style: const TextStyle(
+                  color: LuminColors.textMuted,
+                  fontSize: 11,
+                ),
+              ),
+            ],
           ],
         ),
       ),
     );
+  }
+
+  /// One-line summary of the user's live eligibility filters, e.g.
+  /// "Filtered: 3 of 7 paths · 2 regimes auto-trade for you."
+  String _prefsFootnote() {
+    final parts = <String>[];
+    final paths = runtime.pathPreference;
+    if (paths != null) {
+      final total = runtime.allowedPaths.length;
+      parts.add(
+        total > 0
+            ? '${paths.length} of $total paths'
+            : '${paths.length} path${paths.length == 1 ? "" : "s"}',
+      );
+    }
+    final regimes = runtime.regimePreference;
+    if (regimes != null) {
+      parts.add('${regimes.length} regime${regimes.length == 1 ? "" : "s"}');
+    }
+    return 'Filtered: ${parts.join(" · ")} auto-trade for you.';
   }
 
   Widget _gateRow({
