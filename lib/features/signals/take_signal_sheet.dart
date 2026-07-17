@@ -15,6 +15,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../data/api_client.dart' show ApiError;
 import '../../data/app_config.dart';
 import '../../data/binance_client.dart';
 import '../../data/binance_keys_service.dart';
@@ -57,6 +58,15 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
   bool _loading = true;
   String? _loadError;
 
+  /// Server-side take (owner-approved 2026-07-17): when the user has a
+  /// server-connected Binance key, Confirm posts the signal_id to the
+  /// engine and the ENGINE places + manages the order — the device-key
+  /// path below is the fallback for users who never connected
+  /// server-side.  A server-connected key is IP-whitelisted to the
+  /// engine VPS, so phone-placed orders with it would be
+  /// Binance-rejected; server-side is the only path that works for it.
+  bool _serverSide = false;
+
   BinanceKeys? _keys;
   AutoTradeSettings? _settings;
   double _equity = 0.0;
@@ -66,6 +76,7 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
   bool _placing = false;
   String? _placeResult;
   bool _placeSuccess = false;
+  bool _placeQueued = false;
 
   final _keysService = BinanceKeysService();
   final _logService = OrderLogService();
@@ -88,12 +99,37 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
       return;
     }
     try {
+      // Server-connected key first — the engine path needs no device
+      // keys, no client-side equity read, and works with an
+      // IP-whitelisted key.  Soft-fail to the device-key flow when the
+      // status read errors (offline etc.).
+      var serverConnected = false;
+      try {
+        final runtime = await scope.repo.getAutoTradeRuntimeStatus();
+        serverConnected = runtime.binanceKeyConnected;
+      } catch (_) {
+        serverConnected = false;
+      }
+      if (serverConnected) {
+        final settings = await scope.repo.fetchUserAutoTradeSettings();
+        if (!mounted) return;
+        setState(() {
+          _serverSide = true;
+          _settings = settings;
+          _loading = false;
+        });
+        return;
+      }
+
       final keys = await _keysService.load(uid);
       if (keys == null) {
         setState(() {
           _loading = false;
           _loadError =
-              'Connect your Binance keys on Settings → API keys first.';
+              'No Binance key found. Connect one on Settings → '
+              'Server-side auto-trade (recommended — Lumin places and '
+              'manages the order for you), or store device API keys on '
+              'Settings → API keys for phone-side orders.';
         });
         return;
       }
@@ -164,6 +200,9 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
   }
 
   Future<void> _confirm() async {
+    if (_serverSide) {
+      return _confirmServerSide();
+    }
     final keys = _keys;
     final settings = _settings;
     final scope = AppConfigScope.of(context);
@@ -186,6 +225,51 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
       _placeResult = result.message;
       _placeSuccess = result.success;
       _alreadyTaken = result.entry ?? result.alreadyTaken;
+    });
+  }
+
+  Future<void> _confirmServerSide() async {
+    final scope = AppConfigScope.of(context);
+    setState(() {
+      _placing = true;
+      _placeResult = null;
+    });
+    String message;
+    var success = false;
+    var queued = false;
+    try {
+      final result =
+          await scope.repo.takeSignalServerSide(widget.signal.id);
+      if (result.placed) {
+        success = true;
+        final qty = result.totalQty;
+        message = 'Order placed on Binance'
+            '${qty != null ? ' — qty ${qty.toStringAsFixed(6)}' : ''}. '
+            'Lumin manages the SL/TPs from here; track it on '
+            'Trade → Live.';
+      } else if (result.queued) {
+        queued = true;
+        message = result.detail ??
+            'Take queued — the result will appear in Recent Activity '
+                'on the Trade tab.';
+      } else {
+        // Business rejection — the engine's reject_detail is already
+        // written for users (same copy the Recent Activity card shows).
+        message = result.rejectDetail ??
+            result.rejectBinanceMsg ??
+            'Take rejected (${result.rejectClass ?? "unknown"}).';
+      }
+    } on ApiError catch (e) {
+      message = e.message;
+    } catch (e) {
+      message = 'Take failed: $e';
+    }
+    if (!mounted) return;
+    setState(() {
+      _placing = false;
+      _placeResult = message;
+      _placeSuccess = success;
+      _placeQueued = queued;
     });
   }
 
@@ -357,6 +441,37 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
   }
 
   Widget _envCard() {
+    if (_serverSide) {
+      return Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: LuminSpacing.md,
+          vertical: LuminSpacing.sm,
+        ),
+        decoration: BoxDecoration(
+          color: LuminColors.accent.withOpacity(0.10),
+          borderRadius: BorderRadius.circular(LuminRadii.sm),
+          border: Border.all(color: LuminColors.accent.withOpacity(0.30)),
+        ),
+        child: const Row(
+          children: [
+            Icon(Icons.cloud_done_outlined,
+                color: LuminColors.accent, size: 16),
+            SizedBox(width: LuminSpacing.sm),
+            Expanded(
+              child: Text(
+                'SERVER-SIDE — Lumin places this on your connected key '
+                'and manages SL/TPs. Real money.',
+                style: TextStyle(
+                  color: LuminColors.accent,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     final testnet = _keys?.testnet ?? false;
     final colour = testnet ? LuminColors.warn : LuminColors.loss;
     return Container(
@@ -416,6 +531,46 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
   }
 
   Widget _orderPreview() {
+    if (_serverSide) {
+      final notional = _settings?.notionalUsd;
+      return LuminCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'ORDER',
+              style: TextStyle(
+                color: LuminColors.textMuted,
+                fontSize: 10,
+                letterSpacing: 1.2,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: LuminSpacing.sm),
+            _kv(
+              'Notional',
+              notional != null
+                  ? '\$${notional.toStringAsFixed(0)}'
+                  : r'$500 (default)',
+            ),
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: LuminSpacing.xs),
+              child: Text(
+                'The engine sizes the quantity from your notional, places '
+                'the entry + stop-loss + take-profits on Binance, and '
+                'manages the position. Change the notional in Settings → '
+                'Auto-trade.',
+                style: TextStyle(
+                  color: LuminColors.textSecondary,
+                  fontSize: 11,
+                  height: 1.4,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     final p = _preview;
     return LuminCard(
       child: Column(
@@ -457,7 +612,11 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
   }
 
   Widget _resultBanner(String msg, bool ok) {
-    final colour = ok ? LuminColors.success : LuminColors.loss;
+    final colour = ok
+        ? LuminColors.success
+        : _placeQueued
+            ? LuminColors.warn
+            : LuminColors.loss;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(
@@ -480,7 +639,7 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
     final canPlace = !_loading &&
         _loadError == null &&
         _alreadyTaken == null &&
-        _preview != null &&
+        (_serverSide || _preview != null) &&
         !_placing &&
         _placeResult == null;
     return Row(

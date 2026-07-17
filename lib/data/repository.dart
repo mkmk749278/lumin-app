@@ -1431,6 +1431,17 @@ abstract class LuminRepository {
   /// or after the engine restarted).
   Future<bool> resumeMineAutoTrade();
 
+  /// Server-side manual take (owner-approved 2026-07-17): ask the ENGINE
+  /// to place this ACTIVE signal on the user's server-connected Binance
+  /// key via ``POST /api/auto-trade/take`` — same dispatch path as
+  /// auto-trade (sizing, tripwires, FSM safety gates, dispatch log).
+  ///
+  /// Business rejections (tier, already-active position, Binance error)
+  /// come back as a [TakeSignalResult] with ``outcome == 'rejected'``,
+  /// NOT as a thrown error — only transport-level failures (503 flag
+  /// off, 409 no key, network) throw [ApiError].
+  Future<TakeSignalResult> takeSignalServerSide(String signalId);
+
   /// Connect a Binance API key for server-side execution (engine B18 +
   /// PR-2 ``/api/binance/connect``).  Posts the key to the engine,
   /// which validates against Binance (withdraw=off, futures=on, IP
@@ -2595,6 +2606,20 @@ class MockRepository implements LuminRepository {
   }
 
   @override
+  Future<TakeSignalResult> takeSignalServerSide(String signalId) async {
+    // Mock: instant synthetic fill so the server-take sheet flow is
+    // exercisable in offline dev.
+    return TakeSignalResult(
+      outcome: 'placed',
+      signalId: signalId,
+      symbol: 'BTCUSDT',
+      direction: 'LONG',
+      entryPrice: 29000.0,
+      totalQty: 0.017,
+    );
+  }
+
+  @override
   Future<BinanceConnectSuccess> connectBinanceServerSide({
     required String apiKey,
     required String apiSecret,
@@ -2665,6 +2690,10 @@ class MockRepository implements LuminRepository {
       ],
       regimeOptions: ['TRENDING', 'RANGING', 'CHOPPY'],
       armed: true,
+      userTier: 'auto',
+      tierAllowsAuto: true,
+      autoPaused: false,
+      preferencesBlockAll: false,
     );
   }
 
@@ -3524,6 +3553,19 @@ class HttpRepository implements LuminRepository {
     // tab clears immediately rather than on the next polling tick.
     _swr.invalidate(_kTradeEngineKey);
     return (j['resumed'] as bool?) ?? false;
+  }
+
+  @override
+  Future<TakeSignalResult> takeSignalServerSide(String signalId) async {
+    final j = (await client.post(
+      '/api/auto-trade/take',
+      body: <String, dynamic>{'signal_id': signalId},
+    )) as Map<String, dynamic>;
+    // A placed take changes open positions + Recent Activity — refetch
+    // both on the next Trade-tab subscribe instead of waiting out the
+    // SWR TTL.
+    _swr.invalidate(_kTradeEngineKey);
+    return TakeSignalResult.fromJson(j);
   }
 
   @override
