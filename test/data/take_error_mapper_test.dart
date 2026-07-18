@@ -14,9 +14,11 @@ TakeSignalResult _rejected({
   String? rejectDetail,
   int? binanceCode,
   String? binanceMsg,
+  String? symbol,
 }) =>
     TakeSignalResult(
       outcome: 'rejected',
+      symbol: symbol,
       rejectClass: rejectClass,
       rejectDetail: rejectDetail,
       rejectBinanceCode: binanceCode,
@@ -110,15 +112,21 @@ void main() {
       expect(m.combined, isNot(contains(_uid)));
     });
 
-    test('-4411 gets the Futures-agreement guidance', () {
+    test('-4411 explains the symbol is a stock/TradFi perp, not an '
+        'account problem', () {
       final m = translateTakeRejection(_rejected(
         rejectClass: 'OrderRejectedByBinance',
+        symbol: 'WDCUSDT',
         binanceCode: -4411,
         binanceMsg: 'Please sign TradFi-Perps agreement contract fapi.',
       ));
-      expect(m.headline, contains('Futures agreement'));
-      expect(m.action.toLowerCase(), contains('accept the agreement'));
-      expect(m.combined, isNot(contains('TradFi')));
+      // Names the actual symbol and calls it a stock perp.
+      expect(m.action, contains('WDCUSDT'));
+      expect(m.action.toLowerCase(), contains('stock'));
+      // Must NOT tell the user their account hasn't accepted the Futures
+      // agreement — the misleading copy that alarmed a real subscriber.
+      expect(m.combined.toLowerCase(), isNot(contains('accept')));
+      expect(m.action.toLowerCase(), contains('account is fine'));
     });
 
     test('-2019 keeps the insufficient-margin guidance', () {
