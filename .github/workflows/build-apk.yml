@@ -618,6 +618,11 @@ jobs:
     name: Build web app (PWA)
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # Surfaced at job level because the `secrets` context is not usable in
+      # step-level `if:` conditions (same pattern as ANDROID_KEYSTORE_B64 in
+      # the build job).  Empty until the owner adds the repo secrets.
+      VPS_HOST: ${{ secrets.VPS_HOST }}
 
     steps:
       - name: Checkout
@@ -720,7 +725,7 @@ jobs:
         # Same VPS + secret names as 360-v2's deploy.yml.  Skips cleanly
         # until the owner adds VPS_HOST / VPS_USER / VPS_SSH_KEY secrets
         # to THIS repo.
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.VPS_HOST != ''
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && env.VPS_HOST != ''
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -731,7 +736,7 @@ jobs:
           target: /tmp/
 
       - name: Activate web deploy on VPS (atomic swap)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.VPS_HOST != ''
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && env.VPS_HOST != ''
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VPS_HOST }}
