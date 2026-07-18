@@ -260,16 +260,20 @@ void main() {
       expect(a.severity, b.severity);
     });
 
-    test('-4411 → Futures-agreement guidance (the 2026-07-17 subscriber '
-        'failure)', () {
+    test('-4411 → stock-perp explanation, not a false account-agreement '
+        'claim (2026-07-18 subscriber fix)', () {
       final tx = DispatchEventTranslation.forEvent(_rejected(
         rejectClass: 'OrderRejectedByBinance',
         code: -4411,
         msg: 'Please sign TradFi-Perps agreement contract fapi.',
       ));
-      expect(tx.severity, DispatchEventSeverity.userAction);
-      expect(tx.headline, contains('Futures agreement'));
-      expect(tx.action.toLowerCase(), contains('accept the agreement'));
+      // Benign/self-resolving — the engine filters these symbols out, so
+      // it's not an action the subscriber must chase.
+      expect(tx.severity, DispatchEventSeverity.transient);
+      expect(tx.action.toLowerCase(), contains('stock'));
+      expect(tx.action.toLowerCase(), contains('account is fine'));
+      // The old misleading copy is gone.
+      expect(tx.action.toLowerCase(), isNot(contains('accept the agreement')));
     });
 
     test('UserAutoDisabled never surfaces the UID-bearing detail', () {

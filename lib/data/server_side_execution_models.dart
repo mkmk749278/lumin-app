@@ -584,19 +584,28 @@ class DispatchEventTranslation {
             severity: DispatchEventSeverity.transient,
           );
         case -4411:
-          // "Please sign TradFi-Perps agreement contract fapi." — the
-          // user's Binance account has never accepted the Futures
-          // trading agreement, so EVERY order is refused until they do.
-          // This is the exact failure behind the 2026-07-17 subscriber
-          // screenshots.
+          // "Please sign TradFi-Perps agreement contract fapi." — Binance
+          // rejects this because the SYMBOL is a tokenised-stock / TradFi
+          // perpetual (e.g. WDCUSDT = Western Digital), a separate product
+          // from crypto Futures with its own agreement.  It is NOT an
+          // account-wide problem: crypto pairs trade fine on the same
+          // account.  The old copy here wrongly told users their account
+          // hadn't accepted the Futures agreement, which alarmed a paid
+          // subscriber whose account traded crypto perps daily (2026-07-18).
+          // The engine now filters these symbols out of the universe
+          // (pair_manager + symbol_filters, contractType TRADIFI_PERPETUAL),
+          // so this path is a defensive backstop for a manually-taken
+          // stock symbol or a boot-race window — hence transient, not a
+          // user-action the subscriber needs to chase.
+          final sym = symbol.isNotEmpty ? symbol : 'This signal';
           return DispatchEventTranslation(
-            headline: 'Binance Futures agreement needed',
+            headline: 'Not a crypto pair',
             action:
-                'Your Binance account hasn\'t accepted the Futures trading '
-                'agreement yet, so Binance refuses every order. Open the '
-                'Binance app → Futures, accept the agreement, then try '
-                'again.',
-            severity: DispatchEventSeverity.userAction,
+                '$sym is a Binance stock (TradFi) perpetual, which needs a '
+                'separate Binance agreement and isn\'t a crypto pair. Your '
+                'account is fine — Lumin auto-trades crypto only and filters '
+                'these out.',
+            severity: DispatchEventSeverity.transient,
           );
         case -4164:
           return DispatchEventTranslation(
