@@ -696,7 +696,11 @@ jobs:
           # until the owner adds the FCM_VAPID_KEY secret.
           FCM_VAPID_KEY: ${{ secrets.FCM_VAPID_KEY }}
         run: |
+          # --no-web-resources-cdn bundles CanvasKit into the deploy instead
+          # of fetching it from gstatic at runtime — the app must not depend
+          # on a third-party CDN to boot (restrictive networks, CDN outages).
           flutter build web --release \
+            --no-web-resources-cdn \
             --dart-define=LUMIN_DISTRIBUTION=web \
             --dart-define=LUMIN_FCM_VAPID_KEY="$FCM_VAPID_KEY" \
             --build-number=${{ github.run_number }}
