@@ -804,3 +804,29 @@ class BinanceConnectError implements Exception {
   @override
   String toString() => 'BinanceConnectError($code, $httpStatus): $detail';
 }
+
+/// Result of the self-service breaker re-enable
+/// (``POST /api/auto-trade/resume-disabled-mine``, 2026-07-18).
+///
+/// The per-user safety breaker used to be recoverable only through
+/// support (an owner-run admin endpoint); the paused card now offers a
+/// "Re-enable auto-trade" button backed by this call.  ``message``
+/// carries the server's human-readable refusal when the once-per-
+/// cooldown rate limit blocks the tap (HTTP 429) — rendered verbatim,
+/// same convention as the other engine-authored user copy.
+class SelfReenableResult {
+  const SelfReenableResult({
+    required this.ok,
+    this.alreadyEnabled = false,
+    this.message,
+  });
+
+  final bool ok;
+
+  /// True when the account wasn't disabled in the first place — the UI
+  /// just refreshes status instead of celebrating.
+  final bool alreadyEnabled;
+
+  /// User-facing refusal copy (cooldown), null on success.
+  final String? message;
+}
