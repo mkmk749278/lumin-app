@@ -276,6 +276,38 @@ void main() {
       expect(tx.action.toLowerCase(), isNot(contains('accept the agreement')));
     });
 
+    test('SymbolNotAllowed → consumer copy, raw tripwire string never leaks '
+        '(2026-07-18 WDCUSDT screenshot)', () {
+      // The owner's take sheet rendered the engine string verbatim:
+      // "symbol 'WDCUSDT' is not on the tripwire allowlist (allowlist
+      // size: 76)".  The class now has its own consumer mapping.
+      final tx = DispatchEventTranslation.forEvent(_rejected(
+        rejectClass: 'SymbolNotAllowed',
+        detail:
+            "symbol 'WDCUSDT' is not on the tripwire allowlist "
+            '(allowlist size: 76)',
+      ));
+      expect(tx.severity, DispatchEventSeverity.transient);
+      expect(tx.headline.toLowerCase(), isNot(contains('tripwire')));
+      expect(tx.action.toLowerCase(), isNot(contains('tripwire')));
+      expect(tx.action.toLowerCase(), isNot(contains('allowlist size')));
+      expect(tx.action, contains('BTCUSDT')); // names the symbol
+      expect(tx.action, contains('No action needed'));
+    });
+
+    test('sanitizeEngineDetail drops tripwire/allowlist vocabulary', () {
+      // Backstop for any OTHER path that still funnels a tripwire
+      // detail through the sanitizer (e.g. a future reject class we
+      // haven't mapped): engine-speak must yield null, not leak.
+      expect(
+        DispatchEventTranslation.sanitizeEngineDetail(
+          "symbol 'WDCUSDT' is not on the tripwire allowlist "
+          '(allowlist size: 76)',
+        ),
+        isNull,
+      );
+    });
+
     test('UserAutoDisabled never surfaces the UID-bearing detail', () {
       const uid = 'RYhAWEcwsNXU2gGROCpbFD95svc2';
       final tx = DispatchEventTranslation.forEvent(_rejected(

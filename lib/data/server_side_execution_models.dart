@@ -629,6 +629,25 @@ class DispatchEventTranslation {
     }
     // Engine-side rejections — switch on the typed exception class.
     switch (rejectClass) {
+      case 'SymbolNotAllowed':
+        // Engine-wide tripwire: the symbol is not in the engine's
+        // tradeable universe.  Post the 2026-07-18 TradFi-Perps
+        // exclusion this fires when a signal outlives a universe
+        // update (e.g. a stock perp removed while its signal was
+        // still open — the owner saw the raw engine string
+        // "symbol 'WDCUSDT' is not on the tripwire allowlist
+        // (allowlist size: 76)" leak straight to the take sheet).
+        // Not the user's fault and nothing for them to fix.
+        return DispatchEventTranslation(
+          headline: 'Pair not tradeable through Lumin',
+          action:
+              '${symbol.isEmpty ? 'This pair' : symbol} isn\'t on Lumin\'s '
+              'tradeable pair list right now — usually because the list '
+              'was updated after this signal appeared (stock perpetuals '
+              'and delisted pairs are removed automatically). No action '
+              'needed.',
+          severity: DispatchEventSeverity.transient,
+        );
       case 'SymbolNotInUserPreference':
         return DispatchEventTranslation(
           headline: 'Symbol not in your picker',
@@ -779,7 +798,12 @@ class DispatchEventTranslation {
     // If the residue still reads like engine internals, drop it.
     final internal = RegExp(
       r'kill switch|circuit breaker|globally disabled|Firestore|'
-      r'phase=|code=[A-Z_]+|Traceback|Exception',
+      r'phase=|code=[A-Z_]+|Traceback|Exception|'
+      // Tripwire vocabulary — "symbol 'X' is not on the tripwire
+      // allowlist (allowlist size: N)" reached a subscriber verbatim
+      // on 2026-07-18.  The SymbolNotAllowed case above owns the
+      // consumer copy; anything else mentioning these is engine-speak.
+      r'tripwire|allowlist',
       caseSensitive: false,
     );
     if (internal.hasMatch(s)) return null;
