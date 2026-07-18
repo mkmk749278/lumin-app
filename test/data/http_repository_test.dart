@@ -235,4 +235,63 @@ void main() {
       );
     });
   });
+
+  group('resumeDisabledMine', () {
+    test('success payload maps to ok / not-already-enabled', () async {
+      final seen = <http.Request>[];
+      final r = repo({
+        '/api/auto-trade/resume-disabled-mine': {
+          'ok': true,
+          'auto_trade_disabled': false,
+          'already_enabled': false,
+        },
+      }, seen: seen);
+      final result = await r.resumeDisabledMine();
+      expect(result.ok, isTrue);
+      expect(result.alreadyEnabled, isFalse);
+      expect(result.message, isNull);
+      expect(seen.single.method, 'POST');
+    });
+
+    test('already-enabled passthrough (no-op tap)', () async {
+      final r = repo({
+        '/api/auto-trade/resume-disabled-mine': {
+          'ok': true,
+          'auto_trade_disabled': false,
+          'already_enabled': true,
+        },
+      });
+      final result = await r.resumeDisabledMine();
+      expect(result.ok, isTrue);
+      expect(result.alreadyEnabled, isTrue);
+    });
+
+    test('429 cooldown becomes ok=false with the server message, not a throw',
+        () async {
+      final r = repo({
+        '/api/auto-trade/resume-disabled-mine': {
+          'detail': 'You already re-enabled auto-trade recently. '
+              'Try again in about 90 minutes, or contact support if this '
+              'keeps happening.',
+        },
+      }, status: 429);
+      final result = await r.resumeDisabledMine();
+      expect(result.ok, isFalse);
+      expect(result.message, contains('Try again in about 90 minutes'));
+    });
+
+    test('non-429 errors still throw (5xx handled by caller)', () async {
+      final r = repo({
+        '/api/auto-trade/resume-disabled-mine': {'detail': 'boom'},
+      }, status: 400);
+      await expectLater(r.resumeDisabledMine(), throwsA(isA<ApiError>()));
+    });
+
+    test('tolerant of an older engine omitting fields', () async {
+      final r = repo({'/api/auto-trade/resume-disabled-mine': {}});
+      final result = await r.resumeDisabledMine();
+      expect(result.ok, isFalse); // fail-safe: missing ok reads as false
+      expect(result.alreadyEnabled, isFalse);
+    });
+  });
 }

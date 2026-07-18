@@ -1431,6 +1431,12 @@ abstract class LuminRepository {
   /// or after the engine restarted).
   Future<bool> resumeMineAutoTrade();
 
+  /// Self-service recovery from a per-user safety-breaker disable
+  /// (``POST /api/auto-trade/resume-disabled-mine``, 2026-07-18).
+  /// Rate-limited server-side (once per cooldown window); a 429 comes
+  /// back as `ok=false` with the server's human-readable [SelfReenableResult.message].
+  Future<SelfReenableResult> resumeDisabledMine();
+
   /// Server-side manual take (owner-approved 2026-07-17): ask the ENGINE
   /// to place this ACTIVE signal on the user's server-connected Binance
   /// key via ``POST /api/auto-trade/take`` — same dispatch path as
@@ -2606,6 +2612,13 @@ class MockRepository implements LuminRepository {
   }
 
   @override
+  Future<SelfReenableResult> resumeDisabledMine() async {
+    // Mock mode has no breaker state — always a clean re-enable so the
+    // paused-card flow can be exercised in dev builds.
+    return const SelfReenableResult(ok: true);
+  }
+
+  @override
   Future<TakeSignalResult> takeSignalServerSide(String signalId) async {
     // Mock: instant synthetic fill so the server-take sheet flow is
     // exercisable in offline dev.
@@ -3553,6 +3566,28 @@ class HttpRepository implements LuminRepository {
     // tab clears immediately rather than on the next polling tick.
     _swr.invalidate(_kTradeEngineKey);
     return (j['resumed'] as bool?) ?? false;
+  }
+
+  @override
+  Future<SelfReenableResult> resumeDisabledMine() async {
+    try {
+      final j = (await client.post('/api/auto-trade/resume-disabled-mine'))
+          as Map<String, dynamic>;
+      // The disabled flag just cleared server-side — refetch status so
+      // the paused card flips on the next poll, not after the SWR TTL.
+      _swr.invalidate(_kAutoTradeUserStatusKey);
+      _swr.invalidate(_kTradeEngineKey);
+      return SelfReenableResult(
+        ok: (j['ok'] as bool?) ?? false,
+        alreadyEnabled: (j['already_enabled'] as bool?) ?? false,
+      );
+    } on ApiError catch (e) {
+      if (e.statusCode == 429) {
+        // Cooldown refusal — engine-authored copy, rendered verbatim.
+        return SelfReenableResult(ok: false, message: e.message);
+      }
+      rethrow;
+    }
   }
 
   @override

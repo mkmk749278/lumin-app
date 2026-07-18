@@ -45,6 +45,7 @@ class LiveStatusCard extends StatefulWidget {
 class _LiveStatusCardState extends State<LiveStatusCard> {
   bool _expanded = false;
   bool _resuming = false;
+  bool _reenabling = false;
 
   LiveStatus get _status => resolveLiveStatus(
         runtime: widget.runtime,
@@ -71,7 +72,7 @@ class _LiveStatusCardState extends State<LiveStatusCard> {
         LiveBlockReason.userDisabled =>
           'A safety check stopped orders on your account after repeated '
               'failures. Fix the cause shown in your activity below, then '
-              'email support and we\'ll switch it back on.',
+              're-enable trading. If it keeps happening, email support.',
         LiveBlockReason.autoPaused =>
           widget.userSettings.pausedReason == 'insufficient_margin'
               ? 'Your Binance Futures wallet doesn\'t have enough USDT for '
@@ -98,7 +99,31 @@ class _LiveStatusCardState extends State<LiveStatusCard> {
   Widget? _actionButton(LiveBlockReason r) {
     switch (r) {
       case LiveBlockReason.userDisabled:
-        return _button('Email support', Icons.mail_outline, _emailSupport);
+        // Self-serve recovery (2026-07-18): the primary action clears the
+        // breaker via POST /api/auto-trade/resume-disabled-mine (rate-
+        // limited server-side); support stays as the escalation path.
+        return Wrap(
+          spacing: LuminSpacing.sm,
+          runSpacing: LuminSpacing.xs,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          alignment: WrapAlignment.end,
+          children: [
+            TextButton.icon(
+              onPressed: _emailSupport,
+              icon: const Icon(Icons.mail_outline, size: 16),
+              label: const Text(
+                'Email support',
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
+            _button(
+              'Re-enable auto-trade',
+              Icons.restart_alt_rounded,
+              _reenabling ? null : _reenable,
+              busy: _reenabling,
+            ),
+          ],
+        );
       case LiveBlockReason.autoPaused:
         return _button(
           'Resume',
@@ -148,6 +173,49 @@ class _LiveStatusCardState extends State<LiveStatusCard> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Email us at ${LegalUrls.supportEmail}')),
       );
+    }
+  }
+
+  Future<void> _reenable() async {
+    setState(() => _reenabling = true);
+    final repo = AppConfigScope.of(context).repo;
+    try {
+      final result = await repo.resumeDisabledMine();
+      if (!mounted) return;
+      final String text;
+      final Color color;
+      if (result.ok) {
+        text = result.alreadyEnabled
+            ? 'Your account is already active.'
+            : 'Auto-trade re-enabled. The next signal will trade.';
+        color = LuminColors.success;
+      } else {
+        // Cooldown refusal — the server's copy says when to retry.
+        text = result.message ??
+            'Could not re-enable right now — try again later.';
+        color = LuminColors.warn;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(text),
+          duration: const Duration(seconds: 4),
+          backgroundColor: color,
+        ),
+      );
+      if (result.ok) await widget.onResumed();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Could not re-enable — check your connection and try again.',
+          ),
+          duration: Duration(seconds: 4),
+          backgroundColor: LuminColors.loss,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _reenabling = false);
     }
   }
 
