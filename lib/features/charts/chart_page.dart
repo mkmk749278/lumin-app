@@ -33,7 +33,7 @@ import '../../data/market_alert.dart';
 import '../../data/mock_data.dart';
 import '../../data/repository.dart';
 import '../../shared/tokens.dart';
-import '../pulse/take_alert_trade_sheet.dart';
+import '../pulse/manual_trade_sheet.dart';
 import 'chart_stats.dart';
 import 'chart_webview.dart';
 import 'indicators.dart';
@@ -759,7 +759,13 @@ class _AlertContextBar extends StatelessWidget {
                 foregroundColor: LuminColors.bgDeep,
                 padding: const EdgeInsets.symmetric(horizontal: 16),
               ),
-              onPressed: () => showTakeAlertTradeSheet(context, alert: alert),
+              onPressed: () => showManualTradeSheet(
+                context,
+                symbol: alert.symbol,
+                refId: 'alert-${alert.alertId}',
+                currentPrice: alert.price,
+                bias: alert.bias,
+              ),
               child: const Text('Take trade'),
             ),
           ],
