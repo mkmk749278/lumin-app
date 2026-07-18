@@ -1448,6 +1448,17 @@ abstract class LuminRepository {
   /// off, 409 no key, network) throw [ApiError].
   Future<TakeSignalResult> takeSignalServerSide(String signalId);
 
+  /// Manual trade builder (2026-07-18): ask the ENGINE to place a trade the
+  /// user built on the chart — MARKET or a resting LIMIT at [ManualTradeRequest.entryPrice],
+  /// with OPTIONAL SL/TP — on their server-connected key via
+  /// ``POST /api/manual-trade/take``. Server-side execution (stable VPS IP),
+  /// so it works on mobile networks where the client-side alert take can't.
+  ///
+  /// Business rejections come back as a [ManualTradeResult] with
+  /// ``outcome == 'rejected'``; only transport failures (503 flag off, 409 no
+  /// key, network) throw [ApiError].
+  Future<ManualTradeResult> placeManualTrade(ManualTradeRequest req);
+
   /// Connect a Binance API key for server-side execution (engine B18 +
   /// PR-2 ``/api/binance/connect``).  Posts the key to the engine,
   /// which validates against Binance (withdraw=off, futures=on, IP
@@ -2633,6 +2644,22 @@ class MockRepository implements LuminRepository {
   }
 
   @override
+  Future<ManualTradeResult> placeManualTrade(ManualTradeRequest req) async {
+    // Mock: instant synthetic outcome so the chart trade-builder flow is
+    // exercisable offline. A LIMIT rests; a MARKET fills.
+    return ManualTradeResult(
+      outcome: 'placed',
+      refId: req.refId,
+      symbol: req.symbol,
+      direction: req.direction,
+      entryPrice: req.entryPrice,
+      totalQty: 0.017,
+      entryType: req.entryType,
+      resting: req.entryType == 'limit',
+    );
+  }
+
+  @override
   Future<BinanceConnectSuccess> connectBinanceServerSide({
     required String apiKey,
     required String apiSecret,
@@ -3601,6 +3628,18 @@ class HttpRepository implements LuminRepository {
     // SWR TTL.
     _swr.invalidate(_kTradeEngineKey);
     return TakeSignalResult.fromJson(j);
+  }
+
+  @override
+  Future<ManualTradeResult> placeManualTrade(ManualTradeRequest req) async {
+    final j = (await client.post(
+      '/api/manual-trade/take',
+      body: req.toJson(),
+    )) as Map<String, dynamic>;
+    // A placed trade changes open positions + Recent Activity — refetch both
+    // on the next Trade-tab subscribe instead of waiting out the SWR TTL.
+    _swr.invalidate(_kTradeEngineKey);
+    return ManualTradeResult.fromJson(j);
   }
 
   @override

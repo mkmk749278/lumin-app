@@ -316,6 +316,106 @@ class TakeSignalResult {
 }
 
 
+/// A trade the user built on the chart, sent to
+/// ``POST /api/manual-trade/take`` (manual trade builder, 2026-07-18).
+///
+/// Server-side execution on the user's connected key — MARKET entry or a
+/// resting LIMIT at [entryPrice], with OPTIONAL [slPrice] / [tpPrices] (the
+/// engine stamps ``protection_mode="user_owned"``; SL is not compulsory for a
+/// manual take). This is the server-side replacement for the client-side
+/// (device-key, IP-locked) alert take that is unusable on mobile networks.
+class ManualTradeRequest {
+  const ManualTradeRequest({
+    required this.refId,
+    required this.symbol,
+    required this.direction,
+    required this.entryType,
+    required this.entryPrice,
+    this.slPrice = 0.0,
+    this.tpPrices = const [],
+    this.validForMinutes = 0,
+  });
+
+  final String refId; // alert_id | signal_id — idempotency key
+  final String symbol;
+  final String direction; // 'LONG' | 'SHORT'
+  final String entryType; // 'market' | 'limit'
+  final double entryPrice; // LIMIT price (limit) / sizing anchor (market)
+  final double slPrice; // 0 = no stop (entry-only)
+  final List<double> tpPrices; // 0..3 legs; empty = no take-profit
+  final int validForMinutes; // LIMIT-entry TTL; 0 = GTC
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'ref_id': refId,
+        'symbol': symbol,
+        'direction': direction,
+        'entry_type': entryType,
+        'entry_price': entryPrice,
+        'sl_price': slPrice,
+        'tp_prices': tpPrices,
+        'valid_for_minutes': validForMinutes,
+      };
+}
+
+
+/// Outcome of ``POST /api/manual-trade/take``. Mirrors [TakeSignalResult] with
+/// the manual-builder extras: [refId], [resting] (LIMIT still on the book),
+/// and [entryType]. Business rejections come back as ``outcome == 'rejected'``
+/// with the same reject fields [DispatchEventTranslation] renders; only
+/// transport failures throw.
+class ManualTradeResult {
+  const ManualTradeResult({
+    required this.outcome,
+    this.refId = '',
+    this.symbol,
+    this.direction,
+    this.entryPrice,
+    this.totalQty,
+    this.entryType,
+    this.resting = false,
+    this.rejectClass,
+    this.rejectDetail,
+    this.rejectBinanceCode,
+    this.rejectBinanceMsg,
+    this.detail,
+  });
+
+  final String outcome; // 'placed' | 'rejected' | 'queued'
+  final String refId;
+  final String? symbol;
+  final String? direction;
+  final double? entryPrice;
+  final double? totalQty;
+  final String? entryType; // 'market' | 'limit'
+  final bool resting; // true → LIMIT resting until filled/expired
+  final String? rejectClass;
+  final String? rejectDetail;
+  final int? rejectBinanceCode;
+  final String? rejectBinanceMsg;
+  final String? detail;
+
+  bool get placed => outcome == 'placed';
+  bool get queued => outcome == 'queued';
+
+  factory ManualTradeResult.fromJson(Map<String, dynamic> j) =>
+      ManualTradeResult(
+        outcome: j['outcome'] as String? ?? 'rejected',
+        refId: j['ref_id'] as String? ?? '',
+        symbol: j['symbol'] as String?,
+        direction: j['direction'] as String?,
+        entryPrice: (j['entry_price'] as num?)?.toDouble(),
+        totalQty: (j['total_qty'] as num?)?.toDouble(),
+        entryType: j['entry_type'] as String?,
+        resting: j['resting'] as bool? ?? false,
+        rejectClass: j['reject_class'] as String?,
+        rejectDetail: j['reject_detail'] as String?,
+        rejectBinanceCode: (j['reject_binance_code'] as num?)?.toInt(),
+        rejectBinanceMsg: j['reject_binance_msg'] as String?,
+        detail: j['detail'] as String?,
+      );
+}
+
+
 /// Mirror of one open-position document from
 /// ``GET /api/auto-trade/positions`` (engine reads Firestore under
 /// ``users/{firebase_uid}/positions/``).  Only the fields the Live-
