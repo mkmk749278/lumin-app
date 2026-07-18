@@ -1459,6 +1459,22 @@ abstract class LuminRepository {
   /// key, network) throw [ApiError].
   Future<ManualTradeResult> placeManualTrade(ManualTradeRequest req);
 
+  /// Web (PWA) push topic proxy (2026-07-18).  Web FCM cannot subscribe
+  /// to topics client-side, so the browser hands its registration token
+  /// to the engine (``POST /api/push/subscribe``) which performs the one
+  /// Admin-SDK topic call statelessly — no token registry either side.
+  /// Android builds never call these (they subscribe on-device).
+  Future<void> subscribeWebPushTopic({
+    required String token,
+    required String topic,
+  });
+
+  /// Counterpart of [subscribeWebPushTopic] — ``POST /api/push/unsubscribe``.
+  Future<void> unsubscribeWebPushTopic({
+    required String token,
+    required String topic,
+  });
+
   /// Connect a Binance API key for server-side execution (engine B18 +
   /// PR-2 ``/api/binance/connect``).  Posts the key to the engine,
   /// which validates against Binance (withdraw=off, futures=on, IP
@@ -2644,6 +2660,23 @@ class MockRepository implements LuminRepository {
   }
 
   @override
+  Future<void> subscribeWebPushTopic({
+    required String token,
+    required String topic,
+  }) async {
+    // Mock: no engine to proxy to — succeed silently so the web
+    // notification toggles are exercisable in offline dev.
+  }
+
+  @override
+  Future<void> unsubscribeWebPushTopic({
+    required String token,
+    required String topic,
+  }) async {
+    // Mock: see subscribeWebPushTopic.
+  }
+
+  @override
   Future<ManualTradeResult> placeManualTrade(ManualTradeRequest req) async {
     // Mock: instant synthetic outcome so the chart trade-builder flow is
     // exercisable offline. A LIMIT rests; a MARKET fills.
@@ -3615,6 +3648,28 @@ class HttpRepository implements LuminRepository {
       }
       rethrow;
     }
+  }
+
+  @override
+  Future<void> subscribeWebPushTopic({
+    required String token,
+    required String topic,
+  }) async {
+    await client.post(
+      '/api/push/subscribe',
+      body: <String, dynamic>{'token': token, 'topic': topic},
+    );
+  }
+
+  @override
+  Future<void> unsubscribeWebPushTopic({
+    required String token,
+    required String topic,
+  }) async {
+    await client.post(
+      '/api/push/unsubscribe',
+      body: <String, dynamic>{'token': token, 'topic': topic},
+    );
   }
 
   @override

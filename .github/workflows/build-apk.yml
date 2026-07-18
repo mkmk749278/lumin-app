@@ -670,6 +670,17 @@ jobs:
             s|^    authDomain: .*|    authDomain: '$AUTH_DOMAIN',|
             s|^    storageBucket: .*|    storageBucket: '$STORAGE_BUCKET',|
           }" lib/firebase_options.dart
+
+          # The FCM service worker can't read Dart config — substitute the
+          # same values into its placeholders so background delivery works.
+          sed -i \
+            -e "s|<FIREBASE_API_KEY>|$API_KEY|" \
+            -e "s|<FIREBASE_APP_ID>|$APP_ID|" \
+            -e "s|<FIREBASE_SENDER_ID>|$SENDER_ID|" \
+            -e "s|<FIREBASE_PROJECT_ID>|$PROJECT_ID|" \
+            -e "s|<FIREBASE_AUTH_DOMAIN>|$AUTH_DOMAIN|" \
+            -e "s|<FIREBASE_STORAGE_BUCKET>|$STORAGE_BUCKET|" \
+            web/firebase-messaging-sw.js
           echo "wired=true" >> "$GITHUB_OUTPUT"
 
       - name: Get dependencies
@@ -679,9 +690,15 @@ jobs:
         # LUMIN_DISTRIBUTION=web keeps the self-updater inert (web deploys
         # are the update mechanism) and is the compile-time channel token —
         # see lib/app/distribution.dart.
+        env:
+          # Web-push VAPID public key (Firebase Console → Cloud Messaging →
+          # Web configuration).  Empty (push stays unarmed, app still works)
+          # until the owner adds the FCM_VAPID_KEY secret.
+          FCM_VAPID_KEY: ${{ secrets.FCM_VAPID_KEY }}
         run: |
           flutter build web --release \
             --dart-define=LUMIN_DISTRIBUTION=web \
+            --dart-define=LUMIN_FCM_VAPID_KEY="$FCM_VAPID_KEY" \
             --build-number=${{ github.run_number }}
 
       - name: Upload web build artifact
