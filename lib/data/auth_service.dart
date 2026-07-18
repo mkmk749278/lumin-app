@@ -98,6 +98,14 @@ class AuthService {
 
   void _bumpTier() => tierRevision.value++;
 
+  /// Web-only: the in-flight [ConfirmationResult] from
+  /// `signInWithPhoneNumber`.  The web SDK has no `verifyPhoneNumber`
+  /// (that path throws unimplemented in FlutterFire) — the browser flow
+  /// is reCAPTCHA → `ConfirmationResult` → `.confirm(code)`.  Held here
+  /// so [confirmSmsCode] keeps its platform-neutral signature and the
+  /// OTP page stays unchanged.
+  ConfirmationResult? _webConfirmation;
+
   // ---- Firebase session surface ----------------------------------------
 
   /// Live stream of the current Firebase user (null when signed out).
@@ -153,6 +161,28 @@ class AuthService {
     int? resendToken,
     Duration timeout = const Duration(seconds: 120),
   }) async {
+    if (kIsWeb) {
+      // Browser flow (2026-07-18 PWA channel): `signInWithPhoneNumber`
+      // runs the invisible-reCAPTCHA attestation (FlutterFire creates the
+      // verifier automatically) and returns a ConfirmationResult.  There
+      // is no auto-retrieval and no resend token on web — a resend is
+      // simply a fresh call, which re-runs reCAPTCHA.
+      try {
+        final confirmation = await _auth.signInWithPhoneNumber(phoneE164);
+        _webConfirmation = confirmation;
+        onCodeSent(confirmation.verificationId, null);
+      } on FirebaseAuthException catch (e) {
+        onVerificationFailed(e);
+      } catch (e) {
+        // Surface non-Firebase failures (reCAPTCHA script blocked,
+        // popup dismissed) through the same failure callback so the
+        // sign-in page renders its normal error state.
+        onVerificationFailed(
+          FirebaseAuthException(code: 'web-phone-auth-failed', message: '$e'),
+        );
+      }
+      return;
+    }
     await _auth.verifyPhoneNumber(
       phoneNumber: phoneE164,
       timeout: timeout,
@@ -173,6 +203,15 @@ class AuthService {
     String verificationId,
     String code,
   ) async {
+    if (kIsWeb) {
+      final confirmation = _webConfirmation;
+      if (confirmation == null || confirmation.verificationId != verificationId) {
+        throw AuthError('Verification session expired — resend the code.');
+      }
+      final result = await confirmation.confirm(code);
+      _webConfirmation = null;
+      return result;
+    }
     final credential = PhoneAuthProvider.credential(
       verificationId: verificationId,
       smsCode: code,

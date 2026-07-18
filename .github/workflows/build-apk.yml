@@ -606,3 +606,130 @@ jobs:
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ────────────────────────────────────────────────────────────────────
+  # Web (PWA) channel — the iPhone path (2026-07-18).  No Apple account
+  # required: users add app.luminapp.org to their Home Screen.  Web
+  # deploys ARE the update mechanism, so this job both builds and (on
+  # main) ships to the VPS static root that nginx serves for
+  # app.luminapp.org (server block provisioned by 360-v2's
+  # tools/setup-vps-api.sh).
+  build-web:
+    name: Build web app (PWA)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Inject firebase_options.dart web block (if secret is set)
+        id: fb_web
+        env:
+          FIREBASE_WEB_CONFIG: ${{ secrets.FIREBASE_WEB_CONFIG }}
+        run: |
+          if [ -z "$FIREBASE_WEB_CONFIG" ]; then
+            echo "FIREBASE_WEB_CONFIG secret not set — building with placeholder Firebase config"
+            echo "Owner: register a Web App in the Firebase console, then save its config"
+            echo "object as the FIREBASE_WEB_CONFIG secret (JSON with apiKey, appId,"
+            echo "messagingSenderId, projectId, authDomain, storageBucket)."
+            echo "wired=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          set -eu
+          API_KEY=$(echo "$FIREBASE_WEB_CONFIG" | jq -r '.apiKey // empty')
+          APP_ID=$(echo "$FIREBASE_WEB_CONFIG" | jq -r '.appId // empty')
+          SENDER_ID=$(echo "$FIREBASE_WEB_CONFIG" | jq -r '.messagingSenderId // empty')
+          PROJECT_ID=$(echo "$FIREBASE_WEB_CONFIG" | jq -r '.projectId // empty')
+          AUTH_DOMAIN=$(echo "$FIREBASE_WEB_CONFIG" | jq -r '.authDomain // empty')
+          STORAGE_BUCKET=$(echo "$FIREBASE_WEB_CONFIG" | jq -r '.storageBucket // empty')
+
+          # Defensive: fail fast on a malformed secret — mirrors the android
+          # google-services.json injection step.
+          for v in "API_KEY=$API_KEY" "APP_ID=$APP_ID" "SENDER_ID=$SENDER_ID" "PROJECT_ID=$PROJECT_ID" "AUTH_DOMAIN=$AUTH_DOMAIN" "STORAGE_BUCKET=$STORAGE_BUCKET"; do
+            key="${v%%=*}"; val="${v#*=}"
+            if [ -z "$val" ]; then
+              echo "ERROR: $key is empty in FIREBASE_WEB_CONFIG — paste the config object"
+              echo "from Firebase Console → Project settings → Your apps → Web app"
+              exit 1
+            fi
+          done
+
+          # Substitute placeholders only inside the web FirebaseOptions block.
+          sed -i "/^  static const FirebaseOptions web = FirebaseOptions(/,/^  );/ {
+            s|^    apiKey: .*|    apiKey: '$API_KEY',|
+            s|^    appId: .*|    appId: '$APP_ID',|
+            s|^    messagingSenderId: .*|    messagingSenderId: '$SENDER_ID',|
+            s|^    projectId: .*|    projectId: '$PROJECT_ID',|
+            s|^    authDomain: .*|    authDomain: '$AUTH_DOMAIN',|
+            s|^    storageBucket: .*|    storageBucket: '$STORAGE_BUCKET',|
+          }" lib/firebase_options.dart
+          echo "wired=true" >> "$GITHUB_OUTPUT"
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Build web (release)
+        # LUMIN_DISTRIBUTION=web keeps the self-updater inert (web deploys
+        # are the update mechanism) and is the compile-time channel token —
+        # see lib/app/distribution.dart.
+        run: |
+          flutter build web --release \
+            --dart-define=LUMIN_DISTRIBUTION=web \
+            --build-number=${{ github.run_number }}
+
+      - name: Upload web build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lumin-web-${{ github.run_number }}
+          path: build/web/
+          retention-days: 30
+
+      - name: Package web build for deploy
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: tar -C build/web -czf lumin-web.tar.gz .
+
+      - name: Copy web build to VPS (main push only)
+        # Same VPS + secret names as 360-v2's deploy.yml.  Skips cleanly
+        # until the owner adds VPS_HOST / VPS_USER / VPS_SSH_KEY secrets
+        # to THIS repo.
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.VPS_HOST != ''
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          source: lumin-web.tar.gz
+          target: /tmp/
+
+      - name: Activate web deploy on VPS (atomic swap)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.VPS_HOST != ''
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          script: |
+            set -euo pipefail
+            ROOT=/var/www/app.luminapp.org
+            STAGE=$(mktemp -d /var/www/.lumin-web-stage.XXXXXX)
+            tar -C "$STAGE" -xzf /tmp/lumin-web.tar.gz
+            rm -f /tmp/lumin-web.tar.gz
+            mkdir -p "$ROOT"
+            # Swap the docroot atomically-enough for a static site: stage
+            # fully extracted first, then a rename dance so nginx never
+            # serves a half-written tree.
+            OLD="$ROOT.old.$$"
+            mv "$ROOT" "$OLD"
+            mv "$STAGE" "$ROOT"
+            chmod 755 "$ROOT"
+            rm -rf "$OLD"
+            echo "✅ web deploy live at $ROOT (build ${{ github.run_number }})"

@@ -8,6 +8,7 @@
 /// runs idempotently on every launch.
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -25,24 +26,31 @@ import 'theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Android 15 enforces edge-to-edge for apps targeting SDK 35; opt in
-  // explicitly on every version and make both system bars transparent so
-  // the app renders identically pre/post 15 (Play Console "edge-to-edge"
-  // recommendation on release 282).  Dark theme → light bar icons.
-  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-    statusBarColor: Colors.transparent,
-    statusBarIconBrightness: Brightness.light,
-    systemNavigationBarColor: Colors.transparent,
-    systemNavigationBarIconBrightness: Brightness.light,
-  ));
+  if (!kIsWeb) {
+    // Android 15 enforces edge-to-edge for apps targeting SDK 35; opt in
+    // explicitly on every version and make both system bars transparent so
+    // the app renders identically pre/post 15 (Play Console "edge-to-edge"
+    // recommendation on release 282).  Dark theme → light bar icons.
+    // On web the browser owns the chrome — SystemChrome is a no-op at best.
+    await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.light,
+      systemNavigationBarColor: Colors.transparent,
+      systemNavigationBarIconBrightness: Brightness.light,
+    ));
+  }
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
-  // One-shot cleanup of any pre-migration JWT entries.  Constructs a
-  // bare AuthService with a throwaway base URL — we only need the
-  // secure-storage delete; no network call happens here.
-  await AuthService(baseUrl: '').cleanupLegacyJwtStorage();
+  if (!kIsWeb) {
+    // One-shot cleanup of any pre-migration JWT entries.  Constructs a
+    // bare AuthService with a throwaway base URL — we only need the
+    // secure-storage delete; no network call happens here.  Skipped on web:
+    // no legacy installs ever existed there and flutter_secure_storage's web
+    // backend needs no cleanup.
+    await AuthService(baseUrl: '').cleanupLegacyJwtStorage();
+  }
   // FCM topic subscriptions + tap routing.  Never throws — a
   // Play-Services hiccup must not block app start.
   await NotificationService.instance.init();
