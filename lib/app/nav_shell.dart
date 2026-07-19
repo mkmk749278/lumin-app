@@ -1,6 +1,9 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import '../data/app_config.dart';
 import '../data/notification_service.dart';
 import '../features/charts/charts_page.dart';
+import '../features/install/install_banner.dart';
 import '../features/pulse/pulse_page.dart';
 import '../features/settings/settings_page.dart';
 import '../features/signals/signals_page.dart';
@@ -79,6 +82,17 @@ class _NavShellState extends State<NavShell> with WidgetsBindingObserver {
     // A push tapped before this shell mounted (cold start) is already
     // sitting in the notifier — consume it on first frame.
     WidgetsBinding.instance.addPostFrameCallback((_) => _onNotificationRoute());
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Web push arms post-auth (the engine's topic proxy needs the
+    // signed-in Bearer): hand the live repository to the notification
+    // service now that the shell is inside AppConfigScope.  No-op on
+    // native builds; idempotent across dependency changes.
+    NotificationService.instance
+        .attachRepository(AppConfigScope.of(context).repo);
   }
 
   @override
@@ -165,6 +179,10 @@ class _NavShellState extends State<NavShell> with WidgetsBindingObserver {
     return Scaffold(
       body: Column(
         children: [
+          // Web (PWA) channel: Add-to-Home-Screen walkthrough on iOS
+          // Safari + the user-gesture "enable notifications" tap.
+          // Renders nothing on native builds.
+          if (kIsWeb) const InstallBanner(),
           // Update banner sits above all tabs — sticky-on-top, ignored
           // when no newer GitHub Release is available. Omitted entirely on
           // Play builds: Play forbids self-updating outside its own store,

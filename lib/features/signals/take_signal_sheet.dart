@@ -13,6 +13,7 @@
 /// signal so the user doesn't even reach Confirm.
 library;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../../data/api_client.dart' show ApiError;
@@ -118,6 +119,21 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
           _serverSide = true;
           _settings = settings;
           _loading = false;
+        });
+        return;
+      }
+
+      if (kIsWeb) {
+        // Web (PWA) channel is server-side execution only (2026-07-18):
+        // the browser has no keystore-grade secret storage, so the
+        // device-key signing fallback below is excluded on web.  With no
+        // engine-connected key, the only path is to connect one.
+        setState(() {
+          _loading = false;
+          _loadError =
+              'No Binance key connected. Connect one on Settings → '
+              'Server-side auto-trade — Lumin places and manages the '
+              'order for you.';
         });
         return;
       }

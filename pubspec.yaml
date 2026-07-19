@@ -50,6 +50,10 @@ dependencies:
   # Lightweight Charts asset. Candles come from Binance public REST (history +
   # a short last-bar poll); app→Binance direct, no key, no load on the engine.
   webview_flutter: ^4.7.0
+  # Web (PWA) channel (2026-07-18) — typed DOM interop for the iframe chart
+  # host (chart_webview_web.dart). Was already in the tree transitively;
+  # promoted to a direct dependency because we import it.
+  web: ^1.1.1
 
 dev_dependencies:
   flutter_test:

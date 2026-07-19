@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <!--
+    Lumin web (PWA) shell.  Checked in — unlike android/, which CI
+    regenerates — because this file, manifest.json, and the FCM service
+    worker are hand-edited (2026-07-18 iPhone PWA channel decision).
+
+    The base href placeholder is replaced by `flutter build web`
+    (--base-href, default "/").
+  -->
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="Crypto scalping signals by the 360 Crypto Eye engine.">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0A0E1A">
+
+  <!-- iOS meta tags & icons.  black-translucent lets the app draw
+       edge-to-edge under the status bar once added to the Home Screen,
+       matching the Android edge-to-edge look. -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Lumin">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <title>Lumin</title>
+  <link rel="manifest" href="manifest.json">
+
+  <style>
+    /* Match the app's deep-navy background while the engine loads so the
+       splash never flashes white (LuminColors.bgDeep). */
+    html, body { background: #0A0E1A; margin: 0; padding: 0; }
+  </style>
+</head>
+<body>
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>

@@ -47,6 +47,32 @@
   <div id="legend"></div>
   <div id="attr"><a href="https://www.tradingview.com/" target="_blank" rel="noopener">Charts by TradingView</a></div>
   <script>
+    /* Web (iframe) bridge shim — 2026-07-18 PWA channel.
+       In the Android WebView, `LuminChart` is the natively injected JS
+       channel and this whole block is skipped.  In the web app this page
+       runs in a same-origin iframe with no native channel, so emulate it:
+       outbound events forward to the parent frame, and inbound
+       {luminCall, arg} messages from the parent dispatch to the same
+       window.lumin.<fn>(jsonString) surface the WebView host evaluates
+       directly.  Must precede the chart script so `ready` isn't lost. */
+    if (!window.LuminChart) {
+      window.LuminChart = {
+        postMessage: function (msg) {
+          window.parent.postMessage({ luminChart: msg }, "*");
+        }
+      };
+      window.addEventListener("message", function (ev) {
+        if (ev.source !== window.parent) return;
+        var d = ev.data;
+        if (!d || typeof d.luminCall !== "string" || !window.lumin) return;
+        var fn = window.lumin[d.luminCall];
+        if (typeof fn === "function") {
+          d.arg === undefined ? fn() : fn(d.arg);
+        }
+      });
+    }
+  </script>
+  <script>
     (function () {
       "use strict";
 
