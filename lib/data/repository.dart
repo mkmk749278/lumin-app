@@ -1193,6 +1193,125 @@ class PlayVerifyResult {
       );
 }
 
+/// Web billing config (Phase 3 — the PWA's own payment rails).
+///
+/// Backs `GET /api/billing/web/config`.  The paywall renders whatever rails
+/// the engine returns: `crypto` (NOWPayments) appears only when the rail is
+/// live + configured, `manual` is always present (owner-fulfilled).  The
+/// engine is the source of truth for which rails and what prices — the client
+/// renders, never derives.
+class WebBillingConfig {
+  const WebBillingConfig({
+    required this.enabled,
+    required this.testMode,
+    required this.countryCode,
+    required this.rails,
+  });
+
+  final bool enabled;
+  final bool testMode;
+  final String countryCode;
+  final List<WebBillingRail> rails;
+
+  WebBillingRail? railById(String id) {
+    for (final r in rails) {
+      if (r.id == id) return r;
+    }
+    return null;
+  }
+
+  WebBillingRail? get crypto => railById('crypto');
+  bool get hasCrypto => crypto != null;
+
+  factory WebBillingConfig.fromJson(Map<String, dynamic> j) => WebBillingConfig(
+        enabled: j['enabled'] == true,
+        testMode: j['test_mode'] == true,
+        countryCode: (j['country_code'] as String?) ?? 'unknown',
+        rails: ((j['rails'] as List?) ?? const [])
+            .whereType<Map>()
+            .map((m) => WebBillingRail.fromJson(Map<String, dynamic>.from(m)))
+            .toList(growable: false),
+      );
+}
+
+class WebBillingRail {
+  const WebBillingRail({
+    required this.id,
+    this.provider,
+    this.currency,
+    this.periodDays,
+    this.tiers = const {},
+    this.note,
+  });
+
+  final String id; // 'crypto' | 'manual'
+  final String? provider; // 'nowpayments'
+  final String? currency; // 'USD'
+  final int? periodDays;
+  final Map<String, WebTierPrice> tiers;
+  final String? note;
+
+  factory WebBillingRail.fromJson(Map<String, dynamic> j) {
+    final rawTiers = (j['tiers'] as Map?) ?? const {};
+    final tiers = <String, WebTierPrice>{};
+    rawTiers.forEach((k, v) {
+      if (v is Map) {
+        tiers['$k'] = WebTierPrice.fromJson(Map<String, dynamic>.from(v));
+      }
+    });
+    return WebBillingRail(
+      id: (j['id'] as String?) ?? '',
+      provider: j['provider'] as String?,
+      currency: j['currency'] as String?,
+      periodDays: (j['period_days'] as num?)?.toInt(),
+      tiers: tiers,
+      note: j['note'] as String?,
+    );
+  }
+}
+
+class WebTierPrice {
+  const WebTierPrice({required this.amount, required this.display});
+  final double amount;
+  final String display;
+
+  factory WebTierPrice.fromJson(Map<String, dynamic> j) => WebTierPrice(
+        amount: (j['amount'] as num?)?.toDouble() ?? 0,
+        display: (j['display'] as String?) ?? '',
+      );
+}
+
+/// Result of `POST /api/billing/web/checkout` — the hosted-checkout handoff.
+/// [invoiceUrl] is the NOWPayments page to open; entitlement is granted
+/// asynchronously by the signature-verified IPN, so the client polls the
+/// engine for the tier change after the user pays.
+class WebCheckout {
+  const WebCheckout({
+    required this.ok,
+    required this.tier,
+    required this.amountUsd,
+    required this.invoiceUrl,
+    required this.invoiceId,
+    required this.orderId,
+  });
+
+  final bool ok;
+  final String tier;
+  final double amountUsd;
+  final String invoiceUrl;
+  final String invoiceId;
+  final String orderId;
+
+  factory WebCheckout.fromJson(Map<String, dynamic> j) => WebCheckout(
+        ok: j['ok'] == true,
+        tier: (j['tier'] as String?) ?? '',
+        amountUsd: (j['amount_usd'] as num?)?.toDouble() ?? 0,
+        invoiceUrl: (j['invoice_url'] as String?) ?? '',
+        invoiceId: (j['invoice_id'] as String?) ?? '',
+        orderId: (j['order_id'] as String?) ?? '',
+      );
+}
+
 abstract class LuminRepository {
   /// True when the underlying source is the live engine (vs. mocks).
   bool get isLive;
@@ -1576,6 +1695,17 @@ abstract class LuminRepository {
     required String productId,
     required String purchaseToken,
   });
+
+  /// Fetch the web billing config — which rails + prices the PWA paywall
+  /// should render (`GET /api/billing/web/config`).  Public on the engine;
+  /// returns manual-only when the crypto rail is dark or unconfigured.
+  Future<WebBillingConfig> fetchWebBillingConfig();
+
+  /// Create a NOWPayments hosted checkout for [tier] (`POST
+  /// /api/billing/web/checkout`).  The engine sets the price from its own
+  /// config — the client only names the tier.  Returns the invoice URL to
+  /// open.  Raises on network / 4xx (e.g. 503 when the rail is disabled).
+  Future<WebCheckout> createWebCheckout(String tier);
 
   /// Fetch the user's open server-side positions
   /// (``GET /api/auto-trade/positions``).  The engine reads
@@ -2834,6 +2964,24 @@ class MockRepository implements LuminRepository {
   }
 
   @override
+  Future<WebBillingConfig> fetchWebBillingConfig() async {
+    // Mock/preview: the rail is dark, so only the manual option shows.
+    return const WebBillingConfig(
+      enabled: false,
+      testMode: true,
+      countryCode: 'unknown',
+      rails: [WebBillingRail(id: 'manual', note: 'contact the owner')],
+    );
+  }
+
+  @override
+  Future<WebCheckout> createWebCheckout(String tier) async {
+    // Mock/preview: no live provider — surface the same 'unavailable'
+    // shape the UI handles for a dark rail.
+    throw StateError('Web billing is unavailable in preview mode.');
+  }
+
+  @override
   Future<List<ServerSidePosition>> getAutoTradePositions() async {
     // Mock: no open positions.  UI renders the empty-state copy
     // ("Auto-trade armed — waiting for the next whitelisted signal").
@@ -3822,6 +3970,22 @@ class HttpRepository implements LuminRepository {
       body: {'product_id': productId, 'purchase_token': purchaseToken},
     )) as Map<String, dynamic>;
     return PlayVerifyResult.fromJson(j);
+  }
+
+  @override
+  Future<WebBillingConfig> fetchWebBillingConfig() async {
+    final j = (await client.get('/api/billing/web/config'))
+        as Map<String, dynamic>;
+    return WebBillingConfig.fromJson(j);
+  }
+
+  @override
+  Future<WebCheckout> createWebCheckout(String tier) async {
+    final j = (await client.post(
+      '/api/billing/web/checkout',
+      body: {'tier': tier},
+    )) as Map<String, dynamic>;
+    return WebCheckout.fromJson(j);
   }
 
   @override

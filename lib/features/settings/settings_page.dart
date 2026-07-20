@@ -25,6 +25,8 @@ import 'pages/profile_settings_page.dart';
 import 'pages/referral_page.dart';
 import 'pages/subscription_page.dart';
 import 'pages/symbol_preference_page.dart';
+import 'pages/web_paywall_page.dart';
+import '../../app/distribution.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
@@ -128,7 +130,14 @@ class SettingsPage extends StatelessWidget {
                     icon: Icons.workspace_premium_outlined,
                     label: 'Subscription',
                     subtitle: subtitle,
-                    onTap: () => _push(context, const SubscriptionPage()),
+                    onTap: () => _push(
+                      context,
+                      // Web sells the tiers via crypto/manual (Play Billing is
+                      // store-bound); native builds keep Play Billing.
+                      kDistribution == AppDistribution.web
+                          ? const WebPaywallPage()
+                          : const SubscriptionPage(),
+                    ),
                   );
                 },
               ),
