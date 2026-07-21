@@ -36,6 +36,11 @@ class _WebPaywallPageState extends State<WebPaywallPage> {
   WebBillingConfig? _config;
   String? _tier;
 
+  /// Referral Phase 2 (2026-07-21): engine-reported one-time discount
+  /// state.  The engine prices the discounted invoice server-side at
+  /// checkout — this only drives the "50% off will be applied" banner.
+  ReferralStats? _referral;
+
   // Post-checkout state.
   bool _awaitingPayment = false;
   bool _checking = false;
@@ -67,9 +72,15 @@ class _WebPaywallPageState extends State<WebPaywallPage> {
     });
     try {
       final config = await _svc!.loadConfig();
+      // Best-effort — a failed referral read never blocks the paywall.
+      ReferralStats? referral;
+      try {
+        referral = await AppConfigScope.of(context).repo.getReferralStats();
+      } catch (_) {}
       if (!mounted) return;
       setState(() {
         _config = config;
+        _referral = referral;
         _loading = false;
       });
     } catch (e) {
@@ -160,6 +171,10 @@ class _WebPaywallPageState extends State<WebPaywallPage> {
           _awaitingCard()
         else ...[
           _introCard(),
+          if (_discountBanner() != null) ...[
+            const SizedBox(height: LuminSpacing.md),
+            _discountBanner()!,
+          ],
           const SizedBox(height: LuminSpacing.md),
           ..._planCards(),
         ],
@@ -168,6 +183,45 @@ class _WebPaywallPageState extends State<WebPaywallPage> {
         const SizedBox(height: LuminSpacing.lg),
         _footerNote(),
       ],
+    );
+  }
+
+  /// Referral discount banner — shown only while the ENGINE reports the
+  /// one-time discount as unredeemed; the engine applies the actual cut
+  /// at checkout, so this never promises what the invoice won't honour.
+  Widget? _discountBanner() {
+    final r = _referral;
+    if (_isPaid ||
+        r == null ||
+        !r.rewardsEnabled ||
+        !r.discountEligible ||
+        r.discountPercent <= 0) {
+      return null;
+    }
+    return Container(
+      padding: const EdgeInsets.all(LuminSpacing.md),
+      decoration: BoxDecoration(
+        color: LuminColors.success.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(LuminRadii.md),
+        border: Border.all(color: LuminColors.success.withOpacity(0.45)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.percent, color: LuminColors.success, size: 20),
+          const SizedBox(width: LuminSpacing.sm),
+          Expanded(
+            child: Text(
+              'Invite reward: ${r.discountPercent}% off your first payment '
+              'will be applied at checkout.',
+              style: const TextStyle(
+                color: LuminColors.textPrimary,
+                fontSize: 13,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -324,6 +378,19 @@ class _WebPaywallPageState extends State<WebPaywallPage> {
             'a few minutes.',
             style: TextStyle(color: LuminColors.textSecondary),
           ),
+          if (_pending != null && _pending!.amountUsd > 0) ...[
+            const SizedBox(height: LuminSpacing.xs),
+            Text(
+              _pending!.discounted
+                  ? 'Invoice: \$${_pending!.amountUsd.toStringAsFixed(2)} '
+                      '(${_pending!.discountPercent}% invite discount applied)'
+                  : 'Invoice: \$${_pending!.amountUsd.toStringAsFixed(2)}',
+              style: const TextStyle(
+                color: LuminColors.textMuted,
+                fontSize: 12,
+              ),
+            ),
+          ],
           const SizedBox(height: LuminSpacing.md),
           Row(
             children: [

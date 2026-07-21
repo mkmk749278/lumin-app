@@ -62,30 +62,120 @@ class AutoModeStatus {
       );
 }
 
-/// Referral invite-a-friend (Phase 1, 2026-06-27) — this user's stable
-/// code plus how many friends have joined via it.  Free tracking only;
-/// no reward grant yet.
+/// Accrued/paid referral commission totals in one currency.  Currencies
+/// never sum across each other (Play accrues in INR, the web rail in
+/// USD) — the UI renders each bucket separately.
+class ReferralCommissionTotal {
+  const ReferralCommissionTotal({
+    required this.currency,
+    required this.accrued,
+    required this.paid,
+  });
+  final String currency;
+  final double accrued;
+  final double paid;
+
+  factory ReferralCommissionTotal.fromJson(Map<String, dynamic> j) =>
+      ReferralCommissionTotal(
+        currency: j['currency'] as String? ?? '',
+        accrued: (j['accrued'] as num?)?.toDouble() ?? 0.0,
+        paid: (j['paid'] as num?)?.toDouble() ?? 0.0,
+      );
+}
+
+/// Referral invite-a-friend — the user's stable code + join counter
+/// (Phase 1, 2026-06-27) and the reward / commission / discount picture
+/// (Phase 2, 2026-07-21: 7 days of Auto per join, 50% commission on a
+/// referred user's first 3 paid periods, one-time 50%-off for the
+/// referee).  Every Phase-2 field defaults so a pre-upgrade engine (or
+/// `rewards_enabled: false`) renders the Phase-1 experience unchanged —
+/// the engine is the source of truth for what the programme offers.
 class ReferralStats {
-  const ReferralStats({required this.code, required this.referredCount});
+  const ReferralStats({
+    required this.code,
+    required this.referredCount,
+    this.rewardsEnabled = false,
+    this.rewardDaysPerInvite = 0,
+    this.rewardTier,
+    this.rewardDaysEarned = 0,
+    this.rewardActiveTier,
+    this.rewardActiveUntil,
+    this.paidReferredCount = 0,
+    this.commissionRate = 0.0,
+    this.commissionMaxPeriods = 0,
+    this.commissionTotals = const [],
+    this.discountEligible = false,
+    this.discountOfferId,
+    this.discountPercent = 0,
+  });
+
   final String code;
   final int referredCount;
+  final bool rewardsEnabled;
+  final int rewardDaysPerInvite;
+  final String? rewardTier;
+  final int rewardDaysEarned;
+  final String? rewardActiveTier;
+
+  /// ISO-8601 UTC end of the currently-running reward window, if any.
+  final String? rewardActiveUntil;
+  final int paidReferredCount;
+  final double commissionRate;
+  final int commissionMaxPeriods;
+  final List<ReferralCommissionTotal> commissionTotals;
+
+  /// True while THIS user (as someone else's invitee) still holds the
+  /// one-time 50%-off first billing cycle.
+  final bool discountEligible;
+
+  /// Play Console offer id the paywall buys when [discountEligible].
+  final String? discountOfferId;
+  final int discountPercent;
 
   factory ReferralStats.fromJson(Map<String, dynamic> j) => ReferralStats(
         code: j['code'] as String,
         referredCount: (j['referred_count'] as num?)?.toInt() ?? 0,
+        rewardsEnabled: j['rewards_enabled'] as bool? ?? false,
+        rewardDaysPerInvite:
+            (j['reward_days_per_invite'] as num?)?.toInt() ?? 0,
+        rewardTier: j['reward_tier'] as String?,
+        rewardDaysEarned: (j['reward_days_earned'] as num?)?.toInt() ?? 0,
+        rewardActiveTier: j['reward_active_tier'] as String?,
+        rewardActiveUntil: j['reward_active_until'] as String?,
+        paidReferredCount: (j['paid_referred_count'] as num?)?.toInt() ?? 0,
+        commissionRate: (j['commission_rate'] as num?)?.toDouble() ?? 0.0,
+        commissionMaxPeriods:
+            (j['commission_max_periods'] as num?)?.toInt() ?? 0,
+        commissionTotals: (j['commission_totals'] as List?)
+                ?.whereType<Map<String, dynamic>>()
+                .map(ReferralCommissionTotal.fromJson)
+                .toList() ??
+            const [],
+        discountEligible: j['discount_eligible'] as bool? ?? false,
+        discountOfferId: j['discount_offer_id'] as String?,
+        discountPercent: (j['discount_percent'] as num?)?.toInt() ?? 0,
       );
 }
 
 /// Result of redeeming someone else's referral code.
 class ReferralClaimResult {
-  const ReferralClaimResult({required this.ok, this.reason});
+  const ReferralClaimResult({
+    required this.ok,
+    this.reason,
+    this.discountEligible = false,
+  });
   final bool ok;
   final String? reason;
+
+  /// True when the successful claim unlocked the one-time 50%-off first
+  /// billing cycle for this user (Phase 2).
+  final bool discountEligible;
 
   factory ReferralClaimResult.fromJson(Map<String, dynamic> j) =>
       ReferralClaimResult(
         ok: j['ok'] as bool? ?? false,
         reason: j['reason'] as String?,
+        discountEligible: j['discount_eligible'] as bool? ?? false,
       );
 }
 
@@ -1293,6 +1383,8 @@ class WebCheckout {
     required this.invoiceUrl,
     required this.invoiceId,
     required this.orderId,
+    this.discounted = false,
+    this.discountPercent = 0,
   });
 
   final bool ok;
@@ -1302,6 +1394,12 @@ class WebCheckout {
   final String invoiceId;
   final String orderId;
 
+  /// Referral Phase 2 (2026-07-21): true when the engine priced this
+  /// invoice with the referee's one-time discount — [amountUsd] is
+  /// already the discounted charge (the engine sets the money).
+  final bool discounted;
+  final int discountPercent;
+
   factory WebCheckout.fromJson(Map<String, dynamic> j) => WebCheckout(
         ok: j['ok'] == true,
         tier: (j['tier'] as String?) ?? '',
@@ -1309,6 +1407,8 @@ class WebCheckout {
         invoiceUrl: (j['invoice_url'] as String?) ?? '',
         invoiceId: (j['invoice_id'] as String?) ?? '',
         orderId: (j['order_id'] as String?) ?? '',
+        discounted: j['discounted'] as bool? ?? false,
+        discountPercent: (j['discount_percent'] as num?)?.toInt() ?? 0,
       );
 }
 
@@ -2931,6 +3031,19 @@ class MockRepository implements LuminRepository {
   Future<ReferralStats> getReferralStats() async => ReferralStats(
         code: _mockReferralCode,
         referredCount: _mockReferredCount,
+        rewardsEnabled: true,
+        rewardDaysPerInvite: 7,
+        rewardTier: 'auto',
+        rewardDaysEarned: _mockReferredCount * 7,
+        paidReferredCount: 1,
+        commissionRate: 0.5,
+        commissionMaxPeriods: 3,
+        commissionTotals: const [
+          ReferralCommissionTotal(currency: 'INR', accrued: 1000, paid: 500),
+        ],
+        discountEligible: false,
+        discountOfferId: 'referral50',
+        discountPercent: 50,
       );
 
   @override
@@ -2943,7 +3056,7 @@ class MockRepository implements LuminRepository {
       return const ReferralClaimResult(ok: false, reason: 'self_referral');
     }
     _mockReferredCount += 1;
-    return const ReferralClaimResult(ok: true);
+    return const ReferralClaimResult(ok: true, discountEligible: true);
   }
 
   @override

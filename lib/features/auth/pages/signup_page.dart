@@ -153,15 +153,30 @@ class _SignupPageState extends State<SignupPage> {
       );
       await repo.updateProfile(partial, acceptTerms: true);
       final referral = _referralCtl.text.trim();
+      var discountUnlocked = false;
       if (referral.isNotEmpty) {
         // Best-effort: a stale/garbled invite code never blocks signup.
         try {
-          await repo.claimReferralCode(referral);
+          final claim = await repo.claimReferralCode(referral);
+          discountUnlocked = claim.ok && claim.discountEligible;
         } catch (_) {}
       }
       await scope.auth?.markOnboarded();
       scope.auth?.cacheDisplayName(_nameCtl.text.trim());
       if (!mounted) return;
+      if (discountUnlocked) {
+        // Engine-confirmed (referral Phase 2): tell them the 50%-off
+        // first month is waiting on the Subscription page.
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Invite code accepted — 50% off your first month of any '
+              'plan is unlocked.',
+            ),
+            duration: Duration(seconds: 4),
+          ),
+        );
+      }
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const NavShell()),
         (_) => false,
@@ -402,6 +417,18 @@ class _SignupPageState extends State<SignupPage> {
               fontSize: 15,
             ),
             decoration: _inputDecoration('Have a friend\'s code?'),
+          ),
+          const SizedBox(height: LuminSpacing.xs),
+          // Referral Phase 2 (2026-07-21): the code is worth real money
+          // to both sides — say so, or nobody types it.
+          const Text(
+            'A friend\'s code gets you 50% off your first month of any '
+            'plan — and gives them free Auto days.',
+            style: TextStyle(
+              color: LuminColors.textMuted,
+              fontSize: 11,
+              height: 1.35,
+            ),
           ),
         ],
       ),
