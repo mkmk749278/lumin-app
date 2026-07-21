@@ -20,6 +20,7 @@ import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
 import '../../shared/widgets/preview_badge.dart';
 import '../../shared/widgets/shimmer.dart';
+import '../../shared/widgets/upsell_banners.dart';
 import '../trade/paper_trades_page.dart';
 import 'alerts_tab.dart';
 
@@ -239,6 +240,8 @@ class _PulsePageState extends State<PulsePage>
         if (!isLive) const PreviewBadge(),
         _RegimeBar(engine: data.engine),
         const SizedBox(height: LuminSpacing.md),
+        // Subscription upsell on the landing tab — auto-hides at Auto tier.
+        const UpgradeBanner(slot: 'pulse'),
         _TodayPnlCard(userPnl: data.userPnl),
         const SizedBox(height: LuminSpacing.md),
         if (data.userPnl.hasAnyTrading) ...[
@@ -252,6 +255,9 @@ class _PulsePageState extends State<PulsePage>
           const SizedBox(height: LuminSpacing.md),
         ],
         _RecentSignalsCard(recent: data.recent),
+        const SizedBox(height: LuminSpacing.md),
+        // Referral invite — engine-truth reward copy; hidden until stats load.
+        const InviteBanner(slot: 'pulse'),
         const SizedBox(height: LuminSpacing.xl),
       ],
     );
