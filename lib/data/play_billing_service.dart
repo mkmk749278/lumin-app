@@ -18,9 +18,60 @@
 import 'dart:async';
 
 import 'package:in_app_purchase/in_app_purchase.dart';
+import 'package:in_app_purchase_android/in_app_purchase_android.dart';
 
 import 'auth_service.dart';
 import 'repository.dart';
+
+/// The Play offer id a [ProductDetails] entry represents, or null for a
+/// plain base-plan entry.  On Android the billing plugin returns ONE
+/// [ProductDetails] per subscription offer (base plan included); the
+/// referral 50%-off first cycle lives under a dedicated offer id
+/// (`referral50`, engine `REFERRAL_DISCOUNT_OFFER_ID`) created in Play
+/// Console with developer-determined eligibility.
+String? googlePlayOfferIdOf(ProductDetails product) {
+  if (product is GooglePlayProductDetails) {
+    final index = product.subscriptionIndex;
+    final offers = product.productDetails.subscriptionOfferDetails;
+    if (index != null && offers != null && index < offers.length) {
+      return offers[index].offerId;
+    }
+  }
+  return null;
+}
+
+/// Pick which [ProductDetails] entry the paywall should sell for
+/// [productId].
+///
+/// Eligible referee + the referral offer exists → the discounted offer
+/// entry (Play enforces nothing here — the ENGINE decides eligibility;
+/// this developer-determined offer must only ever be surfaced when
+/// `ReferralStats.discountEligible`).  Everyone else gets the base-plan
+/// entry, so pre-referral behaviour is unchanged.  Falls back to the
+/// base plan when the offer isn't configured in Play Console yet.
+/// [offerIdOf] is injectable so tests don't need Android plugin types.
+ProductDetails? pickPlanOffer({
+  required List<ProductDetails> products,
+  required String productId,
+  required bool discountEligible,
+  String? discountOfferId,
+  String? Function(ProductDetails) offerIdOf = googlePlayOfferIdOf,
+}) {
+  final candidates = products.where((p) => p.id == productId).toList();
+  if (candidates.isEmpty) return null;
+  ProductDetails? base;
+  ProductDetails? discounted;
+  for (final p in candidates) {
+    final offerId = offerIdOf(p);
+    if (offerId == null) {
+      base ??= p;
+    } else if (discountOfferId != null && offerId == discountOfferId) {
+      discounted ??= p;
+    }
+  }
+  if (discountEligible && discounted != null) return discounted;
+  return base ?? candidates.first;
+}
 
 /// What happened with a purchase, surfaced to the subscription page.
 enum PlayBillingStatus { pending, entitled, notEntitled, canceled, error }

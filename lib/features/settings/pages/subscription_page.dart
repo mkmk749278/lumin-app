@@ -52,6 +52,15 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
   String? _loadError;
   List<ProductDetails> _products = const [];
 
+  /// Referral state (Phase 2, 2026-07-21) — when the ENGINE says this
+  /// user holds the one-time referral discount, the tiles sell the
+  /// `referral50` Play offer instead of the base plan.  Engine-gated:
+  /// the offer is developer-determined in Play Console, so surfacing it
+  /// only on `discountEligible` IS the eligibility enforcement.
+  ReferralStats? _referral;
+  final Set<String> _discountedIds = <String>{};
+  final Map<String, String> _basePriceById = <String, String>{};
+
   /// Current plan, rendered persistently (2026-07-17 — before this the
   /// page showed the identical marketing pitch to a paying Auto
   /// subscriber; the only status signal was a purchase-time snackbar).
@@ -124,13 +133,57 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
         }
         return;
       }
-      final products = await billing.loadProducts(kSubscriptionProductIds);
+      // Referral discount state — best-effort: an offline referral read
+      // must never block the paywall (the user just sees base prices).
+      ReferralStats? referral;
+      try {
+        referral = await AppConfigScope.of(context).repo.getReferralStats();
+      } catch (_) {}
+      final all = await billing.loadProducts(kSubscriptionProductIds);
+      final eligible = referral != null &&
+          referral.rewardsEnabled &&
+          referral.discountEligible;
+      final offerId = referral?.discountOfferId;
+      // One tile per product: the referral offer entry for an eligible
+      // referee (when the owner has created it in Play Console), the
+      // base-plan entry for everyone else.
+      final products = <ProductDetails>[];
+      final discountedIds = <String>{};
+      final basePriceById = <String, String>{};
+      for (final id in kSubscriptionProductIds) {
+        final base = pickPlanOffer(
+          products: all,
+          productId: id,
+          discountEligible: false,
+        );
+        if (base != null) basePriceById[id] = base.price;
+        final pick = pickPlanOffer(
+          products: all,
+          productId: id,
+          discountEligible: eligible,
+          discountOfferId: offerId,
+        );
+        if (pick == null) continue;
+        if (eligible &&
+            offerId != null &&
+            googlePlayOfferIdOf(pick) == offerId) {
+          discountedIds.add(id);
+        }
+        products.add(pick);
+      }
       // Cheapest first so Assist (₹1000) renders above Auto (₹2000).
       products.sort((a, b) => a.rawPrice.compareTo(b.rawPrice));
       if (mounted) {
         setState(() {
           _available = true;
           _products = products;
+          _referral = referral;
+          _discountedIds
+            ..clear()
+            ..addAll(discountedIds);
+          _basePriceById
+            ..clear()
+            ..addAll(basePriceById);
           _loading = false;
           _loadError = products.isEmpty
               ? 'No subscription plans are available right now.'
@@ -409,6 +462,12 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     final note = isAuto
         ? 'Hands-off — every eligible signal auto-executed'
         : 'One-tap — take any signal in a tap';
+    // Referral discount tile state: the price on `product` IS the offer's
+    // first-phase (discounted) price straight from Play; the struck-out
+    // base price gives the discount its reference point.
+    final hasDiscount = _discountedIds.contains(product.id);
+    final basePrice = _basePriceById[product.id];
+    final discountPct = _referral?.discountPercent ?? 0;
     // Subscribed users never re-buy from this page: the owned tile is
     // labelled CURRENT PLAN, and switching plans routes through Google
     // Play's manage screen (a plain buy() would open a second parallel
@@ -469,6 +528,12 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                           if (owned) ...[
                             const SizedBox(width: LuminSpacing.sm),
                             _pill('CURRENT PLAN', LuminColors.success),
+                          ] else if (hasDiscount && !subscribed) ...[
+                            const SizedBox(width: LuminSpacing.sm),
+                            _pill(
+                              '$discountPct% OFF 1ST MONTH',
+                              LuminColors.success,
+                            ),
                           ] else if (isAuto && !subscribed) ...[
                             const SizedBox(width: LuminSpacing.sm),
                             _pill('RECOMMENDED', LuminColors.accent),
@@ -493,6 +558,17 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
+                    if (hasDiscount &&
+                        basePrice != null &&
+                        basePrice != product.price)
+                      Text(
+                        basePrice,
+                        style: const TextStyle(
+                          color: LuminColors.textMuted,
+                          fontSize: 12,
+                          decoration: TextDecoration.lineThrough,
+                        ),
+                      ),
                     Text(
                       product.price, // Play-formatted, localised currency
                       style: const TextStyle(
@@ -503,7 +579,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                       ),
                     ),
                     Text(
-                      unit,
+                      hasDiscount ? 'first month' : unit,
                       style: const TextStyle(
                         color: LuminColors.textMuted,
                         fontSize: 10,

@@ -39,6 +39,12 @@ dependencies:
   # source of truth.  Telegram-bot payment retired (Telegram banned
   # in-region).
   in_app_purchase: ^3.2.0
+  # Referral rewards Phase 2 (2026-07-21) — direct dep on the Android
+  # implementation so the paywall can read GooglePlayProductDetails
+  # offer ids and buy the engine-gated `referral50` 50%-off-first-month
+  # offer.  Already a transitive dep of in_app_purchase (0.5.1 in the
+  # lockfile); the loose bound just keeps pub happy across its minors.
+  in_app_purchase_android: ">=0.3.6 <0.6.0"
   # Referral invite-a-friend (Phase 1, 2026-06-27) — native share sheet
   # for sending the user's referral link via WhatsApp/SMS/etc.
   # Pinned <13.0.0: share_plus 13.x bumps its win32 dependency to ^6.0.1,
