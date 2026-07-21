@@ -15,6 +15,7 @@ import '../auth/pages/phone_signin_page.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/free_tier_gate.dart';
 import '../../shared/widgets/lumin_card.dart';
+import '../../shared/widgets/upsell_banners.dart';
 import 'pages/about_page.dart';
 import 'pages/notification_settings_page.dart';
 import 'pages/server_side_execution_page.dart';
@@ -38,6 +39,12 @@ class SettingsPage extends StatelessWidget {
       body: ListView(
         physics: const BouncingScrollPhysics(),
         children: [
+          const SizedBox(height: LuminSpacing.md),
+          // Growth banners at the top of the menu — the upgrade pitch
+          // auto-hides once the user reaches Auto; the invite banner shows
+          // the standing reward deal (engine truth) to everyone.
+          const UpgradeBanner(slot: 'menu'),
+          const InviteBanner(slot: 'menu'),
           const SizedBox(height: LuminSpacing.md),
           _section(
             title: 'AUTO-TRADE',
@@ -144,7 +151,7 @@ class SettingsPage extends StatelessWidget {
               _Row(
                 icon: Icons.person_add_alt_1_outlined,
                 label: 'Invite a friend',
-                subtitle: 'Share your code, track who joined',
+                subtitle: 'Earn rewards when friends join — they get a discount',
                 onTap: () => _push(context, const ReferralPage()),
               ),
               _Row(

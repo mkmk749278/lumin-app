@@ -40,6 +40,7 @@ import '../../shared/format.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
 import '../../shared/widgets/preview_badge.dart';
+import '../../shared/widgets/upsell_banners.dart';
 import 'live_status_card.dart';
 import 'paper_trades_page.dart';
 
@@ -495,6 +496,9 @@ class _TradePageState extends State<TradePage>
               }
             },
           ),
+          // Upsell above the trade views — paper P&L is the strongest proof,
+          // so nudge free/Assist users to run it live.  Auto tier: hidden.
+          const UpgradeBanner(slot: 'trade'),
           Expanded(
             child: RefreshIndicator(
               color: LuminColors.accent,

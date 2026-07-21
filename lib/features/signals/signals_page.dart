@@ -22,6 +22,7 @@ import '../../shared/widgets/free_tier_gate.dart';
 import '../../shared/widgets/lumin_card.dart';
 import '../../shared/widgets/preview_badge.dart';
 import '../../shared/widgets/shimmer.dart';
+import '../../shared/widgets/upsell_banners.dart';
 import 'signal_snap.dart';
 import 'take_signal_sheet.dart';
 
@@ -366,6 +367,10 @@ class _SignalsPageState extends State<SignalsPage>
       body: Column(
         children: [
           if (!isLive) const PreviewBadge(),
+          // Automate-these-signals upsell — free/Assist users only; hides
+          // itself at Auto tier.  The signals feed is the strongest
+          // conversion surface, so the pitch sits right above the list.
+          const UpgradeBanner(slot: 'signals'),
           _FilterRow(current: _filter, onChanged: _setFilter),
           if (_filter == _SignalFilter.closed) ...[
             const SizedBox(height: LuminSpacing.sm),
