@@ -22,6 +22,7 @@ import '../../shared/widgets/preview_badge.dart';
 import '../../shared/widgets/shimmer.dart';
 import '../../shared/widgets/upsell_banners.dart';
 import '../trade/paper_trades_page.dart';
+import '../trial/trial_gate.dart';
 import 'alerts_tab.dart';
 
 // _PulseBundle promoted to ``PulseBundle`` in lib/data/repository.dart
@@ -240,6 +241,12 @@ class _PulsePageState extends State<PulsePage>
         if (!isLive) const PreviewBadge(),
         _RegimeBar(engine: data.engine),
         const SizedBox(height: LuminSpacing.md),
+        // Free trial: pops the welcome offer for a new customer (engine
+        // decides eligibility) and counts down a running trial. Sits above
+        // the upsell so a trialist sees their remaining days first — the
+        // upsell banner hides itself at Auto tier anyway, which a running
+        // trial grants.
+        const TrialGate(),
         // Subscription upsell on the landing tab — auto-hides at Auto tier.
         const UpgradeBanner(slot: 'pulse'),
         _TodayPnlCard(userPnl: data.userPnl),
