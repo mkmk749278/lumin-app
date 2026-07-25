@@ -25,6 +25,7 @@ import '../../../shared/format.dart';
 import '../../../shared/tokens.dart';
 import '../../../shared/widgets/free_tier_gate.dart';
 import '../../../shared/widgets/lumin_card.dart';
+import '../../trial/trial_offer_tile.dart';
 
 /// Play Console subscription product ids (B16 two-tier model).  Keep in
 /// lockstep with the engine's GOOGLE_PLAY_ASSIST/AUTO_PRODUCT_IDS env.
@@ -287,6 +288,16 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
         physics: const BouncingScrollPhysics(),
         children: [
           const SizedBox(height: LuminSpacing.md),
+          // Free-trial offer, if this user still has one. Above the plans on
+          // purpose: someone weighing a subscription deserves to know they
+          // can have it free for a week first. Invisible unless the engine
+          // says the offer is available.
+          TrialOfferBanner(
+            onClaimed: (trial) => setState(() {
+              _tier = trial.tier ?? _tier;
+              _paidUntil = trial.expiresAt ?? _paidUntil;
+            }),
+          ),
           if (isPaidTier(_tier))
             Padding(
               padding:

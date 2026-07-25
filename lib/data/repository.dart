@@ -157,6 +157,107 @@ class ReferralStats {
       );
 }
 
+/// The signup free trial — 7 days of the full `auto` tier for a new
+/// customer, granted server-side with no payment method (owner decision
+/// 2026-07-25).
+///
+/// **The app decides nothing here.**  [offerAvailable] is the ONLY signal
+/// that the welcome sheet may appear; it is false for every user while the
+/// engine's `SIGNUP_TRIAL_ENABLED` flag is off, even though those users are
+/// already being counted in the engine's cohort.  Mirrors the repo rule that
+/// the engine is the source of truth for anything money-adjacent the UI
+/// renders — a sheet promising a trial the engine will refuse is exactly the
+/// bug class this app has already paid for once.
+///
+/// Every field defaults so a pre-trial engine deserialises to "no offer,
+/// nothing claimed" rather than null-crashing.
+class TrialState {
+  const TrialState({
+    this.offerAvailable = false,
+    this.days = 0,
+    this.tier,
+    this.claimed = false,
+    this.active = false,
+    this.claimedAt,
+    this.expiresAt,
+    this.secondsRemaining,
+    this.daysRemaining,
+    this.converted = false,
+    this.ineligibleReason,
+  });
+
+  /// True when this user can activate a trial right now.
+  final bool offerAvailable;
+
+  /// Length of the offered window, in days.
+  final int days;
+
+  /// Tier the trial grants (`auto` — hands-off server-side execution).
+  final String? tier;
+
+  /// True once the user has activated their one trial — stays true after it
+  /// lapses, because a trial is one-shot per user forever.
+  final bool claimed;
+
+  /// True while the claimed window is still running.
+  final bool active;
+  final String? claimedAt;
+  final String? expiresAt;
+  final int? secondsRemaining;
+
+  /// Whole days left, rounded up — what the countdown chip renders.
+  final int? daysRemaining;
+  final bool converted;
+
+  /// Why no offer is available: `offer_not_available` | `already_trialled`
+  /// | `already_subscribed` | `account_too_old` | `not_onboarded`.
+  final String? ineligibleReason;
+
+  /// True when the trial is running and close enough to its end that the
+  /// app should nudge the user toward subscribing.
+  bool get isEndingSoon =>
+      active && daysRemaining != null && daysRemaining! <= 2;
+
+  static const empty = TrialState();
+
+  factory TrialState.fromJson(Map<String, dynamic> j) => TrialState(
+        offerAvailable: j['offer_available'] as bool? ?? false,
+        days: (j['days'] as num?)?.toInt() ?? 0,
+        tier: j['tier'] as String?,
+        claimed: j['claimed'] as bool? ?? false,
+        active: j['active'] as bool? ?? false,
+        claimedAt: j['claimed_at'] as String?,
+        expiresAt: j['expires_at'] as String?,
+        secondsRemaining: (j['seconds_remaining'] as num?)?.toInt(),
+        daysRemaining: (j['days_remaining'] as num?)?.toInt(),
+        converted: j['converted'] as bool? ?? false,
+        ineligibleReason: j['ineligible_reason'] as String?,
+      );
+}
+
+/// Result of tapping "Start my free days" — the post-claim [TrialState]
+/// plus the verdict, so one round trip both activates and refreshes the UI.
+class TrialClaimResult {
+  const TrialClaimResult({
+    required this.ok,
+    required this.state,
+    this.reason,
+  });
+  final bool ok;
+  final TrialState state;
+
+  /// Set when [ok] is false; same vocabulary as
+  /// [TrialState.ineligibleReason].
+  final String? reason;
+
+  factory TrialClaimResult.fromJson(Map<String, dynamic> j) =>
+      TrialClaimResult(
+        ok: j['ok'] as bool? ?? false,
+        reason: j['reason'] as String?,
+        state: TrialState.fromJson(j),
+      );
+}
+
 /// Result of redeeming someone else's referral code.
 class ReferralClaimResult {
   const ReferralClaimResult({
@@ -1783,6 +1884,25 @@ abstract class LuminRepository {
   /// so a stale/garbled link never blocks signup).
   Future<ReferralClaimResult> claimReferralCode(String code);
 
+  /// This user's signup-trial offer + window (``GET /api/trial``).
+  ///
+  /// Cheap and safe to call on app start: it returns "no offer" for every
+  /// user while the engine's trial flag is off, and for anyone who has
+  /// already trialled or subscribed.  Never grants anything — activation is
+  /// [claimTrial] and nothing else.
+  Future<TrialState> fetchTrialState();
+
+  /// Activate the free trial (``POST /api/trial/claim``) — the welcome
+  /// sheet's CTA, and the only path that grants trial entitlement.
+  ///
+  /// Opt-in by design: the engine will not start a trial without this
+  /// deliberate call, because it puts server-side auto-execution within
+  /// reach of the user's real capital.  Idempotent — a double-tap returns
+  /// ``ok: false`` with ``already_trialled`` and the unchanged window
+  /// rather than a second grant.  Returns a result instead of throwing on
+  /// refusal; a refused offer is not an error the user should see as one.
+  Future<TrialClaimResult> claimTrial();
+
   /// Verify a Google Play subscription purchase server-side (B16 —
   /// ``POST /api/billing/play/verify``).  The app sends the opaque
   /// ``purchaseToken`` + ``productId`` after Play Billing confirms a
@@ -3059,6 +3179,43 @@ class MockRepository implements LuminRepository {
     return const ReferralClaimResult(ok: true, discountEligible: true);
   }
 
+  // In-memory trial state for offline/preview mode. ``static`` so a claim
+  // survives for the lifetime of the const MockRepository — previewing the
+  // welcome sheet should behave like the real one-shot offer, not re-offer
+  // itself on every rebuild.
+  static TrialState _mockTrial = const TrialState(
+    offerAvailable: true,
+    days: 7,
+    tier: 'auto',
+  );
+
+  @override
+  Future<TrialState> fetchTrialState() async => _mockTrial;
+
+  @override
+  Future<TrialClaimResult> claimTrial() async {
+    if (_mockTrial.claimed) {
+      return TrialClaimResult(
+        ok: false,
+        reason: 'already_trialled',
+        state: _mockTrial,
+      );
+    }
+    final expiry = DateTime.now().toUtc().add(const Duration(days: 7));
+    _mockTrial = TrialState(
+      offerAvailable: false,
+      days: 7,
+      tier: 'auto',
+      claimed: true,
+      active: true,
+      claimedAt: DateTime.now().toUtc().toIso8601String(),
+      expiresAt: expiry.toIso8601String(),
+      secondsRemaining: const Duration(days: 7).inSeconds,
+      daysRemaining: 7,
+    );
+    return TrialClaimResult(ok: true, state: _mockTrial);
+  }
+
   @override
   Future<PlayVerifyResult> verifyPlayPurchase({
     required String productId,
@@ -4071,6 +4228,20 @@ class HttpRepository implements LuminRepository {
       body: {'code': code},
     );
     return ReferralClaimResult.fromJson(j as Map<String, dynamic>);
+  }
+
+  @override
+  Future<TrialState> fetchTrialState() async {
+    final j = await client.get('/api/trial');
+    return TrialState.fromJson(j as Map<String, dynamic>);
+  }
+
+  @override
+  Future<TrialClaimResult> claimTrial() async {
+    // A refusal comes back as a 200 with ``ok: false`` — an unavailable
+    // offer is not an error condition, so nothing here throws on it.
+    final j = await client.post('/api/trial/claim');
+    return TrialClaimResult.fromJson(j as Map<String, dynamic>);
   }
 
   @override
