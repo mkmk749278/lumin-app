@@ -21,10 +21,18 @@ Widget _wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
 
 /// The welcome card is taller than the default 800×600 test surface, so its
 /// buttons scroll off. Scroll to a control before tapping it.
-Future<void> _tap(WidgetTester tester, Finder finder) async {
+///
+/// [settle] must be false while the card is busy: it renders a
+/// CircularProgressIndicator, which animates forever, so `pumpAndSettle`
+/// would time out rather than reach the tap.
+Future<void> _tap(
+  WidgetTester tester,
+  Finder finder, {
+  bool settle = true,
+}) async {
   await tester.ensureVisible(finder);
-  await tester.pumpAndSettle();
-  await tester.tap(finder);
+  await (settle ? tester.pumpAndSettle() : tester.pump());
+  await tester.tap(finder, warnIfMissed: false);
   await tester.pump();
 }
 
@@ -113,7 +121,7 @@ void main() {
         tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
         isNull,
       );
-      await _tap(tester, find.byType(FilledButton));
+      await _tap(tester, find.byType(FilledButton), settle: false);
       expect(started, 0);
     });
 
