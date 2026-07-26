@@ -8,6 +8,7 @@ import '../../../data/app_config.dart';
 import '../../../data/country_codes.dart';
 import '../../../data/repository.dart';
 import '../../../shared/format.dart';
+import '../../../shared/platform_input.dart';
 import '../../../shared/tokens.dart';
 import '../../../shared/widgets/free_tier_gate.dart';
 import '../../../shared/widgets/lumin_card.dart';
@@ -611,7 +612,7 @@ class _PickerSheetState<T> extends State<_PickerSheet<T>> {
             padding:
                 const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
             child: TextField(
-              autofocus: true,
+              autofocus: kAutofocusTextFields,
               decoration: InputDecoration(
                 hintText: 'Search',
                 hintStyle: const TextStyle(

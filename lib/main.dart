@@ -92,6 +92,20 @@ class LuminApp extends StatelessWidget {
 /// each stage needs to observe a SharedPreferences flag and the
 /// caller (LuminApp) doesn't want to know about either flag.
 ///
+/// The flags are read **once**, on mount.  Advancing between stages
+/// then walks the enum synchronously rather than re-running the async
+/// resolve (2026-07-26 iPhone setup-screen fix): the old `_advance`
+/// replaced the resolved future with a fresh one, so every "Get
+/// Started" / "Continue" tap dropped the UI back to the blank splash
+/// for at least one frame — and on iOS Safari, where the
+/// SharedPreferences round-trip is slower, for long enough to read as
+/// a freeze.  Taps landing in that window hit the splash and did
+/// nothing, which is why the screen appeared to need pressing twice.
+/// Stage order is fixed (welcome → consent → ready), so the next
+/// stage is known without re-reading storage; the stage widgets still
+/// persist their flag before calling back, so a relaunch resumes at
+/// the right place.
+///
 /// Lives in front of [_AuthGate] (not behind it) because the welcome
 /// + consent disclosures are required BEFORE any data collection —
 /// including the Firebase Auth session — per Google's prominent-
@@ -105,53 +119,70 @@ class _FirstRunGate extends StatefulWidget {
 }
 
 class _FirstRunGateState extends State<_FirstRunGate> {
-  Future<_OnboardingState>? _check;
+  /// Null until the one-shot flag read completes; the blank splash shows
+  /// only during that first read, never again between stages.
+  _OnboardingState? _stage;
+
+  /// Mirrors the consent flag as last read / written, so [_advance] can
+  /// pick the next stage without another storage round-trip.
+  bool _consentSatisfied = false;
 
   @override
   void initState() {
     super.initState();
-    _check = _resolve();
+    _resolve();
   }
 
-  Future<_OnboardingState> _resolve() async {
+  Future<void> _resolve() async {
     final welcomeSeen = await ConsentStorage.welcomeSeen();
     final consentDone = await ConsentStorage.isUpToDate();
-    if (!welcomeSeen) return _OnboardingState.welcome;
-    if (!consentDone) return _OnboardingState.consent;
-    return _OnboardingState.ready;
+    if (!mounted) return;
+    setState(() {
+      _consentSatisfied = consentDone;
+      if (!welcomeSeen) {
+        _stage = _OnboardingState.welcome;
+      } else if (!consentDone) {
+        _stage = _OnboardingState.consent;
+      } else {
+        _stage = _OnboardingState.ready;
+      }
+    });
   }
 
+  /// Synchronous hand-off to the next stage.  Skips consent when the
+  /// stored version is already current — a fresh install never hits that
+  /// branch, but a welcome replay on a consented device would.
   void _advance() {
-    // Re-evaluate flags so we land on the next required stage.
     setState(() {
-      _check = _resolve();
+      _stage = switch (_stage) {
+        _OnboardingState.welcome => _consentSatisfied
+            ? _OnboardingState.ready
+            : _OnboardingState.consent,
+        _ => _OnboardingState.ready,
+      };
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<_OnboardingState>(
-      future: _check,
-      builder: (context, snap) {
-        if (snap.connectionState != ConnectionState.done) {
-          // Same blank-splash convention as [_AuthGate] to avoid a
-          // visible flicker between stages.
-          return const Scaffold(
-            backgroundColor: Color(0xFF0A0E1A),
-            body: SizedBox.shrink(),
-          );
-        }
-        switch (snap.data) {
-          case _OnboardingState.welcome:
-            return WelcomePage(onContinue: _advance);
-          case _OnboardingState.consent:
-            return WelcomeConsentPage(onAccepted: _advance);
-          case _OnboardingState.ready:
-          case null:
-            return const _AuthGate();
-        }
-      },
-    );
+    switch (_stage) {
+      case null:
+        // Same blank-splash convention as [_AuthGate] to avoid a
+        // visible flicker on the very first flag read.
+        return const Scaffold(
+          backgroundColor: Color(0xFF0A0E1A),
+          body: SizedBox.shrink(),
+        );
+      case _OnboardingState.welcome:
+        return WelcomePage(onContinue: _advance);
+      case _OnboardingState.consent:
+        return WelcomeConsentPage(onAccepted: () {
+          _consentSatisfied = true;
+          _advance();
+        });
+      case _OnboardingState.ready:
+        return const _AuthGate();
+    }
   }
 }
 

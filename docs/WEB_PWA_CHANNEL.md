@@ -63,6 +63,21 @@ bundles cache 1h).
 
 ## Architecture notes
 
+- **The shell locks the document viewport** (`web/index.html`:
+  `position: fixed; inset: 0; overflow: hidden; overscroll-behavior: none;
+  touch-action: manipulation`). Flutter paints into one canvas, so the HTML
+  document has nothing to scroll — but iOS Safari still rubber-bands it on
+  any vertical drag the Flutter scene didn't consume, which moves the canvas
+  under the user's finger and makes the next tap land on stale coordinates.
+  Symptom (owner, 2026-07-26): every setup screen needed two presses, while
+  everything after sign-in felt fine — because each shell tab owns a real
+  scrollable that eats the drag, and the onboarding slides / sign-in form
+  don't. Pinned by `test/web_shell_test.dart`; if `flutter create` ever
+  regenerates this file, re-apply the block.
+- **No `autofocus` on web** (`lib/shared/platform_input.dart`). Browsers only
+  raise the keyboard from inside a user gesture, so a field that focuses at
+  mount leaves Flutter and Safari disagreeing about focus and costs the user
+  a tap. Native keeps autofocus.
 - `lib/app/distribution.dart`: the `web` token maps explicitly (the
   historical unknown-token→sideload fail-safe would otherwise enable the
   self-updater on web).

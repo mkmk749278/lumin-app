@@ -21,6 +21,7 @@ import '../../../app/nav_shell.dart';
 import '../../../data/app_config.dart';
 import '../../../data/country_codes.dart';
 import '../../../data/repository.dart';
+import '../../../shared/platform_input.dart';
 import '../../../shared/tokens.dart';
 import '../../../shared/widgets/lumin_card.dart';
 
@@ -315,7 +316,7 @@ class _SignupPageState extends State<SignupPage> {
           const SizedBox(height: LuminSpacing.sm),
           TextFormField(
             controller: _nameCtl,
-            autofocus: true,
+            autofocus: kAutofocusTextFields,
             textCapitalization: TextCapitalization.words,
             maxLength: 64,
             validator: (raw) {
@@ -618,7 +619,7 @@ class _PickerSheetState<T> extends State<_PickerSheet<T>> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
             child: TextField(
-              autofocus: true,
+              autofocus: kAutofocusTextFields,
               decoration: InputDecoration(
                 hintText: 'Search',
                 hintStyle:

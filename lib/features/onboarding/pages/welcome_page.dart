@@ -31,16 +31,35 @@ class _WelcomePageState extends State<WelcomePage> {
   int _page = 0;
   static const _lastPage = 2;
 
+  /// True once "Get Started" has been accepted.  Guards against a second
+  /// tap arriving while [ConsentStorage.recordWelcomeSeen] is in flight
+  /// firing [WelcomePage.onContinue] twice.
+  bool _finishing = false;
+
   @override
   void dispose() {
     _controller.dispose();
     super.dispose();
   }
 
+  /// Advances one slide, or finishes on the last one.
+  ///
+  /// `_page` is bumped optimistically rather than waiting for
+  /// `onPageChanged` (2026-07-26 iPhone setup-screen fix).  `onPageChanged`
+  /// only fires when the 300ms scroll animation crosses the halfway point,
+  /// so a second CTA tap inside that window used to read a stale `_page`
+  /// and re-target the slide the carousel was already animating to — the
+  /// tap did nothing visible, which on iOS Safari (where the frame budget
+  /// makes that window feel long) is exactly the "pressed it and nothing
+  /// happened" symptom.  Tracking the intent means consecutive taps queue
+  /// up one slide each.
   void _next() {
+    if (_finishing) return;
     if (_page < _lastPage) {
+      final target = _page + 1;
+      setState(() => _page = target);
       _controller.animateToPage(
-        _page + 1,
+        target,
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeInOut,
       );
@@ -50,6 +69,8 @@ class _WelcomePageState extends State<WelcomePage> {
   }
 
   void _skipToLast() {
+    if (_finishing || _page == _lastPage) return;
+    setState(() => _page = _lastPage);
     _controller.animateToPage(
       _lastPage,
       duration: const Duration(milliseconds: 300),
@@ -58,7 +79,10 @@ class _WelcomePageState extends State<WelcomePage> {
   }
 
   Future<void> _done() async {
+    if (_finishing) return;
+    setState(() => _finishing = true);
     await ConsentStorage.recordWelcomeSeen();
+    if (!mounted) return;
     widget.onContinue();
   }
 

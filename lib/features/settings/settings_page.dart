@@ -12,6 +12,7 @@ import '../../data/legal_urls.dart';
 import '../../data/repository.dart';
 import '../agents/agents_page.dart';
 import '../auth/pages/phone_signin_page.dart';
+import '../../shared/platform_input.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/free_tier_gate.dart';
 import '../../shared/widgets/lumin_card.dart';
@@ -448,7 +449,7 @@ class _DeleteAccountDialogState extends State<_DeleteAccountDialog> {
           const SizedBox(height: LuminSpacing.md),
           TextField(
             controller: _controller,
-            autofocus: true,
+            autofocus: kAutofocusTextFields,
             decoration: const InputDecoration(
               hintText: 'Type DELETE',
               border: OutlineInputBorder(),
