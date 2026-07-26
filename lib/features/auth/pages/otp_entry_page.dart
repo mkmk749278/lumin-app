@@ -37,6 +37,7 @@ import '../../../data/app_config.dart';
 import '../../../data/auth_service.dart';
 import '../../../data/country_codes.dart';
 import '../../../data/repository.dart';
+import '../../../shared/platform_input.dart';
 import '../../../shared/tokens.dart';
 import '../../../shared/widgets/lumin_card.dart';
 import 'signup_page.dart';
@@ -402,7 +403,7 @@ class _OtpEntryPageState extends State<OtpEntryPage> {
                       const SizedBox(height: LuminSpacing.sm),
                       TextFormField(
                         controller: _codeCtl,
-                        autofocus: true,
+                        autofocus: kAutofocusTextFields,
                         keyboardType: TextInputType.number,
                         autocorrect: false,
                         maxLength: 6,

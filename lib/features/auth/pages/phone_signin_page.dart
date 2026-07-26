@@ -23,6 +23,7 @@ import 'package:flutter/services.dart';
 import '../../../data/app_config.dart';
 import '../../../data/auth_service.dart';
 import '../../../data/country_codes.dart';
+import '../../../shared/platform_input.dart';
 import '../../../shared/tokens.dart';
 import '../../../shared/widgets/lumin_card.dart';
 import 'otp_entry_page.dart';
@@ -294,7 +295,7 @@ class _PhoneSignInPageState extends State<PhoneSignInPage> {
                           Expanded(
                             child: TextFormField(
                               controller: _phoneCtl,
-                              autofocus: true,
+                              autofocus: kAutofocusTextFields,
                               keyboardType: TextInputType.phone,
                               autocorrect: false,
                               maxLength: 14,
@@ -458,7 +459,7 @@ class _CountryPickerSheetState extends State<_CountryPickerSheet> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
             child: TextField(
-              autofocus: true,
+              autofocus: kAutofocusTextFields,
               decoration: InputDecoration(
                 hintText: 'Search country',
                 hintStyle:

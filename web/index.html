@@ -36,6 +36,42 @@
     /* Match the app's deep-navy background while the engine loads so the
        splash never flashes white (LuminColors.bgDeep). */
     html, body { background: #0A0E1A; margin: 0; padding: 0; }
+
+    /* Pin the document to the viewport (2026-07-26 iPhone setup-screen fix).
+     *
+     * Flutter draws the whole app into one canvas, so the HTML document
+     * itself has nothing to scroll — but iOS Safari does not know that and
+     * still rubber-bands the document on any vertical drag the Flutter
+     * scene did not consume.  Onboarding is exactly that case: the welcome
+     * PageView scrolls horizontally only, and the consent + phone screens
+     * are non-scrolling Columns, so every stray vertical drag (including
+     * the small one at the start of an ordinary tap) scrolled the document
+     * a few pixels under the canvas.  The tap then landed on stale
+     * coordinates and only reset the overscroll, which is why the owner had
+     * to press "a couple of times" to advance a setup screen while
+     * everything after sign-in — where each tab owns a real scrollable that
+     * consumes the drag — felt smooth.
+     *
+     * Taking `body` out of flow at `inset: 0` sizes it to the viewport and
+     * leaves the document with nothing to overscroll — Flutter's
+     * `flutter-view` is absolutely positioned inside `body`, so it still
+     * fills the same box.  `overscroll-behavior: none` stops the chained
+     * bounce / pull-to-refresh on Chrome and Android, and `touch-action:
+     * manipulation` drops Safari's double-tap-to-zoom recogniser so a
+     * second quick tap is delivered as a tap. */
+    html {
+      height: 100%;
+      overflow: hidden;
+      overscroll-behavior: none;
+    }
+    body {
+      position: fixed;
+      inset: 0;
+      overflow: hidden;
+      overscroll-behavior: none;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
   </style>
 </head>
 <body>
