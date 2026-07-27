@@ -149,6 +149,14 @@ class _PhoneSignInPageState extends State<PhoneSignInPage> {
           // Auto-resolution landed us a session — the AuthGate stream
           // listener in main.dart will swap to NavShell on the next
           // frame.  Nothing more to do here.
+          //
+          // That reasoning is sound *for this route only*, because the
+          // gate renders this page directly and so can replace it.  It
+          // does NOT generalise: `codeSent` usually fires first and
+          // pushes OtpEntryPage on top of the gate, and a gate re-route
+          // then rebuilds underneath that pushed route while the user
+          // keeps looking at it.  OtpEntryPage therefore watches the
+          // auth stream itself rather than relying on this (2026-07-27).
           if (!mounted) return;
           setState(() => _busy = false);
         },

@@ -11,12 +11,31 @@
 ///     [AuthService.confirmTelegramCode] which POSTs `/verify`,
 ///     receives a Firebase custom token, and signs in.
 ///
-/// On success the AuthGate stream listener in `main.dart` swaps the
-/// shell to NavShell automatically.  Brand-new users land on
-/// SignupPage first — Telegram path uses the cached
-/// `needs_onboarding` from the verify response; SMS path round-trips
-/// `/api/profile` after Firebase signin to learn the same bit (since
-/// the SMS verify itself doesn't touch the engine).
+/// Brand-new users land on SignupPage first — Telegram path uses the
+/// cached `needs_onboarding` from the verify response; SMS path
+/// round-trips `/api/profile` after Firebase signin to learn the same
+/// bit (since the SMS verify itself doesn't touch the engine).
+///
+/// **This page owns its own forward navigation, and must** (2026-07-27).
+/// The previous doc here said "the AuthGate stream listener in main.dart
+/// swaps the shell to NavShell automatically".  That is false for this
+/// route: PhoneSignInPage `push`es OtpEntryPage *on top of* `_AuthGate`,
+/// so when the gate re-routes it rebuilds **underneath** the pushed
+/// route and this page stays on screen.
+///
+/// It broke Android auto-retrieval end to end.  Firebase fires `codeSent`
+/// (we push this page) and then `verificationCompleted` when it reads the
+/// SMS itself — which signs the user in and consumes the verification
+/// session.  The gate switched to NavShell below, invisibly; the user sat
+/// on the code screen.  Tapping Verify then failed `session-expired`
+/// against a session that had already succeeded, so the page reported
+/// "That code expired" over a live authenticated account.  Force-quitting
+/// rebuilt the navigator from scratch and the user was simply logged in —
+/// the report that surfaced this.
+///
+/// So: [_watchAuthState] completes the flow on *any* sign-in regardless of
+/// which callback produced it, and [_submit] never reports a failure while
+/// [AuthService.currentUser] is non-null.
 ///
 /// "Resend" re-issues the OTP on the same channel.  Telegram re-uses
 /// [AuthService.startTelegramSignIn].  SMS re-invokes the same call
@@ -45,6 +64,46 @@ import 'signup_page.dart';
 /// Which provider delivered the OTP — drives the channel-specific
 /// hint copy and dictates which `confirm*` method to call on submit.
 enum OtpChannel { sms, telegram }
+
+/// What the UI should do about a failed code exchange.
+enum OtpFailureAction {
+  /// Not actually a failure — a session already exists, so go forward.
+  completeSignIn,
+
+  /// The verification window is gone; only a fresh code can recover.
+  promptResend,
+
+  /// Wrong digits; the same session can still accept a retry.
+  promptRetryCode,
+
+  /// Anything else — surface the SDK's own message.
+  showMessage,
+}
+
+/// Decide what a code-exchange failure means, given whether we are signed in.
+///
+/// Pulled out as a pure function because the ordering *is* the bug
+/// (2026-07-27): the page used to branch on `e.code` alone and never asked
+/// whether the account was already authenticated. Android SMS auto-retrieval
+/// signs the user in through `verificationCompleted` and consumes the
+/// verification session doing it, so a later Verify tap throws
+/// `session-expired` against a session that had already succeeded — and the
+/// screen said "That code expired" to someone who was logged in.
+///
+/// **A live session outranks every error code.** None of the codes below
+/// describe the account state; they describe one exchange attempt, and an
+/// attempt can fail redundantly after the account is already signed in.
+OtpFailureAction classifyOtpFailure({
+  required String code,
+  required bool signedIn,
+}) {
+  if (signedIn) return OtpFailureAction.completeSignIn;
+  if (code == 'session-expired') return OtpFailureAction.promptResend;
+  if (code == 'invalid-verification-code') {
+    return OtpFailureAction.promptRetryCode;
+  }
+  return OtpFailureAction.showMessage;
+}
 
 class OtpEntryPage extends StatefulWidget {
   const OtpEntryPage({
@@ -112,6 +171,17 @@ class _OtpEntryPageState extends State<OtpEntryPage> {
   late int _windowSeconds;
   Timer? _ticker;
 
+  /// Guards the forward navigation so it runs exactly once. Sign-in can be
+  /// observed twice in a race — the auth-state stream and a successful
+  /// [_submit] both reach [_completeSignIn] — and two `pushAndRemoveUntil`
+  /// calls would stack two NavShells.
+  bool _completing = false;
+
+  /// Auth-state subscription. Cancelled in [dispose]; without that a fired
+  /// callback on a disposed State throws on `setState`/`Navigator`.
+  StreamSubscription<User?>? _authSub;
+  bool _watchingAuth = false;
+
   @override
   void initState() {
     super.initState();
@@ -120,6 +190,40 @@ class _OtpEntryPageState extends State<OtpEntryPage> {
     _windowSeconds = widget.expiresInSeconds;
     _secondsLeft = _windowSeconds;
     _startTicker();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _watchAuthState();
+  }
+
+  /// Complete the flow whenever Firebase reports a signed-in user, no matter
+  /// which path produced it.
+  ///
+  /// The one that used to fall through the cracks is Android SMS
+  /// auto-retrieval: `verificationCompleted` fires inside
+  /// [AuthService.startSmsSignIn] and signs the user in there, so the
+  /// callback that would have navigated lives on PhoneSignInPage — a route
+  /// this page is stacked on top of. Nothing here ever learned about it.
+  /// Watching the stream catches that case, the resend case, and any future
+  /// path, instead of enumerating callbacks.
+  ///
+  /// Subscribed from [didChangeDependencies] rather than [initState] because
+  /// it needs the [AppConfigScope] inherited widget.
+  ///
+  /// Uses `maybeOf`, not `of`: unlike [_submit] this runs on every mount, so
+  /// asserting here would make the page un-buildable standalone in a widget
+  /// test. A missing scope simply means no auth to watch.
+  void _watchAuthState() {
+    if (_watchingAuth) return;
+    final auth = AppConfigScope.maybeOf(context)?.auth;
+    if (auth == null) return;
+    _watchingAuth = true;
+    _authSub = auth.authStateChanges.listen((user) {
+      if (user == null || !mounted) return;
+      _completeSignIn();
+    });
   }
 
   void _startTicker() {
@@ -138,8 +242,56 @@ class _OtpEntryPageState extends State<OtpEntryPage> {
   @override
   void dispose() {
     _ticker?.cancel();
+    _authSub?.cancel();
     _codeCtl.dispose();
     super.dispose();
+  }
+
+  /// Leave this page for wherever a freshly signed-in user belongs.
+  ///
+  /// Deliberately the *same* routine whether the code was typed or
+  /// auto-retrieved: an auto-filled sign-in is the identical event arriving
+  /// by a different callback, and giving it its own routing behaviour is how
+  /// the two drift apart.
+  Future<void> _completeSignIn() async {
+    if (_completing || !mounted) return;
+    _completing = true;
+    _ticker?.cancel();
+    final scope = AppConfigScope.of(context);
+    final auth = scope.auth;
+    if (auth == null) return;
+
+    if (widget.channel == OtpChannel.sms) {
+      // The SMS verify never touches the engine, so ask /api/profile whether
+      // this user is new. Failure falls through to NavShell — a transient
+      // 5xx must not strand someone who is already authenticated; worst case
+      // a new user finishes their profile from Settings → Profile.
+      try {
+        final Profile profile = await scope.repo.fetchProfile();
+        auth.cacheEngineMetadata(
+          userId: profile.userId,
+          tier: profile.tier,
+          paidUntil: profile.paidUntil,
+          needsOnboarding: profile.needsOnboarding,
+          displayName: profile.displayName,
+        );
+      } catch (_) {
+        // Intentionally swallowed — see above.
+      }
+    }
+    if (!mounted) return;
+    // Replace the stack so the user can't back-button into the signin pages.
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(
+        builder: (_) => auth.currentNeedsOnboarding()
+            ? SignupPage(
+                phoneE164: widget.phone,
+                countryHint: widget.countryHint,
+              )
+            : const NavShell(),
+      ),
+      (_) => false,
+    );
   }
 
   String? _validateCode(String? raw) {
@@ -173,75 +325,40 @@ class _OtpEntryPageState extends State<OtpEntryPage> {
           );
         }
         await auth.confirmSmsCode(vid, _codeCtl.text.trim());
-        // SMS path doesn't go through the engine for the OTP itself —
-        // ask `/api/profile` whether this user is new so we route them
-        // to SignupPage like the Telegram path does.  Failure here
-        // (engine down, transient 5xx) falls through to NavShell; the
-        // user can complete profile from Settings → Profile later.
-        try {
-          final Profile profile = await scope.repo.fetchProfile();
-          auth.cacheEngineMetadata(
-            userId: profile.userId,
-            tier: profile.tier,
-            paidUntil: profile.paidUntil,
-            needsOnboarding: profile.needsOnboarding,
-            displayName: profile.displayName,
-          );
-        } catch (_) {
-          // Swallow — needsOnboarding stays at its default (false for
-          // the SMS path).  Worst case: a brand-new user lands on
-          // NavShell instead of SignupPage and finishes profile from
-          // Settings → Profile.  Better than blocking signin on a
-          // transient profile-fetch failure.
-        }
       } else {
         await auth.confirmTelegramCode(widget.phone, _codeCtl.text.trim());
       }
       if (!mounted) return;
-      // Brand-new users land on SignupPage before NavShell.  Telegram
-      // populates `currentNeedsOnboarding` from the verify response;
-      // SMS populates it from the `/api/profile` round-trip above.
-      if (auth.currentNeedsOnboarding()) {
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(
-            builder: (_) => SignupPage(
-              phoneE164: widget.phone,
-              countryHint: widget.countryHint,
-            ),
-          ),
-          (_) => false,
-        );
-      } else {
-        // Replace the stack with NavShell so the user can't back-button
-        // into the signin pages.  The AuthGate would also route here
-        // on the next stream tick; doing it explicitly avoids the
-        // single-frame flash of PhoneSignInPage between pop and tick.
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const NavShell()),
-          (_) => false,
-        );
-      }
+      await _completeSignIn();
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
-      // `session-expired` means the Firebase verification window
-      // (pinned to 120s in AuthService.startSmsSignIn) elapsed before
-      // the user typed the code, OR the SDK invalidated the session
-      // for some other reason.  In either case the same code-entry
-      // can't recover; the user needs a fresh SMS.  Surface a clear
-      // "Send a new code" CTA and stop the countdown.
-      if (e.code == 'session-expired') {
-        _ticker?.cancel();
-        setState(() {
-          _sessionExpired = true;
-          _secondsLeft = 0;
-          _error = 'That code expired — tap "Send a new code" below '
-              'and we\'ll text you a fresh one.';
-        });
-      } else if (e.code == 'invalid-verification-code') {
-        setState(() => _error = 'That code didn\'t match — double-check '
-            'and try again.');
-      } else {
-        setState(() => _error = e.message ?? 'Verify failed (${e.code})');
+      switch (classifyOtpFailure(
+        code: e.code,
+        signedIn: auth.currentUser != null,
+      )) {
+        case OtpFailureAction.completeSignIn:
+          // The exchange failed but the account is already authenticated —
+          // auto-retrieval got there first. Go forward; reporting an error
+          // here is the app contradicting its own state.
+          await _completeSignIn();
+          return;
+        case OtpFailureAction.promptResend:
+          // The Firebase verification window (pinned to 120s in
+          // AuthService.startSmsSignIn) elapsed before the user typed the
+          // code, or the SDK invalidated the session. The same code-entry
+          // can't recover; promote the resend CTA and stop the countdown.
+          _ticker?.cancel();
+          setState(() {
+            _sessionExpired = true;
+            _secondsLeft = 0;
+            _error = 'That code expired — tap "Send a new code" below '
+                'and we\'ll text you a fresh one.';
+          });
+        case OtpFailureAction.promptRetryCode:
+          setState(() => _error = 'That code didn\'t match — double-check '
+              'and try again.');
+        case OtpFailureAction.showMessage:
+          setState(() => _error = e.message ?? 'Verify failed (${e.code})');
       }
     } on AuthError catch (e) {
       if (!mounted) return;
@@ -317,9 +434,11 @@ class _OtpEntryPageState extends State<OtpEntryPage> {
             if (!completer.isCompleted) completer.complete();
           },
           onAutoVerified: (_) {
-            // Auto-resolution signed the user in directly — the
-            // AuthGate stream listener will route forward on the next
-            // tick.  Nothing for us to do here.
+            // Auto-resolution signed the user in directly.  Routing is
+            // [_watchAuthState]'s job, not this callback's — the AuthGate
+            // cannot do it for us, because this route sits ON TOP of the
+            // gate and the gate re-routing rebuilds underneath it.  Just
+            // release the completer.
             if (!completer.isCompleted) completer.complete();
           },
         );
