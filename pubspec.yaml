@@ -66,6 +66,24 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^4.0.0
 
+dependency_overrides:
+  # jni 1.0.1 (published 2026-07-27T01:10Z) ships an android/build.gradle
+  # that calls `kotlin()` from a Groovy script without the Kotlin Gradle
+  # plugin on the classpath, so `assembleRelease` dies evaluating project
+  # ':jni' before our code is ever compiled. It reached us transitively
+  # (via jni_flutter, constraint ^1.0.0) and broke every Android build in
+  # this repo within hours — main was green at 2026-07-26T16:23Z on 1.0.0
+  # and the next build failed on nothing but the version bump.
+  #
+  # pubspec.lock already pins 1.0.0, but the lock is not authoritative
+  # here: CI has no committed android/, so it runs `flutter create` on
+  # every build, which re-resolves and picks the newer transitive. An
+  # override holds through that; the lock does not.
+  #
+  # Remove once jni publishes a release whose Android build script does
+  # not require the Kotlin plugin.
+  jni: 1.0.0
+
 flutter:
   uses-material-design: true
   assets:
