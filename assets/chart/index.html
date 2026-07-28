@@ -7,7 +7,8 @@
     setCandles({tf, candles:[{time,open,high,low,close}], volumes:[{time,value}],
                 precision, minMove, preserveView})
     updateCandle({candle:{...}, volume:{time,value}})
-    setIndicators({lines:[{id,color,title,data:[{time,value}]}],
+    setIndicators({lines:[{id,color,title,style:"line"|"dots",
+                           data:[{time,value}]}],
                    rsi:{data:[{time,value}]} | null, showVolume})
     updateIndicators({points:[{id,time,value}], rsi:{time,value} | null})
     setOverlay(ChartOverlay)        clearOverlay()        setTheme({dark})
@@ -303,6 +304,18 @@
                   crosshairMarkerVisible: false, title: L.title || "",
                 });
               }
+              // Style is applied on every push, not just at creation, so a
+              // series re-created under the same id can never keep a stale
+              // rendering.  "dots" draws point markers with NO connecting
+              // line: Parabolic SAR jumps sides on a reversal, and a line
+              // would span the gap through prices no bar's SAR ever held.
+              indSeries[L.id].applyOptions(
+                L.style === "dots"
+                  ? { color: L.color, title: L.title || "", lineVisible: false,
+                      pointMarkersVisible: true, pointMarkersRadius: 1.6 }
+                  : { color: L.color, title: L.title || "", lineVisible: true,
+                      pointMarkersVisible: false, lineWidth: 1 }
+              );
               indSeries[L.id].setData(L.data || []);
             }
             for (var id in indSeries) {

@@ -15,22 +15,43 @@ import 'models/alert_overlay.dart';
 import 'models/candle.dart';
 import 'models/chart_overlay.dart';
 
-/// One overlay indicator line (EMA/SMA) ready for the JS bridge.
+/// How an [IndicatorLine] is drawn.
+///
+/// [dots] exists for Parabolic SAR: the SAR jumps from one side of price to
+/// the other on a reversal, so a connected line would draw a long diagonal
+/// through the candles that no bar's SAR level ever occupied. Points-only is
+/// how SAR is conventionally rendered, and here it is also the only rendering
+/// that isn't drawing prices that never existed.
+enum IndicatorStyle {
+  line,
+  dots;
+
+  String get wire => name;
+}
+
+/// One overlay indicator line (EMA/SMA/SAR) ready for the JS bridge.
 class IndicatorLine {
   const IndicatorLine({
     required this.id,
     required this.title,
     required this.color,
     required this.data,
+    this.style = IndicatorStyle.line,
   });
 
   final String id;
   final String title;
   final String color; // CSS color string
   final List<Map<String, dynamic>> data; // [{time, value}]
+  final IndicatorStyle style;
 
-  Map<String, dynamic> toJson() =>
-      {'id': id, 'title': title, 'color': color, 'data': data};
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'color': color,
+        'data': data,
+        'style': style.wire,
+      };
 }
 
 /// Dart→JS commands. Each call serialises the payload to a JSON string the

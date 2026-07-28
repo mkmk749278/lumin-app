@@ -70,6 +70,80 @@ List<double?> rsi(List<double> values, {int period = 14}) {
   return out;
 }
 
+/// Wilder's Parabolic SAR step / max acceleration factor.
+///
+/// These are not free chart settings — they are the engine's
+/// `SAR_EXIT_SHADOW_STEP` / `SAR_EXIT_SHADOW_MAX_STEP` defaults
+/// (`config/__init__.py` in `360-v2`). The chart draws the same indicator the
+/// engine's SAR study measures, so a dot a user reads here is the same level
+/// the study read. Changing either constant here without changing it there
+/// silently makes the two describe different indicators.
+const double kSarStep = 0.02;
+const double kSarMaxStep = 0.2;
+
+/// The timeframe the engine's SAR study runs on (`SAR_EXIT_SHADOW_BAR_MINUTES`).
+/// The chart draws SAR on whatever timeframe is on screen — as an indicator
+/// must — so the UI says so whenever the two differ.
+const String kSarStudyTf = '15m';
+
+/// Parabolic SAR (Wilder) — the stop-and-reverse level per bar.
+///
+/// **Port, not a re-derivation.** Line-for-line the engine's
+/// `src/sar_exit_shadow.py::parabolic_sar`, including its seeding
+/// (`out[0]` null, `out[1]` = the first SAR) and its two-bar min/max clamp on
+/// the trailing level. Pinned against the engine's own output by a shared
+/// vector in `test/features/charts/indicators_test.dart`, mirrored engine-side
+/// in `tests/test_sar_chart_contract.py` — a drift in either implementation
+/// fails CI on both sides rather than quietly putting a different indicator in
+/// front of users than the one the study measured.
+///
+/// Returns a list aligned 1:1 with the input; `null` where no level exists
+/// yet. [highs] and [lows] must be the same length — a mismatched pair is
+/// refused (all-null) rather than clamped to the shorter one.
+List<double?> parabolicSar(
+  List<double> highs,
+  List<double> lows, {
+  double step = kSarStep,
+  double maxStep = kSarMaxStep,
+}) {
+  final n = highs.length;
+  final out = List<double?>.filled(n, null);
+  if (n < 2 || lows.length != n) return out;
+  var up = highs[1] >= highs[0];
+  var af = step;
+  var ep = up ? highs[1] : lows[1];
+  var sar = up ? lows[0] : highs[0];
+  out[1] = sar;
+  for (var i = 2; i < n; i++) {
+    sar = sar + af * (ep - sar);
+    if (up) {
+      sar = math.min(sar, math.min(lows[i - 1], lows[i - 2]));
+      if (lows[i] < sar) {
+        up = false;
+        sar = ep;
+        ep = lows[i];
+        af = step;
+      } else if (highs[i] > ep) {
+        ep = highs[i];
+        af = math.min(af + step, maxStep);
+      }
+    } else {
+      sar = math.max(sar, math.max(highs[i - 1], highs[i - 2]));
+      if (highs[i] > sar) {
+        up = true;
+        sar = ep;
+        ep = highs[i];
+        af = step;
+      } else if (lows[i] < ep) {
+        ep = lows[i];
+        af = math.min(af + step, maxStep);
+      }
+    }
+    out[i] = sar;
+  }
+  return out;
+}
+
 /// Decimal places the chart's price axis needs to resolve [price].
 ///
 /// Lightweight Charts defaults to 2 decimals, which flattens every

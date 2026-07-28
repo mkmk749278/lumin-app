@@ -11,8 +11,9 @@
 /// On top of the v1 shell this screen owns:
 /// - the candle list (Dart side), merged on every live tick — the source for
 ///   indicator math and older-history pagination;
-/// - toggleable indicators (EMA 21/50, the SMA 7/25/99 mover stack, RSI 14),
-///   computed in Dart (`indicators.dart`), persisted across sessions;
+/// - toggleable indicators (EMA 21/50, the SMA 7/25/99 mover stack, RSI 14,
+///   Parabolic SAR 0.02/0.2), computed in Dart (`indicators.dart`), persisted
+///   across sessions;
 /// - price-axis precision derived from the symbol's price magnitude (the
 ///   Lightweight Charts default of 2 decimals flattens sub-dollar alts);
 /// - lazy-load of older history when the user pans to the left edge;
@@ -40,6 +41,7 @@ import 'indicators.dart';
 import 'models/alert_overlay.dart';
 import 'models/candle.dart';
 import 'models/chart_overlay.dart';
+import 'sar_disclosure.dart';
 
 class ChartPage extends StatefulWidget {
   const ChartPage({super.key, required this.symbol, this.signal, this.alert});
@@ -97,6 +99,13 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
   bool _showEma = false;
   bool _showMaStack = false;
   bool _showRsi = false;
+
+  /// Parabolic SAR, drawn with the engine's study parameters (see
+  /// `indicators.dart`). A *chart study only*: Lumin's exits run on the
+  /// signal's SL/TP, never on a SAR flip, and the caption under the chip row
+  /// says so — the engine's SAR exit arm is a dark measurement that has not
+  /// been adopted, so nothing the user sees here may imply otherwise.
+  bool _showSar = false;
   late final Future<void> _prefsLoaded = _loadPrefs();
 
   /// Signal-levels overlay visibility (session-scoped, default on) —
@@ -202,6 +211,7 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
       _showEma = p.getBool('charts.ind.ema') ?? false;
       _showMaStack = p.getBool('charts.ind.ma') ?? false;
       _showRsi = p.getBool('charts.ind.rsi') ?? false;
+      _showSar = p.getBool('charts.ind.sar') ?? false;
     } catch (_) {/* prefs unavailable — defaults are fine */}
   }
 
@@ -212,6 +222,7 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
       await p.setBool('charts.ind.ema', _showEma);
       await p.setBool('charts.ind.ma', _showMaStack);
       await p.setBool('charts.ind.rsi', _showRsi);
+      await p.setBool('charts.ind.sar', _showSar);
     } catch (_) {/* best-effort */}
   }
 
@@ -342,7 +353,13 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
     (id: 'sma99', title: 'MA 99', color: '#e57ab1', period: 99),
   ];
 
+  /// Parabolic SAR is the one indicator here that reads highs/lows rather than
+  /// closes — the same two arrays the engine's study feeds `parabolic_sar`.
+  static const _sarSpec = (id: 'sar', title: 'SAR', color: '#9aa4b2');
+
   List<double> get _closes => [for (final c in _candles) c.close];
+  List<double> get _highs => [for (final c in _candles) c.high];
+  List<double> get _lows => [for (final c in _candles) c.low];
 
   static List<Map<String, dynamic>> _seriesData(
     List<Candle> candles,
@@ -376,6 +393,14 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
             color: s.color,
             data: _seriesData(_candles, sma(closes, s.period)),
           ),
+      if (_showSar)
+        IndicatorLine(
+          id: _sarSpec.id,
+          title: _sarSpec.title,
+          color: _sarSpec.color,
+          style: IndicatorStyle.dots,
+          data: _seriesData(_candles, parabolicSar(_highs, _lows)),
+        ),
     ];
     await bridge.setIndicators(
       lines: lines,
@@ -389,7 +414,7 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
   Future<void> _pushIndicatorTails() async {
     final bridge = _bridge;
     if (bridge == null || _candles.isEmpty) return;
-    if (!_showEma && !_showMaStack && !_showRsi) return;
+    if (!_showEma && !_showMaStack && !_showRsi && !_showSar) return;
     final closes = _closes;
     final t = _candles.last.time;
     final points = <Map<String, dynamic>>[
@@ -399,6 +424,14 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
       if (_showMaStack)
         for (final s in _maSpecs)
           {'id': s.id, 'time': t, 'value': sma(closes, s.period).last},
+      // SAR is forward-recursive: an earlier bar's level never changes, so
+      // pushing only the newest point stays identical to a full recompute.
+      if (_showSar)
+        {
+          'id': _sarSpec.id,
+          'time': t,
+          'value': parabolicSar(_highs, _lows).last,
+        },
     ];
     final rsiLast = _showRsi ? rsi(closes).last : null;
     await bridge.updateIndicators(
@@ -406,6 +439,10 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
       rsiPoint: rsiLast != null ? {'time': t, 'value': rsiLast} : null,
     );
   }
+
+  /// See `sar_disclosure.dart` — the copy carries the two things the dots
+  /// themselves cannot say.
+  String get _sarCaption => sarCaption(_tf);
 
   Future<void> _toggleIndicator(void Function() flip) async {
     setState(flip);
@@ -646,6 +683,16 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
                         _toggleIndicator(() => _showRsi = !_showRsi),
                   ),
                 ),
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: FilterChip(
+                    label: const Text('SAR'),
+                    visualDensity: VisualDensity.compact,
+                    selected: _showSar,
+                    onSelected: (_) =>
+                        _toggleIndicator(() => _showSar = !_showSar),
+                  ),
+                ),
                 if (_signal != null)
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
@@ -659,6 +706,23 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
               ],
             ),
           ),
+          if (_showSar)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                LuminSpacing.md,
+                0,
+                LuminSpacing.md,
+                LuminSpacing.xs,
+              ),
+              child: Text(
+                _sarCaption,
+                style: const TextStyle(
+                  fontSize: 11,
+                  height: 1.3,
+                  color: LuminColors.textMuted,
+                ),
+              ),
+            ),
           Expanded(
             child: Stack(
               children: [
