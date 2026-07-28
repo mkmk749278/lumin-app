@@ -91,6 +91,31 @@ void main() {
       expect((j['lines'] as List).single['id'], 'ema20');
       expect(j['rsi'], {'data': [{'time': 1, 'value': 55.0}]});
       expect(j['showVolume'], isFalse);
+      // Unstyled lines still declare a style, so the JS never has to guess.
+      expect((j['lines'] as List).single['style'], 'line');
+    });
+
+    test('setIndicators carries the dots style for SAR', () async {
+      // SAR jumps sides on a reversal — the renderer must be told to draw
+      // points with no connecting line, or it spans the flip with a diagonal
+      // through prices no bar's SAR level ever held.
+      final b = _RecordingBridge();
+      await b.setIndicators(
+        lines: const [
+          IndicatorLine(
+            id: 'sar',
+            title: 'SAR',
+            color: '#9aa4b2',
+            style: IndicatorStyle.dots,
+            data: [
+              {'time': 1, 'value': 0.9},
+            ],
+          ),
+        ],
+        showVolume: true,
+      );
+      final j = jsonDecode(b.calls.single.$2!) as Map<String, dynamic>;
+      expect((j['lines'] as List).single['style'], 'dots');
     });
 
     test('clearOverlay is a zero-argument invoke', () async {

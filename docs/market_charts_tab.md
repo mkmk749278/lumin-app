@@ -276,3 +276,80 @@ features, in one change set:
 - **Volume colouring** — histogram bars now follow candle direction.
 
 Sparklines in the Signals list remain deferred (see §15 point 2).
+
+---
+
+## 17. Parabolic SAR chart study (2026-07-28)
+
+Added on the owner's ask: *"shall we implement Parabolic SAR indicator into our
+app charts — if yes align that with our Signals."* Answer: yes to the indicator,
+and "align" is implemented as **the chart draws the same series the engine
+measures**, not as a verdict rendered next to a signal. Both halves matter, and
+the second one is the design decision worth recording.
+
+### What shipped
+
+- `indicators.dart::parabolicSar(highs, lows, {step, maxStep})` — a
+  line-for-line port of the engine's `src/sar_exit_shadow.py::parabolic_sar`,
+  defaulting to `kSarStep = 0.02` / `kSarMaxStep = 0.2`, which are the engine's
+  `SAR_EXIT_SHADOW_STEP` / `SAR_EXIT_SHADOW_MAX_STEP` defaults. It is the first
+  indicator here that reads highs/lows rather than closes.
+- A **`SAR` chip** beside EMA / MAs / RSI, persisted as `charts.ind.sar`,
+  drawn in the price pane.
+- `IndicatorStyle.dots` on the bridge (`{style: "line"|"dots"}`), rendered by
+  the chart asset as point markers with `lineVisible: false`. SAR jumps from one
+  side of price to the other on a reversal; a connected line would draw a
+  diagonal through prices no bar's SAR level ever held.
+- A caption under the chip row, owned by `sar_disclosure.dart` and pinned by
+  its own test.
+
+### Alignment: pinned, not asserted
+
+The port is held to the engine by a **shared 40-bar vector** — the same
+`HIGHS` / `LOWS` / `EXPECTED` lists in
+`test/features/charts/indicators_test.dart` here and in the engine's
+`tests/test_sar_chart_contract.py`. `EXPECTED` was generated from the engine's
+function, so the app is asserted against the engine and never the reverse; the
+series flips the SAR twice so the reversal branch is actually covered. Verified
+bit-identical across both implementations, including the float tails
+(`108.99331975679999`). A drift in either repo turns one of the two CIs red.
+
+This is the shape the repo's §"a field one repo reads and no repo writes"
+lesson (engine #817) asks for: a cross-repo contract that nothing pins fails
+**silently and looks fine** — the app would keep drawing dots, the engine would
+keep stamping alignment, and nobody would see that they had stopped being the
+same indicator.
+
+### What deliberately did NOT ship
+
+No "SAR agrees with this signal" badge, and no SAR field on the signal payload.
+The engine's SAR exit arm (`@SARBASE` / `@SAREXIT`) is a **dark shadow
+measurement that has never governed a live position**, and its entry-alignment
+split does not support a quality claim: over 270 resolved rows on 2026-07-27,
+the *SAR agreed at entry* cohort netted **+0.007%/trade** against +0.437% for
+the opposed cohort, and even that split is confounded by re-detection (engine
+#816). Shipping a checkmark off that would be putting an unadopted, measured-flat
+counterfactual in front of paying subscribers as a confidence signal.
+
+So the caption carries the two things the dots cannot say, and
+`sar_disclosure_test.dart` fails if either is edited away:
+
+1. **Exits are unaffected** — "Chart study only — Lumin exits still run on the
+   signal's SL/TP." A user watching SAR flip against an open signal must not sit
+   waiting for an exit that is not coming.
+2. **Timeframe honesty** — the chart draws SAR on whatever TF is on screen (as
+   an indicator must) while the engine's study fixes 15m
+   (`SAR_EXIT_SHADOW_BAR_MINUTES`). Off 15m the caption says the dots will not
+   match the research rather than letting the user assume they are looking at
+   the engine's view.
+
+The badge becomes a live question again only if the arm is signed off — at which
+point it is a money-path change under the dark-first rule, not a chart change.
+
+### Cost
+
+Zero. SAR is computed Dart-side from candles the chart already holds; no engine
+call, no new Binance request, no Firestore read. Per live tick it is one
+forward pass over ≤3000 doubles, the same shape as the existing EMA/SMA tail
+push — and because SAR is forward-recursive, an earlier bar's level never
+changes, so pushing only the newest point stays identical to a full recompute.
