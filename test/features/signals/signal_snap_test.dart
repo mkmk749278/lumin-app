@@ -50,10 +50,17 @@ List<Candle> _candles({int n = 96, int? lastOpen}) {
   ];
 }
 
+/// [ageMins] is the signal's true age — it sets [MockSignal.openedAt], which
+/// is what resolves the entry bar since 2026-07-29.  `minutesAgo` rides along
+/// as the engine's "N ago" *caption*; for these ACTIVE fixtures the two
+/// coincide, and for a closed one they deliberately do not (see
+/// `closedAgeMins`), because that divergence is the bug this pins.
 MockSignal _sig({
   String direction = 'LONG',
   String status = 'ACTIVE',
-  int minutesAgo = 30,
+  int ageMins = 30,
+  int? closedAgeMins,
+  DateTime? anchor,
   double entry = 100.0,
   double sl = 99.0,
   double tp1 = 101.0,
@@ -77,7 +84,13 @@ MockSignal _sig({
     tier: 'A+',
     status: status,
     pnlPct: 0.0,
-    minutesAgo: minutesAgo,
+    // The caption: recency of the last event.  Equal to the age while open,
+    // measured from the exit once closed — exactly as the engine sends it.
+    minutesAgo: closedAgeMins ?? ageMins,
+    openedAt: (anchor ?? _now).subtract(Duration(minutes: ageMins)),
+    closedAt: closedAgeMins == null
+        ? null
+        : (anchor ?? _now).subtract(Duration(minutes: closedAgeMins)),
     maxFavorableExcursionPct: mfe,
     isOpen: isOpen,
   );
@@ -97,13 +110,47 @@ void main() {
       expect(SignalSnapData.pickTf(4000), '4h');
       expect(SignalSnapData.pickTf(20000), '4h');
     });
+
+    test('an unknown age widens the window rather than narrowing it', () {
+      // Losing resolution is recoverable; picking 15m for a signal whose age
+      // we cannot bound loses the entry off the left edge.
+      expect(SignalSnapData.pickTf(null), '4h');
+    });
+  });
+
+  group('SignalSnapData.ageMinutes', () {
+    test('measures from the creation stamp, not the "N ago" caption', () {
+      // The regression: a trade opened 6h ago that closed 3 minutes ago sends
+      // minutesAgo == 3. Sizing the window from that picked 15m — a window
+      // ending hours after the entry — and the marker silently vanished.
+      final sig = _sig(
+        status: 'SL_HIT',
+        isOpen: false,
+        ageMins: 360,
+        closedAgeMins: 3,
+      );
+      expect(sig.minutesAgo, 3);
+      expect(SignalSnapData.ageMinutes(sig, now: _now), 360);
+      expect(SignalSnapData.pickTf(SignalSnapData.ageMinutes(sig, now: _now)),
+          '1h');
+      expect(SignalSnapData.pickTf(sig.minutesAgo), '15m'); // what it used to pick
+    });
+
+    test('is null when the signal carries no creation stamp', () {
+      const sig = MockSignal(
+        id: 'X', symbol: 'RAVEUSDT', direction: 'LONG', setupName: '',
+        agentName: '', entry: 100, sl: 99, tp1: 101, tp2: 0, tp3: 0,
+        confidence: 80, tier: 'B', status: 'ACTIVE', pnlPct: 0, minutesAgo: 30,
+      );
+      expect(SignalSnapData.ageMinutes(sig, now: _now), isNull);
+    });
   });
 
   group('SignalSnapData.build', () {
     test('trims to 60 bars and resolves the entry bar by floored bucket', () {
       // 30 min ago on a 15m grid = exactly 2 bars before the newest.
       final data =
-          SignalSnapData.build(_sig(minutesAgo: 30), '15m', _candles(), now: _now);
+          SignalSnapData.build(_sig(ageMins: 30), '15m', _candles(), now: _now);
       expect(data.candles, hasLength(SignalSnapData.targetBars));
       expect(data.entryIndex, data.candles.length - 1 - 2);
       expect(data.candles[data.entryIndex!].time,
@@ -113,7 +160,7 @@ void main() {
     test('an entry older than the painted window gets no marker', () {
       // 60 painted 15m bars reach back ~885 min; 2000 min is far outside.
       final data = SignalSnapData.build(
-          _sig(minutesAgo: 2000, status: 'SL_HIT', isOpen: false),
+          _sig(ageMins: 2000, closedAgeMins: 1990, status: 'SL_HIT', isOpen: false),
           '15m',
           _candles(),
           now: _now);
@@ -144,7 +191,7 @@ void main() {
 
     test('a closed SL_HIT signal still builds with its full geometry', () {
       final data = SignalSnapData.build(
-          _sig(status: 'SL_HIT', isOpen: false, minutesAgo: 240),
+          _sig(status: 'SL_HIT', isOpen: false, ageMins: 240, closedAgeMins: 5),
           '15m',
           _candles(),
           now: _now);
@@ -185,7 +232,7 @@ void main() {
 
     testWidgets('shimmer while loading, CustomPaint once resolved with one fetch',
         (tester) async {
-      await tester.pumpWidget(host(SignalSnap(sig: _sig(), service: service())));
+      await tester.pumpWidget(host(SignalSnap(sig: _sig(anchor: DateTime.now().toUtc()), service: service())));
       expect(
         find.descendant(
           of: find.byType(SignalSnap),
@@ -210,7 +257,7 @@ void main() {
       final s = KlinesThumbnailService.forTest(
         BinanceMarketData(httpClient: mock),
       );
-      await tester.pumpWidget(host(SignalSnap(sig: _sig(), service: s)));
+      await tester.pumpWidget(host(SignalSnap(sig: _sig(anchor: DateTime.now().toUtc()), service: s)));
       await tester.pumpAndSettle();
       expect(find.text('chart unavailable'), findsOneWidget);
     });
@@ -218,7 +265,7 @@ void main() {
     testWidgets('tap fires onTap', (tester) async {
       var tapped = false;
       await tester.pumpWidget(host(SignalSnap(
-        sig: _sig(),
+        sig: _sig(anchor: DateTime.now().toUtc()),
         service: service(),
         onTap: () => tapped = true,
       )));
@@ -251,7 +298,7 @@ void main() {
 
     test('paints a marker-less (out-of-window) setup without throwing', () {
       paintVariant(SignalSnapData.build(
-          _sig(minutesAgo: 2000), '15m', _candles(), now: _now));
+          _sig(ageMins: 2000), '15m', _candles(), now: _now));
     });
 
     test('survives an empty candle list', () {

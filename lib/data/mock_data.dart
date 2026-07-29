@@ -7,6 +7,8 @@
 /// is clearly marked as sample.
 import 'package:flutter/material.dart';
 
+import 'timestamps.dart';
+
 class MockEngineSnapshot {
   const MockEngineSnapshot({
     required this.status,
@@ -64,6 +66,8 @@ class MockSignal {
     required this.pnlPct,
     required this.minutesAgo,
     this.holdMins,
+    this.openedAt,
+    this.closedAt,
     this.currentPrice = 0.0,
     this.preTpTriggerPrice = 0.0,
     this.preTpThresholdPct = 0.0,
@@ -87,11 +91,33 @@ class MockSignal {
   final String tier; // A+ / B
   final String status; // ACTIVE / TP1_HIT / TP2_HIT / TP3_HIT / SL_HIT / INVALIDATED
   final double pnlPct;
+
+  /// Recency of the signal's **last** event, for an "N ago" caption — *not*
+  /// its age. Closed signals measure from the terminal event, active ones from
+  /// dispatch (engine `snapshot._signal_to_detail`).
+  ///
+  /// Never reconstruct a point in time from this. `DateTime.now() -
+  /// minutesAgo` lands on the **exit** of every closed signal, which is what
+  /// the chart's ENTRY marker was drawn at until 2026-07-29 — COTIUSDT stamped
+  /// 03:00:33 UTC rendered at 04:05, on its own SL line. Use [openedAt] /
+  /// [closedAt]; they exist so nothing has to derive an instant from a label.
   final int minutesAgo;
 
   /// Actual hold duration in minutes (dispatch → terminal for closed signals,
   /// dispatch → now for active signals). Null when dispatch_timestamp is absent.
   final int? holdMins;
+
+  /// When the signal was created — the entry instant, from the engine's
+  /// `timestamp`. Null only if the engine omitted it (it is a required field
+  /// there, so in practice never); consumers draw no entry marker rather than
+  /// guessing one.
+  final DateTime? openedAt;
+
+  /// When the signal reached its terminal state, from the engine's
+  /// `terminal_outcome_timestamp`. Null while the signal is still open **and**
+  /// on closed records predating the stamp (engine #829) — two different
+  /// states that both mean "no exit marker", never "exit at now".
+  final DateTime? closedAt;
 
   /// Last-known mark price.  Populated from the live engine snapshot —
   /// 0.0 when offline / mock data.
@@ -136,6 +162,46 @@ class MockSignal {
   /// the terminal-status heuristic for payloads that predate the field.
   bool get effectiveIsOpen => isOpen ?? !_terminalStatuses.contains(status);
 
+  /// Preview-only: derive the lifecycle instants from the fixture's
+  /// [minutesAgo] / [holdMins] against [now].
+  ///
+  /// Sound *here and only here* because the preview fixtures are hand-authored
+  /// with `minutesAgo` meaning age. Live signals get their instants from the
+  /// engine — deriving one there is precisely the bug this exists to avoid,
+  /// so this stays a mock-repository concern and never touches the HTTP path.
+  MockSignal withPreviewStamps(DateTime now) {
+    final opened = now.toUtc().subtract(Duration(minutes: minutesAgo));
+    return MockSignal(
+      id: id,
+      symbol: symbol,
+      direction: direction,
+      setupName: setupName,
+      agentName: agentName,
+      entry: entry,
+      sl: sl,
+      tp1: tp1,
+      tp2: tp2,
+      tp3: tp3,
+      confidence: confidence,
+      tier: tier,
+      status: status,
+      pnlPct: pnlPct,
+      minutesAgo: minutesAgo,
+      holdMins: holdMins,
+      openedAt: opened,
+      closedAt: effectiveIsOpen
+          ? null
+          : opened.add(Duration(minutes: holdMins ?? 30)),
+      currentPrice: currentPrice,
+      preTpTriggerPrice: preTpTriggerPrice,
+      preTpThresholdPct: preTpThresholdPct,
+      preTpHit: preTpHit,
+      maxFavorableExcursionPct: maxFavorableExcursionPct,
+      bestTpPnlPct: bestTpPnlPct,
+      isOpen: isOpen,
+    );
+  }
+
   Map<String, dynamic> toMap() => {
     'id': id,
     'symbol': symbol,
@@ -153,6 +219,8 @@ class MockSignal {
     'pnlPct': pnlPct,
     'minutesAgo': minutesAgo,
     'holdMins': holdMins,
+    'openedAt': openedAt?.toIso8601String(),
+    'closedAt': closedAt?.toIso8601String(),
     'currentPrice': currentPrice,
     'preTpTriggerPrice': preTpTriggerPrice,
     'preTpThresholdPct': preTpThresholdPct,
@@ -179,6 +247,8 @@ class MockSignal {
     pnlPct: (m['pnlPct'] as num?)?.toDouble() ?? 0.0,
     minutesAgo: (m['minutesAgo'] as num?)?.toInt() ?? 0,
     holdMins: (m['holdMins'] as num?)?.toInt(),
+    openedAt: parseUtcTimestamp(m['openedAt']),
+    closedAt: parseUtcTimestamp(m['closedAt']),
     currentPrice: (m['currentPrice'] as num?)?.toDouble() ?? 0.0,
     preTpTriggerPrice: (m['preTpTriggerPrice'] as num?)?.toDouble() ?? 0.0,
     preTpThresholdPct: (m['preTpThresholdPct'] as num?)?.toDouble() ?? 0.0,

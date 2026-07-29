@@ -71,11 +71,30 @@ class SignalSnapData {
   /// contains the entry with [_edgeMarginBars] of headroom.  Signals carry
   /// no TF of their own (scalp-tier); fresh signals get 15m like the full
   /// chart's default.
-  static String pickTf(int minutesAgo) {
+  ///
+  /// Takes the signal's **true age** — minutes since [MockSignal.openedAt].
+  /// It used to take `minutesAgo`, which on a closed signal measures from the
+  /// terminal event: a trade opened six hours ago that closed two minutes ago
+  /// scored as "2 minutes old" and got a 15m window ending long after the
+  /// entry, so `entryIndex` came back null and the marker silently vanished
+  /// (2026-07-29).  Unknown age falls back to the widest window rather than
+  /// the narrowest, so an unstamped signal loses resolution instead of losing
+  /// its entry.
+  static String pickTf(int? ageMins) {
+    if (ageMins == null) return '4h';
     const window = targetBars - _edgeMarginBars; // bars available to reach back
-    if (minutesAgo <= window * 15) return '15m';
-    if (minutesAgo <= window * 60) return '1h';
+    if (ageMins <= window * 15) return '15m';
+    if (ageMins <= window * 60) return '1h';
     return '4h';
+  }
+
+  /// Minutes since the signal was created, or null when it carries no
+  /// creation stamp.  Not derivable from `minutesAgo` — see [pickTf].
+  static int? ageMinutes(MockSignal sig, {DateTime? now}) {
+    final opened = sig.openedAt;
+    if (opened == null) return null;
+    final n = (now ?? DateTime.now()).toUtc();
+    return n.difference(opened.toUtc()).inMinutes;
   }
 
   factory SignalSnapData.build(
@@ -92,14 +111,19 @@ class SignalSnapData {
     final candles = raw.sublist(start);
 
     // Entry bar: floor the open time to the TF bucket, then find the last
-    // candle at-or-before it.  Entries older than the window get no marker.
-    final tfSec = kAlertTfSeconds[tf] ?? 3600;
-    final entryBarSec = (overlay.openedAtSec ~/ tfSec) * tfSec;
+    // candle at-or-before it.  Entries older than the window get no marker —
+    // and so does a signal with no creation stamp at all, which is why the
+    // null check is a refusal rather than a default.
+    final openedAtSec = overlay.openedAtSec;
     int? entryIndex;
-    for (var i = candles.length - 1; i >= 0; i--) {
-      if (candles[i].time <= entryBarSec) {
-        entryIndex = i;
-        break;
+    if (openedAtSec != null) {
+      final tfSec = kAlertTfSeconds[tf] ?? 3600;
+      final entryBarSec = (openedAtSec ~/ tfSec) * tfSec;
+      for (var i = candles.length - 1; i >= 0; i--) {
+        if (candles[i].time <= entryBarSec) {
+          entryIndex = i;
+          break;
+        }
       }
     }
 
@@ -147,7 +171,7 @@ class _SignalSnapState extends State<SignalSnap> {
   Future<void> _load() async {
     try {
       final service = widget.service ?? KlinesThumbnailService.instance;
-      final tf = SignalSnapData.pickTf(widget.sig.minutesAgo);
+      final tf = SignalSnapData.pickTf(SignalSnapData.ageMinutes(widget.sig));
       final candles = await service.get(widget.sig.symbol, tf);
       if (!mounted) return;
       if (candles.isEmpty) {
