@@ -120,17 +120,22 @@ void main() {
 
   group('SignalSnapData.ageMinutes', () {
     test('measures from the creation stamp, not the "N ago" caption', () {
-      // The regression: a trade opened 6h ago that closed 3 minutes ago sends
+      // The regression: a trade opened 20h ago that closed 3 minutes ago sends
       // minutesAgo == 3. Sizing the window from that picked 15m — a window
-      // ending hours after the entry — and the marker silently vanished.
+      // ending most of a day after the entry — and the marker silently
+      // vanished.
+      //
+      // The age has to clear the 15m band's reach (56 bars × 15m = 840 min)
+      // for the two inputs to select different timeframes at all; inside it
+      // both pick 15m and the divergence is real but invisible.
       final sig = _sig(
         status: 'SL_HIT',
         isOpen: false,
-        ageMins: 360,
+        ageMins: 1200,
         closedAgeMins: 3,
       );
       expect(sig.minutesAgo, 3);
-      expect(SignalSnapData.ageMinutes(sig, now: _now), 360);
+      expect(SignalSnapData.ageMinutes(sig, now: _now), 1200);
       expect(SignalSnapData.pickTf(SignalSnapData.ageMinutes(sig, now: _now)),
           '1h');
       expect(SignalSnapData.pickTf(sig.minutesAgo), '15m'); // what it used to pick
