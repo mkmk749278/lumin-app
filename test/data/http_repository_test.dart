@@ -81,6 +81,77 @@ void main() {
       expect(s.isOpen, isTrue);
     });
 
+    test('carries the engine lifecycle instants onto the model', () async {
+      // Cross-repo contract (engine #829). These two field names are what the
+      // chart anchors its ENTRY / EXIT markers to; dropping them is what made
+      // it reconstruct a time from `minutes_ago` and draw the entry at the
+      // exit. Pinned on the consuming side as well as the producing one.
+      final r = repo({
+        '/api/signals': {
+          'items': [
+            {
+              'signal_id': 'MVRTP-015FA037',
+              'symbol': 'COTIUSDT',
+              'direction': 'SHORT',
+              'entry': 0.0105112,
+              'stop_loss': 0.01083078,
+              'status': 'SL_HIT',
+              'is_open': false,
+              'timestamp': '2026-07-29T03:00:33.820031Z',
+              'terminal_outcome_timestamp': '2026-07-29T04:05:00Z',
+              'minutes_ago': 3,
+            }
+          ]
+        }
+      });
+      final s = (await r.fetchSignals()).single;
+      expect(s.openedAt, isNotNull);
+      expect(s.openedAt!.isUtc, isTrue);
+      // Second precision — the sub-second part is irrelevant to a 1m chart and
+      // its representation differs between the VM and web targets.
+      expect(
+        s.openedAt!.difference(DateTime.utc(2026, 7, 29, 3, 0, 33)).inSeconds,
+        0,
+      );
+      expect(s.closedAt, DateTime.utc(2026, 7, 29, 4, 5));
+      // The caption still means what the engine means by it.
+      expect(s.minutesAgo, 3);
+    });
+
+    test('an open signal has no terminal instant', () async {
+      final r = repo({
+        '/api/signals': {
+          'items': [
+            {
+              'signal_id': 'MVRTP-2B5C43EF',
+              'symbol': 'ZILUSDT',
+              'status': 'ACTIVE',
+              'is_open': true,
+              'timestamp': '2026-07-29T06:20:21.277055Z',
+              'minutes_ago': 51,
+            }
+          ]
+        }
+      });
+      final s = (await r.fetchSignals()).single;
+      expect(s.openedAt, isNotNull);
+      expect(s.closedAt, isNull);
+    });
+
+    test('an older engine omitting both instants leaves them null', () async {
+      // Tolerant parsing: no stamp means no marker, never a marker at epoch.
+      final r = repo({
+        '/api/signals': {
+          'items': [
+            {'signal_id': 'old-1', 'symbol': 'BTCUSDT', 'status': 'SL_HIT'}
+          ]
+        }
+      });
+      final s = (await r.fetchSignals()).single;
+      expect(s.openedAt, isNull);
+      expect(s.closedAt, isNull);
+    });
+
     test('a minimal payload from an older engine defaults every field',
         () async {
       final r = repo({

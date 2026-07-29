@@ -377,14 +377,18 @@
           addLine(o.tp2, "#26a69a", "TP2");
           addLine(o.tp3, "#26a69a", "TP3");
           if (o.markers && o.markers.length) {
+            // Each marker carries its own position/shape/text: an exit points
+            // the opposite way to the entry, so deriving both from o.side (as
+            // this did until 2026-07-29) draws the two ends identically.
+            // Fall back to the side-derived form for older payloads.
+            var up = (o.side === "LONG");
             candleSeries.setMarkers(o.markers.map(function (m) {
-              var up = (o.side === "LONG");
               return {
                 time: m.time,
-                position: up ? "belowBar" : "aboveBar",
+                position: m.position || (up ? "belowBar" : "aboveBar"),
                 color: m.kind === "entry" ? "#5d8bf4" : (m.kind === "sl" ? "#ef5350" : "#26a69a"),
-                shape: up ? "arrowUp" : "arrowDown",
-                text: (m.kind || "").toUpperCase(),
+                shape: m.shape || (up ? "arrowUp" : "arrowDown"),
+                text: m.text || (m.kind || "").toUpperCase(),
               };
             }));
           }

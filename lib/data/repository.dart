@@ -16,6 +16,7 @@ import 'market_alert.dart';
 import 'mock_data.dart';
 import 'server_side_execution_models.dart';
 import 'swr_cache.dart';
+import 'timestamps.dart';
 
 class AutoModeStatus {
   const AutoModeStatus({
@@ -2038,7 +2039,11 @@ class MockRepository implements LuminRepository {
       default:
         filtered = all;
     }
-    return filtered.take(limit).toList();
+    // Preview fixtures are const, so they carry no lifecycle instants; stamp
+    // them relative to now so the preview chart still draws its markers.
+    // Mock-only — the live path reads the engine's stamps and derives nothing.
+    final now = DateTime.now().toUtc();
+    return filtered.take(limit).map((s) => s.withPreviewStamps(now)).toList();
   }
 
   /// Mock impl: no caching needed (the source is in-memory anyway).
@@ -4332,6 +4337,12 @@ class HttpRepository implements LuminRepository {
         pnlPct: (j['pnl_pct'] as num?)?.toDouble() ?? 0.0,
         minutesAgo: (j['minutes_ago'] as num?)?.toInt() ?? 0,
         holdMins: (j['hold_mins'] as num?)?.toInt(),
+        // The lifecycle instants themselves. Dropping these was what forced
+        // the chart to reconstruct an entry time from `minutes_ago` — which
+        // measures from the *terminal* event on a closed signal, so the ENTRY
+        // marker landed on the exit (owner-caught 2026-07-29, engine #829).
+        openedAt: parseUtcTimestamp(j['timestamp']),
+        closedAt: parseUtcTimestamp(j['terminal_outcome_timestamp']),
         currentPrice: (j['current_price'] as num?)?.toDouble() ?? 0.0,
         preTpTriggerPrice:
             (j['pre_tp_trigger_price'] as num?)?.toDouble() ?? 0.0,
