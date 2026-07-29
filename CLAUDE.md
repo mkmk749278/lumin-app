@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Companion repos
 
-- **`mkmk749278/360-v2`** — the engine + API this app talks to, and the source of truth for role, doctrine, and roadmap. Read `OWNER_BRIEF.md` and `ACTIVE_CONTEXT.md` there at session start; update `ACTIVE_CONTEXT.md` there at session end. Sessions frequently span both repos (engine endpoint + app UI in one change, shipped as paired PRs).
+- **`mkmk749278/360-v2`** — the engine + API this app talks to, and the source of truth for role, doctrine, and roadmap. At session start read **`ARCHITECTURE.md`** there first (the whole system on one map — §1 for repo boundaries, §4.7 for this app's own entry, §5 for where every fact lives), then `OWNER_BRIEF.md` and `ACTIVE_CONTEXT.md`; update `ACTIVE_CONTEXT.md` there at session end. Sessions frequently span both repos (engine endpoint + app UI in one change, shipped as paired PRs) — and a cross-repo field name is a contract, so pin it in a test on the producing side.
 - **`mkmk749278/lumin-legal`** — the public privacy / terms / risk documents that Settings → Legal links to (`lib/data/legal_urls.dart`).
 
 Every change ships via PR — never push to `main` directly. A `main` push triggers the full CI build and auto-creates a GitHub Release the in-app updater picks up.
