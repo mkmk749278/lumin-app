@@ -42,6 +42,7 @@ import '../../shared/widgets/lumin_card.dart';
 import '../../shared/widgets/preview_badge.dart';
 import '../../shared/widgets/upsell_banners.dart';
 import 'live_status_card.dart';
+import 'live_status_resolver.dart';
 import 'paper_trades_page.dart';
 
 class _TradeBundle {
@@ -574,6 +575,17 @@ class _TradePageState extends State<TradePage>
     final hasAnyTrades = (serverPositions?.isNotEmpty ?? false) ||
         (recentEvents?.isNotEmpty ?? false) ||
         _phoneOrders.isNotEmpty;
+    // Is the engine ACTUALLY dispatching live orders right now?  Same
+    // resolver, same inputs, same verdict as the status card below — so the
+    // toggle's subtitle and the card can never disagree.  Null runtime means
+    // the status fetch hasn't landed: treat as "not dispatching" so the
+    // stronger claim is never made on unknown state.
+    final liveDispatching = runtime != null &&
+        resolveLiveStatus(
+          runtime: runtime,
+          userStatus: _autoTradeStatus,
+          userSettings: data.userSettings,
+        ).active;
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(
         parent: BouncingScrollPhysics(),
@@ -591,9 +603,22 @@ class _TradePageState extends State<TradePage>
         // sends 'both'; disabling live while paper is on keeps 'paper'.
         _BinaryModeToggle(
           label: 'Live auto-trade',
-          subtitle: liveActive
-              ? 'Lumin places real Binance Futures orders on your account.'
-              : 'Off — enable to place real orders on the next signal.',
+          // Truthfulness (2026-08-05): the ON subtitle asserted, in the
+          // present tense, that Lumin "places real Binance Futures orders on
+          // your account" — derived from the user's mode preference ALONE.
+          // With no key connected (or any other gate failing) nothing
+          // dispatches, so that sentence was false in exactly the state a
+          // new user first sees it: a blue ON toggle above an amber "Connect
+          // your Binance account" card.  That is the "card showing armed
+          // while dispatch silently skips" class this repo has already paid
+          // for.  The toggle keeps showing user INTENT (correct for a
+          // switch); the subtitle now claims dispatch only when the engine
+          // says dispatch is live, via the same resolver the status card
+          // below uses.  Engine truth — nothing derived here.
+          subtitle: liveToggleSubtitle(
+            liveActive: liveActive,
+            dispatching: liveDispatching,
+          ),
           icon: Icons.bolt_rounded,
           activeColor: LuminColors.accent,
           isOn: liveActive,

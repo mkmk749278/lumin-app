@@ -164,3 +164,29 @@ LiveStatus resolveLiveStatus({
     watchedSymbols: runtime.effectiveAllowedSymbols.length,
   );
 }
+
+/// Subtitle for the Live auto-trade toggle.
+///
+/// The toggle itself shows user INTENT — correct for a switch, since flipping
+/// it is how intent is expressed. This sentence sits under it and describes
+/// SYSTEM BEHAVIOUR, so it may only claim dispatch when the engine says
+/// dispatch is live ([dispatching] is [LiveStatus.active], nothing derived).
+///
+/// Before 2026-08-05 the ON copy asserted "Lumin places real Binance Futures
+/// orders on your account" from the mode preference alone. With no key
+/// connected nothing dispatches, so the claim was false in exactly the state a
+/// new user first meets it: a blue ON toggle sitting directly above an amber
+/// "Connect your Binance account" card. That is the "card showing armed while
+/// dispatch silently skips" class this repo has already paid for.
+String liveToggleSubtitle({
+  required bool liveActive,
+  required bool dispatching,
+}) {
+  if (!liveActive) {
+    return 'Off — enable to place real orders on the next signal.';
+  }
+  if (dispatching) {
+    return 'Lumin places real Binance Futures orders on your account.';
+  }
+  return 'On — not placing orders yet. See the status below.';
+}

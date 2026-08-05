@@ -71,6 +71,25 @@ CI builds **both** artifacts on every `main` push and attaches both to the auto-
 
 **Push** (`lib/data/notification_service.dart`): FCM topic subscriptions (`alerts`, `signals`) — no device-token registry; the engine sends via firebase-admin. Foreground pushes surface as SnackBars via the app-level `scaffoldMessengerKey`.
 
+## Driving the app as an agent (no phone, no emulator)
+
+An AI session can sign into Lumin and browse it — via the **web (PWA) channel**,
+never the Android build (no emulator, no KVM, no `android/` in the tree). The
+deployed site at `app.luminapp.org` can be *loaded* but not *signed into*: web
+phone-auth runs reCAPTCHA, which escalates to an image challenge for headless
+browsers. Never solve it and never spoof a human fingerprint — build the web
+target locally with `--dart-define=LUMIN_E2E=true`, which enables Firebase's
+documented `appVerificationDisabledForTesting` and works only with numbers
+registered as test numbers in the console.
+
+Full procedure, coordinates, and the traps (the agent proxy's port changes
+mid-session; Chrome's post-quantum TLS breaks the MITM proxy; Charts looks
+broken because Binance 451s datacenter IPs): **`docs/AI_AGENT_APP_ACCESS.md`**.
+
+That flag is a **local patch, deliberately not in this repo** — auth-weakening
+code does not belong in the tree of a live financial app. If you ever find
+`LUMIN_E2E` referenced here or in a workflow, that is a defect: remove it.
+
 ## Conventions
 
 - **The engine is the source of truth** for anything money-adjacent the UI renders: entitlement tier, signal open/closed (`is_open`), auto-trade armed state and its gates. Render engine state; never derive or optimistically assume it. (A card showing "armed" while dispatch silently skips is a bug class this repo has already paid for.)

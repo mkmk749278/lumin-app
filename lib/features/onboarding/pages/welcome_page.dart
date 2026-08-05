@@ -191,8 +191,14 @@ class _Slide1 extends StatelessWidget {
 
           const Spacer(),
 
+          // Copy states the MECHANISM, never an outcome (2026-08-05).  The
+          // previous headline — "Signals that close in profit." — asserted a
+          // result the recorded book does not support, contradicted the
+          // risk consent the user ticks two screens later, and is exactly
+          // the guaranteed-return language Play's financial-services policy
+          // treats as a listing risk.  Never restate an outcome here.
           const Text(
-            'Signals that\nclose in profit.',
+            'Every signal.\nEntry, stop, target.',
             style: TextStyle(
               color: LuminColors.textPrimary,
               fontSize: 36,
