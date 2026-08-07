@@ -15,6 +15,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Every change ships via PR — never push to `main` directly. A `main` push triggers the full CI build and auto-creates a GitHub Release the in-app updater picks up.
 
+**Wait ~14 minutes before checking CI here** — by a wide margin the longest of
+the four repos, because the workflow regenerates the whole Android scaffolding with `flutter
+create`, patches it, and builds both an APK and an AAB. For comparison: ops is
+~4 min and the engine ~6 min. The two jobs differ sharply: `Build web app (PWA)`
+finishes in ~2 min, `Build signed APK` is the long pole — so a green web job says
+nothing about the run. Polling a check run that cannot have finished yet
+burns API calls and turns one wait into six — sleep the known duration first,
+*then* read the conclusion. These are expected durations, not deadlines: a job
+still running at the mark gets another wait. If the number drifts materially,
+update it here rather than re-learning it every session.
+
 ## Commands
 
 ```bash
