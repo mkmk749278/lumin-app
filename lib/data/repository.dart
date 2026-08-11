@@ -304,6 +304,335 @@ class PnlHistory {
   final double monthlyPnlUsd;
 }
 
+/// One UTC day of the recorded delivered-signal book.
+///
+/// [netUsd] is that day's realised PnL at [TrackRecord.amountUsdt] per signal,
+/// net of the round-trip fee.  [cumNetUsd] is the running total from the
+/// window's start, so the newest day carries the whole window.
+///
+/// Days on which nothing closed are **absent from the series, not zero** — the
+/// engine does not emit them.  An invented zero is indistinguishable from a
+/// real flat day, and drawing a bar for it would show the book trading when it
+/// was not.  Render the series by its dates, never by its index.
+class TrackRecordDay {
+  const TrackRecordDay({
+    required this.date,
+    required this.trades,
+    required this.moves,
+    required this.wins,
+    required this.losses,
+    required this.netUsd,
+    required this.netPct,
+    required this.cumNetUsd,
+    required this.partialReason,
+  });
+
+  final String date; // UTC, YYYY-MM-DD
+  final int trades;
+  final int moves;
+  final int wins;
+  final int losses;
+  final double? netUsd;
+  final double? netPct;
+  final double cumNetUsd;
+
+  /// `'in_progress'` on today, null on a finished day.
+  ///
+  /// Today is partial by construction — it is still running.  Rendering it
+  /// like a closed day is how a part-period reads as a whole one, which flipped
+  /// a day's sign on the ops dashboard once.  The engine says which day it is;
+  /// the app must not work it out from the device clock, which can be in any
+  /// timezone while every figure here is UTC.
+  final String? partialReason;
+
+  bool get inProgress => partialReason == 'in_progress';
+
+  factory TrackRecordDay.fromJson(Map<String, dynamic> j) => TrackRecordDay(
+        date: j['date'] as String? ?? '',
+        trades: (j['n'] as num?)?.toInt() ?? 0,
+        moves: (j['moves'] as num?)?.toInt() ?? 0,
+        wins: (j['wins'] as num?)?.toInt() ?? 0,
+        losses: (j['losses'] as num?)?.toInt() ?? 0,
+        netUsd: (j['net_usd'] as num?)?.toDouble(),
+        netPct: (j['total_net_pct'] as num?)?.toDouble(),
+        cumNetUsd: (j['cum_net_usd'] as num?)?.toDouble() ?? 0.0,
+        partialReason: j['partial_reason'] as String?,
+      );
+}
+
+/// Aggregate over the selected window of the delivered-signal book.
+///
+/// Two denominators on purpose. [trades] is every selected signal; [tradesPriced]
+/// is those carrying a readable outcome, and every money figure divides by
+/// **that**.  They are normally identical; where they differ the card must be
+/// able to say so rather than quietly describe a smaller book than it counts.
+///
+/// [moves] is how many distinct price moves those trades describe — two entries
+/// into one move exit at the same price and are not independent evidence.
+/// Nothing is de-duplicated; it is disclosed.
+class TrackRecordSummary {
+  const TrackRecordSummary({
+    required this.trades,
+    required this.moves,
+    required this.tradesPriced,
+    required this.wins,
+    required this.losses,
+    required this.winRate,
+    required this.grossUsd,
+    required this.feeUsd,
+    required this.netUsd,
+    required this.avgPnlPct,
+    required this.avgNetPct,
+    required this.bestPnlPct,
+    required this.worstPnlPct,
+  });
+
+  final int trades;
+  final int moves;
+  final int tradesPriced;
+  final int wins;
+  final int losses;
+
+  /// 0..1, counted on the **net** money: a trade that made less than its own
+  /// round trip did not make money.  The book runs roughly ten times more fee
+  /// than edge, so counting gross wins would read as a winning book.
+  final double? winRate;
+
+  final double? grossUsd;
+  final double? feeUsd;
+  final double? netUsd;
+  final double? avgPnlPct;
+  final double? avgNetPct;
+
+  /// Gross — the fee is not subtracted twice in the reader's head.
+  final double? bestPnlPct;
+  final double? worstPnlPct;
+
+  static const empty = TrackRecordSummary(
+    trades: 0, moves: 0, tradesPriced: 0, wins: 0, losses: 0,
+    winRate: null, grossUsd: null, feeUsd: null, netUsd: null,
+    avgPnlPct: null, avgNetPct: null, bestPnlPct: null, worstPnlPct: null,
+  );
+
+  factory TrackRecordSummary.fromJson(Map<String, dynamic> j) =>
+      TrackRecordSummary(
+        trades: (j['n'] as num?)?.toInt() ?? 0,
+        moves: (j['moves'] as num?)?.toInt() ?? 0,
+        tradesPriced: (j['n_pnl'] as num?)?.toInt() ?? 0,
+        wins: (j['wins'] as num?)?.toInt() ?? 0,
+        losses: (j['losses'] as num?)?.toInt() ?? 0,
+        winRate: (j['win_rate'] as num?)?.toDouble(),
+        grossUsd: (j['gross_usd'] as num?)?.toDouble(),
+        feeUsd: (j['fee_usd'] as num?)?.toDouble(),
+        netUsd: (j['net_usd'] as num?)?.toDouble(),
+        avgPnlPct: (j['avg_pnl_pct'] as num?)?.toDouble(),
+        avgNetPct: (j['avg_net_pct'] as num?)?.toDouble(),
+        bestPnlPct: (j['best_pnl_pct'] as num?)?.toDouble(),
+        worstPnlPct: (j['worst_pnl_pct'] as num?)?.toDouble(),
+      );
+}
+
+/// The **recorded** track record of every signal the engine delivered.
+///
+/// Read from `GET /api/track-record` (engine `src/track_record.py`).  It exists
+/// because a per-user paper book starts empty: a subscriber who has never
+/// traded had no way to see whether the signals work, while the engine has
+/// recorded every closed signal all along.
+///
+/// **Three things this is not, and the UI must never let it read as any of
+/// them:**
+///
+/// * It is **not the user's own book.**  `PnlHistory` / "YOUR PAPER P&L" is a
+///   per-user ledger — it starts empty at enrolment, applies that user's
+///   symbol / path / regime preferences and their own risk manager, sizes at
+///   `min(equity x 2%, $100)` **compounding**, and books each TP-ladder partial
+///   on its own day.  This is every delivered signal, pooled, at one fixed
+///   notional, one blended outcome per row.  Different population, different
+///   sizing, different exit accounting: a disagreement between the two cards is
+///   not a bug and must never be "reconciled".
+/// * It is **not a backtest.**  Every row is a signal the router confirmed and
+///   `trade_monitor` tracked forward in real time, written at its terminal
+///   transition.  Nothing is replayed or reconstructed.
+/// * It is **not a promise.**  Past signal performance does not guarantee
+///   future results — the phrase the user already agreed to at consent, which
+///   the card repeats rather than assuming they remember.
+///
+/// [enabled] is false when the owner has switched the public record off from
+/// the ops panel; [unavailableReason] then says which of `disabled` / `missing`
+/// / `unreadable` / `unexpected_shape` applies.  The card hides itself either
+/// way — a subscriber does not need our plumbing explained — but the two are
+/// kept apart so a diagnostic can tell "off" from "broken".
+class TrackRecord {
+  const TrackRecord({
+    required this.enabled,
+    required this.unavailableReason,
+    required this.days,
+    required this.amountUsdt,
+    required this.feePct,
+    required this.rangeStart,
+    required this.summary,
+    required this.items,
+  });
+
+  final bool enabled;
+  final String unavailableReason;
+  final int days;
+
+  /// The position notional every dollar figure assumes, straight from the
+  /// engine.  Shown on the card: a dollar figure whose size the reader cannot
+  /// see is an assumption wearing a measurement's clothes.
+  final double amountUsdt;
+
+  /// Round trip, both legs, as a percentage of notional.
+  final double feePct;
+
+  /// First UTC day included, `YYYY-MM-DD`.  Snapped to midnight engine-side, so
+  /// the oldest day of the window is a whole day rather than a fragment.
+  final String rangeStart;
+
+  final TrackRecordSummary summary;
+
+  /// Oldest first — chart order.  See [TrackRecordDay] on absent days.
+  final List<TrackRecordDay> items;
+
+  static const empty = TrackRecord(
+    enabled: false,
+    unavailableReason: 'not_fetched',
+    days: 30,
+    amountUsdt: 100.0,
+    feePct: 0.07,
+    rangeStart: '',
+    summary: TrackRecordSummary.empty,
+    items: <TrackRecordDay>[],
+  );
+
+  /// Whether there is a book worth showing.
+  ///
+  /// Requires priced trades, not merely rows: a window whose every outcome was
+  /// unreadable would render a headline of dashes over an empty chart, which
+  /// reads as "the signals made nothing" when it means "we could not price
+  /// them".
+  bool get hasBook =>
+      enabled && summary.tradesPriced > 0 && items.isNotEmpty;
+
+  factory TrackRecord.fromJson(Map<String, dynamic> j) => TrackRecord(
+        enabled: j['enabled'] as bool? ?? false,
+        unavailableReason: j['unavailable_reason'] as String? ?? '',
+        days: (j['days'] as num?)?.toInt() ?? 30,
+        amountUsdt: (j['amount_usdt'] as num?)?.toDouble() ?? 100.0,
+        feePct: (j['fee_pct'] as num?)?.toDouble() ?? 0.07,
+        rangeStart: j['range_start'] as String? ?? '',
+        summary: TrackRecordSummary.fromJson(
+          (j['summary'] as Map?)?.cast<String, dynamic>() ??
+              const <String, dynamic>{},
+        ),
+        items: ((j['items'] as List?) ?? const [])
+            .whereType<Map>()
+            .map((m) => TrackRecordDay.fromJson(m.cast<String, dynamic>()))
+            .toList(),
+      );
+}
+
+/// One closed signal behind a day of the track record — the drill-down row.
+///
+/// A headline nobody can open is a claim rather than a record: a reader who
+/// sees a red day should be able to ask which signals made it red.
+///
+/// [pnlPct] is null where the engine could not read the outcome. The row is
+/// still listed rather than dropped — it is part of what closed that day, and
+/// omitting it would make the list disagree with the count above it.
+class TrackRecordSignal {
+  const TrackRecordSignal({
+    required this.signalId,
+    required this.symbol,
+    required this.direction,
+    required this.setup,
+    required this.regime,
+    required this.outcome,
+    required this.entry,
+    required this.closedAt,
+    required this.pnlPct,
+    required this.netPct,
+    required this.netUsd,
+  });
+
+  final String signalId;
+  final String symbol;
+  final String direction;
+  final String setup;
+
+  /// Regime at ENTRY. `UNPLACED` on records closed before the engine stamped
+  /// it — knowable only at entry, so never backfilled.
+  final String regime;
+
+  /// Terminal label, e.g. `TP1_HIT` / `SL_HIT` / `EXPIRED`.
+  final String outcome;
+
+  final double? entry;
+  final String closedAt; // ISO-8601 UTC
+  final double? pnlPct;
+  final double? netPct;
+  final double? netUsd;
+
+  bool get isLong => direction.toUpperCase() == 'LONG';
+
+  factory TrackRecordSignal.fromJson(Map<String, dynamic> j) =>
+      TrackRecordSignal(
+        signalId: j['signal_id'] as String? ?? '',
+        symbol: j['symbol'] as String? ?? '',
+        direction: j['direction'] as String? ?? '',
+        setup: j['setup'] as String? ?? '',
+        regime: j['regime'] as String? ?? '',
+        outcome: j['outcome'] as String? ?? '',
+        entry: (j['entry'] as num?)?.toDouble(),
+        closedAt: j['closed_at'] as String? ?? '',
+        pnlPct: (j['pnl_pct'] as num?)?.toDouble(),
+        netPct: (j['net_pct'] as num?)?.toDouble(),
+        netUsd: (j['net_usd'] as num?)?.toDouble(),
+      );
+}
+
+/// A page of [TrackRecordSignal]s, for a window or for one UTC day.
+///
+/// [matched] is the true population the filter selected; [truncated] says the
+/// render cap bit. The cap is applied engine-side **after** filtering — a cap
+/// applied first starves the rarest rows hardest, which is how "delivered to
+/// users" once silently meant "delivered, within the newest 300".
+class TrackRecordSignals {
+  const TrackRecordSignals({
+    required this.enabled,
+    required this.date,
+    required this.matched,
+    required this.truncated,
+    required this.items,
+  });
+
+  final bool enabled;
+
+  /// `YYYY-MM-DD` when narrowed to one day; empty for the whole window.
+  final String date;
+  final int matched;
+  final bool truncated;
+  final List<TrackRecordSignal> items;
+
+  static const empty = TrackRecordSignals(
+    enabled: false, date: '', matched: 0, truncated: false,
+    items: <TrackRecordSignal>[],
+  );
+
+  factory TrackRecordSignals.fromJson(Map<String, dynamic> j) =>
+      TrackRecordSignals(
+        enabled: j['enabled'] as bool? ?? false,
+        date: j['date'] as String? ?? '',
+        matched: (j['matched'] as num?)?.toInt() ?? 0,
+        truncated: j['truncated'] as bool? ?? false,
+        items: ((j['items'] as List?) ?? const [])
+            .whereType<Map>()
+            .map((m) => TrackRecordSignal.fromJson(m.cast<String, dynamic>()))
+            .toList(),
+      );
+}
+
 class AgentStat {
   const AgentStat({
     required this.evaluator,
@@ -1167,6 +1496,7 @@ class PulseBundle {
     required this.recent,
     required this.tickers,
     required this.pnlHistory,
+    required this.trackRecord,
     required this.userPnl,
   });
   final MockEngineSnapshot engine;
@@ -1176,6 +1506,11 @@ class PulseBundle {
   /// engine-health chart but **not** rendered as the user's own
   /// performance — that's [userPnl] now.
   final PnlHistory pnlHistory;
+
+  /// The recorded delivered-signal track record (engine-wide, every user sees
+  /// the same book). Rendered for a user who has never traded, which is the
+  /// whole point of it — [userPnl] is silent until they have.
+  final TrackRecord trackRecord;
   /// Per-user PnL snapshot — replaces what used to be sourced from
   /// ``engine.todayPnlUsd``.  See [UserPnlSnapshot] for the per-user
   /// fix doctrine.
@@ -1336,6 +1671,11 @@ Future<PulseBundle> assemblePulseBundle(LuminRepository repo) async {
             monthlyPnlUsd: 0.0,
           ),
         ),
+    // The recorded track record. Falls back to ``TrackRecord.empty`` (which
+    // is ``enabled: false``) on any error, so the card hides rather than
+    // rendering a performance claim we could not verify — and an engine that
+    // predates the endpoint simply shows no card.
+    repo.fetchTrackRecord(days: 30).catchError((_) => TrackRecord.empty),
     // Per-user PnL — replaces the engine-global todayPnlUsd that
     // was leaking across users.  Already error-tolerant inside the
     // assembler (falls through to ``UserPnlSnapshot.empty``).
@@ -1346,7 +1686,8 @@ Future<PulseBundle> assemblePulseBundle(LuminRepository repo) async {
     recent: (results[1] as List).cast<MockSignal>(),
     tickers: (results[2] as List).cast<MockTicker>(),
     pnlHistory: results[3] as PnlHistory,
-    userPnl: results[4] as UserPnlSnapshot,
+    trackRecord: results[4] as TrackRecord,
+    userPnl: results[5] as UserPnlSnapshot,
   );
 }
 
@@ -1668,6 +2009,24 @@ abstract class LuminRepository {
   /// engine's current auto-execution mode; pass an explicit value to
   /// view the opposite ledger (paper history while in live, etc.).
   Future<PnlHistory> fetchPnlHistory({int days = 30, String? mode});
+
+  /// The recorded delivered-signal book — see [TrackRecord].
+  ///
+  /// Pooled and identical for every caller, so the engine endpoint takes no
+  /// identity; `days` is the only thing the app varies. Never merge its numbers
+  /// with [fetchPnlHistory]'s, which is the caller's OWN per-user paper book.
+  Future<TrackRecord> fetchTrackRecord({int days = 30});
+
+  /// The individual closed signals behind [fetchTrackRecord]'s buckets.
+  ///
+  /// `date` (`YYYY-MM-DD`, UTC) narrows to one day; empty means the whole
+  /// window. Same population and same fee as the buckets, so the list under a
+  /// bar is the bar.
+  Future<TrackRecordSignals> fetchTrackRecordSignals({
+    int days = 30,
+    String date = '',
+    int limit = 200,
+  });
   /// Pre-TP grab settings page — engine-wide defaults (owner-only writes).
   /// Used by Settings → Engine defaults.
   Future<PretpSettings> fetchPretpSettings();
@@ -2241,6 +2600,117 @@ class MockRepository implements LuminRepository {
       items: series,
       weeklyPnlUsd: weekly,
       monthlyPnlUsd: monthly,
+    );
+  }
+
+  @override
+  Future<TrackRecord> fetchTrackRecord({int days = 30}) async {
+    // Preview mode: a plausible book so the card has something to render
+    // offline. Shaped like the real one on purpose — a losing stretch, a
+    // couple of blank days where nothing closed (ABSENT from the series, not
+    // zero), and today still running — so the preview exercises every branch
+    // the live card has to handle rather than only the happy one.
+    final now = DateTime.now().toUtc();
+    const pattern = <double>[
+      -1.9, 0.8, 2.4, -0.7, 3.1, -2.2, 0.4, 1.6, -1.1, 2.9,
+      0.6, -0.3, 4.2, -1.7, 0.9, 2.0, -2.6, 1.3, 0.2, 3.4,
+      -0.8, 1.1, 2.7, -1.4, 0.5, 1.9, -0.6, 2.2, 1.0, -0.4,
+    ];
+    // Days on which "nothing closed" — omitted entirely, never emitted as 0.
+    const blank = <int>{4, 17};
+    final items = <TrackRecordDay>[];
+    var cum = 0.0;
+    var wins = 0;
+    var losses = 0;
+    var net = 0.0;
+    for (int offset = days - 1; offset >= 0; offset--) {
+      if (blank.contains(offset)) continue;
+      final date = now.subtract(Duration(days: offset));
+      final iso = '${date.year.toString().padLeft(4, '0')}-'
+          '${date.month.toString().padLeft(2, '0')}-'
+          '${date.day.toString().padLeft(2, '0')}';
+      final v = pattern[offset % pattern.length];
+      cum += v;
+      net += v;
+      v > 0 ? wins++ : losses++;
+      items.add(TrackRecordDay(
+        date: iso,
+        trades: 3,
+        moves: 3,
+        wins: v > 0 ? 2 : 1,
+        losses: v > 0 ? 1 : 2,
+        netUsd: v,
+        netPct: v,
+        cumNetUsd: cum,
+        partialReason: offset == 0 ? 'in_progress' : null,
+      ));
+    }
+    final trades = items.length * 3;
+    return TrackRecord(
+      enabled: true,
+      unavailableReason: '',
+      days: days,
+      amountUsdt: 100.0,
+      feePct: 0.07,
+      rangeStart: items.isEmpty ? '' : items.first.date,
+      summary: TrackRecordSummary(
+        trades: trades,
+        moves: trades - 4,
+        tradesPriced: trades,
+        wins: wins * 2,
+        losses: losses * 2,
+        winRate: wins / (wins + losses),
+        grossUsd: net + trades * 0.07,
+        feeUsd: trades * 0.07,
+        netUsd: net,
+        avgPnlPct: (net + trades * 0.07) / trades,
+        avgNetPct: net / trades,
+        bestPnlPct: 4.2,
+        worstPnlPct: -2.6,
+      ),
+      items: items,
+    );
+  }
+
+  @override
+  Future<TrackRecordSignals> fetchTrackRecordSignals({
+    int days = 30,
+    String date = '',
+    int limit = 200,
+  }) async {
+    // Preview mode: a handful of plausible closed signals, including one whose
+    // outcome could not be read — the live list carries those rather than
+    // dropping them, so the offline build must exercise that branch too.
+    const symbols = ['BTCUSDT', 'SOLUSDT', 'ARBUSDT', 'PROMUSDT', 'ROBOUSDT'];
+    const setups = ['MOVER_TREND_PULLBACK', 'MOVER_AVWAP_SCALP',
+                    'TREND_PULLBACK_EMA'];
+    const outcomes = ['TP1_HIT', 'SL_HIT', 'TP2_HIT', 'EXPIRED'];
+    final base = date.isEmpty
+        ? DateTime.now().toUtc()
+        : DateTime.tryParse('${date}T12:00:00Z') ?? DateTime.now().toUtc();
+    final items = <TrackRecordSignal>[];
+    for (var i = 0; i < (date.isEmpty ? 12 : 5); i++) {
+      final pnl = i == 3 ? null : [2.4, -1.2, 0.8, -3.0, 1.6][i % 5];
+      items.add(TrackRecordSignal(
+        signalId: 'MOCK-${i.toString().padLeft(4, '0')}',
+        symbol: symbols[i % symbols.length],
+        direction: i.isEven ? 'LONG' : 'SHORT',
+        setup: setups[i % setups.length],
+        regime: i % 3 == 0 ? 'TRENDING_UP' : 'RANGING',
+        outcome: pnl == null ? '' : outcomes[i % outcomes.length],
+        entry: 100.0 + i,
+        closedAt: base.subtract(Duration(minutes: 37 * i)).toIso8601String(),
+        pnlPct: pnl,
+        netPct: pnl == null ? null : pnl - 0.07,
+        netUsd: pnl == null ? null : pnl - 0.07,
+      ));
+    }
+    return TrackRecordSignals(
+      enabled: true,
+      date: date,
+      matched: items.length,
+      truncated: false,
+      items: items,
     );
   }
 
@@ -3809,6 +4279,32 @@ class HttpRepository implements LuminRepository {
       weeklyPnlUsd: (j['weekly_pnl_usd'] as num?)?.toDouble() ?? 0.0,
       monthlyPnlUsd: (j['monthly_pnl_usd'] as num?)?.toDouble() ?? 0.0,
     );
+  }
+
+  @override
+  Future<TrackRecord> fetchTrackRecord({int days = 30}) async {
+    // No identity is sent and none is wanted: the book is pooled across every
+    // subscriber and identical for every caller, and the reader it exists for
+    // is the one who has never traded. Amount and fee are the engine's
+    // defaults — they ride back in the payload so the card can state the
+    // assumption it is rendering rather than hide one.
+    final j = (await client.get('/api/track-record', query: {'days': days}))
+        as Map<String, dynamic>;
+    return TrackRecord.fromJson(j);
+  }
+
+  @override
+  Future<TrackRecordSignals> fetchTrackRecordSignals({
+    int days = 30,
+    String date = '',
+    int limit = 200,
+  }) async {
+    final j = (await client.get('/api/track-record/signals', query: {
+      'days': days,
+      if (date.isNotEmpty) 'date': date,
+      'limit': limit,
+    })) as Map<String, dynamic>;
+    return TrackRecordSignals.fromJson(j);
   }
 
   @override

@@ -24,6 +24,7 @@ import '../../shared/widgets/upsell_banners.dart';
 import '../trade/paper_trades_page.dart';
 import '../trial/trial_gate.dart';
 import 'alerts_tab.dart';
+import 'track_record_card.dart';
 
 // _PulseBundle promoted to ``PulseBundle`` in lib/data/repository.dart
 // (Phase 2b perf push) so the repository can cache the assembled bundle
@@ -250,6 +251,16 @@ class _PulsePageState extends State<PulsePage>
         // Subscription upsell on the landing tab — auto-hides at Auto tier.
         const UpgradeBanner(slot: 'pulse'),
         _TodayPnlCard(userPnl: data.userPnl),
+        const SizedBox(height: LuminSpacing.md),
+        // The RECORDED delivered-signal book, directly under the user's own.
+        // Their money first, the product's record second — and for a user who
+        // has never traded (where _TodayPnlCard renders "Trading not enabled
+        // yet") this is the only evidence on the tab that the signals work at
+        // all, which is the reason it exists. It hides itself when the owner
+        // has switched the public record off, when the engine predates the
+        // endpoint, or when the fetch failed: a performance claim we could not
+        // verify is worse than no card.
+        TrackRecordCard(initial: data.trackRecord),
         const SizedBox(height: LuminSpacing.md),
         if (data.userPnl.hasAnyTrading) ...[
           _PnlChartCard(history: data.pnlHistory),
