@@ -56,7 +56,7 @@ import '../../shared/widgets/lumin_card.dart';
 import '../../data/track_record_prefs.dart';
 import 'month_calendar.dart';
 import 'notional_sheet.dart';
-import 'track_record_card.dart' show TrackRecordChartScale;
+import 'track_record_chart_scale.dart';
 
 const _windows = <int>[7, 30, 90];
 

@@ -24,7 +24,6 @@ import '../../shared/widgets/upsell_banners.dart';
 import '../trade/paper_trades_page.dart';
 import '../trial/trial_gate.dart';
 import 'alerts_tab.dart';
-import 'track_record_card.dart';
 import 'track_record_month_card.dart';
 
 // _PulseBundle promoted to ``PulseBundle`` in lib/data/repository.dart
@@ -261,12 +260,13 @@ class _PulsePageState extends State<PulsePage>
         // has switched the public record off, when the engine predates the
         // endpoint, or when the fetch failed: a performance claim we could not
         // verify is worse than no card.
-        TrackRecordCard(initial: data.trackRecord),
-        const SizedBox(height: LuminSpacing.md),
-        // The same book as a CALENDAR month, beside the rolling-window card
-        // rather than inside it: the two answer different questions over
-        // different periods, and one control for two periods is the confusion
-        // the month mode exists to remove.
+        //
+        // ONE card, as a calendar month (owner, 2026-08-12: *"we don't need
+        // two track cards there, keep that signal book by day"*). A rolling
+        // 7/30/90-day summary card sat above this one until then; two cards
+        // over the same book, on different periods, made the reader reconcile
+        // two headlines before reading either. The window view is not gone —
+        // it is the first thing on the page this card opens.
         TrackRecordMonthCard(window: data.trackRecord),
         const SizedBox(height: LuminSpacing.md),
         if (data.userPnl.hasAnyTrading) ...[
