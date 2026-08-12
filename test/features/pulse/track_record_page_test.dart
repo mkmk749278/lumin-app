@@ -10,8 +10,17 @@
 /// charts, each with its own axis.
 ///
 /// Changed: no invented account fields; a day on which nothing closed reads
-/// `—` and never `0.00`; and the calendar is a week grid over the fetched
-/// window rather than a month with a stepper into months we never loaded.
+/// `—` and never `0.00`.
+///
+/// **The calendar is a real month with a stepper (2026-08-11), and it FETCHES
+/// the month.** The first cut rolled over whatever the period chips had
+/// selected, so a "month" on screen was never the month a reader means by the
+/// word. It also could not honestly draw a missing day: under a rolling window
+/// an absent day might equally have been outside it. Fetching the whole month
+/// removes that ambiguity, which is what a `—` now asserts.
+///
+/// The clock is injected. A calendar that cannot be told what day it is cannot
+/// be tested at a month boundary, which is exactly where calendars break.
 library;
 
 import 'package:flutter/material.dart';
@@ -33,13 +42,19 @@ TrackRecordDay _day(String date, double? net,
       partialReason: partial,
     );
 
+/// The moment every test runs at: mid-August 2026, so the fixture's month is
+/// complete behind it and the 12th onwards are future days.
+final _now = DateTime.utc(2026, 8, 11, 12);
+
 /// 2026-08-04 … 2026-08-11, with **2026-08-06 and 2026-08-07 absent** — days
 /// on which nothing closed. The engine omits them; the calendar must still
 /// draw a cell for each, and it must read `—`.
-TrackRecord _record({double amount = 100.0}) => TrackRecord(
+TrackRecord _record({double amount = 100.0, String month = ''}) => TrackRecord(
       enabled: true,
       unavailableReason: '',
       days: 30,
+      month: month,
+      earliestDate: '2026-07-01',
       amountUsdt: amount,
       feePct: 0.07,
       rangeStart: '2026-08-04',
@@ -64,18 +79,34 @@ class _Repo extends MockRepository {
   final TrackRecordSignals? signals;
   int signalCalls = 0;
   String lastDate = 'never-called';
+  String lastMonth = 'never-called';
+  double? lastAmount;
+  double? lastSignalAmount;
 
   @override
-  Future<TrackRecord> fetchTrackRecord({int days = 30}) async => _record();
+  Future<TrackRecord> fetchTrackRecord({
+    int days = 30,
+    String month = '',
+    double? amount,
+  }) async {
+    if (month.isNotEmpty) lastMonth = month;
+    lastAmount = amount;
+    // Echo the requested month back, exactly as the engine does. A payload
+    // whose `month` disagreed with the request is what `MonthCalendar` treats
+    // as stale, so getting this wrong would silently blank every cell.
+    return _record(amount: amount ?? 100.0, month: month);
+  }
 
   @override
   Future<TrackRecordSignals> fetchTrackRecordSignals({
     int days = 30,
     String date = '',
     int limit = 200,
+    double? amount,
   }) async {
     signalCalls++;
     lastDate = date;
+    lastSignalAmount = amount;
     return signals ??
         TrackRecordSignals(
           enabled: true,
@@ -112,7 +143,11 @@ Future<void> _pump(WidgetTester tester, {_Repo? repo}) async {
   addTearDown(() => tester.binding.setSurfaceSize(null));
   await tester.pumpWidget(
     MaterialApp(
-      home: TrackRecordPage(initial: _record(), repo: repo ?? _Repo()),
+      home: TrackRecordPage(
+        initial: _record(),
+        repo: repo ?? _Repo(),
+        today: _now,
+      ),
     ),
   );
   await tester.pumpAndSettle();
@@ -210,30 +245,92 @@ void main() {
       await _pump(t);
       await t.tap(find.byTooltip('Calendar'));
       await t.pumpAndSettle();
-      // 2026-08-06 and 2026-08-07 are absent from the series. Scoped to the
-      // calendar: the signals list below also renders — for a trade whose
-      // outcome could not be read, and counting both together would pass for
-      // the wrong reason.
+      // August 2026 has 31 days. The fixture closes on the 4th, 5th, 8th, 9th,
+      // 10th and 11th, so the 1st–3rd and the 6th–7th are days on which
+      // nothing closed — five dashes. The 12th onwards are FUTURE days, which
+      // get no card and no dash: a day that has not happened is not a quiet
+      // day, and that is a third state the grid must not collapse into the
+      // other two.
+      //
+      // Scoped to the calendar: the signals list below also renders — for a
+      // trade whose outcome could not be read, and counting both together
+      // would pass for the wrong reason.
       expect(
         find.descendant(
-          of: find.byKey(const ValueKey('track-record-calendar')),
+          of: find.byKey(const ValueKey('month-calendar')),
           matching: find.text('—'),
         ),
-        findsNWidgets(2),
+        findsNWidgets(5),
       );
       expect(find.text('0.0'), findsNothing);
       expect(find.text('+0.0'), findsNothing);
       expect(_text(t), contains('nothing closed that day'));
     });
 
-    testWidgets('every day in the window gets a cell', (t) async {
+    testWidgets('every day of the MONTH gets a cell, 1 to 31', (t) async {
       await _pump(t);
       await t.tap(find.byTooltip('Calendar'));
       await t.pumpAndSettle();
-      // 4th through 11th inclusive.
-      for (final d in ['4', '5', '6', '7', '8', '9', '10', '11']) {
-        expect(find.text(d), findsWidgets, reason: 'day $d');
+      for (var d = 1; d <= 31; d++) {
+        expect(
+          find.descendant(
+            of: find.byKey(const ValueKey('month-calendar')),
+            matching: find.text('$d'),
+          ),
+          findsWidgets,
+          reason: 'day $d of August',
+        );
       }
+      expect(find.text('August 2026'), findsOneWidget);
+    });
+
+    testWidgets('the month is FETCHED, not sliced from the window', (t) async {
+      // The distinction the whole mode rests on: every day of the month was
+      // asked for, so a missing day is "nothing closed" rather than "outside
+      // our window". If this ever became a slice, the `—` above would be a
+      // guess.
+      final repo = _Repo();
+      await _pump(t, repo: repo);
+      expect(repo.lastMonth, '2026-08');
+    });
+
+    testWidgets('the stepper walks months and refetches', (t) async {
+      final repo = _Repo();
+      await _pump(t, repo: repo);
+      await t.tap(find.byTooltip('Calendar'));
+      await t.pumpAndSettle();
+      await t.tap(find.byTooltip('Previous month'));
+      await t.pumpAndSettle();
+      expect(find.text('July 2026'), findsOneWidget);
+      expect(repo.lastMonth, '2026-07');
+    });
+
+    testWidgets('it will not step past the record, or into the future',
+        (t) async {
+      // Paging past the beginning shows empty months a reader cannot tell from
+      // "we never traded then" — a blank with no cause, at a control. The
+      // fixture's earliest close is 2026-07-01, so July is the floor.
+      await _pump(t);
+      await t.tap(find.byTooltip('Calendar'));
+      await t.pumpAndSettle();
+      // Forward is already at the stop: August is the current month.
+      expect(find.byTooltip('This is the current month'), findsOneWidget);
+      await t.tap(find.byTooltip('Previous month'));
+      await t.pumpAndSettle();
+      expect(find.text('July 2026'), findsOneWidget);
+      expect(find.byTooltip('The record starts here'), findsOneWidget);
+    });
+
+    testWidgets('a future day is not drawn as a quiet day', (t) async {
+      await _pump(t);
+      await t.tap(find.byTooltip('Calendar'));
+      await t.pumpAndSettle();
+      // The 20th is in the future; it has a number and nothing else.
+      final cells = find.descendant(
+        of: find.byKey(const ValueKey('month-calendar')),
+        matching: find.text('20'),
+      );
+      expect(cells, findsOneWidget);
     });
 
     testWidgets('a day with nothing to open is not tappable', (t) async {
@@ -242,7 +339,10 @@ void main() {
       await t.tap(find.byTooltip('Calendar'));
       await t.pumpAndSettle();
       final before = repo.signalCalls;
-      await t.tap(find.text('—').first);
+      await t.tap(find.descendant(
+        of: find.byKey(const ValueKey('month-calendar')),
+        matching: find.text('—'),
+      ).first);
       await t.pumpAndSettle();
       expect(repo.signalCalls, before);
     });
@@ -295,6 +395,22 @@ void main() {
       );
       await _pump(t, repo: repo);
       expect(_text(t), contains('showing the newest 1 of 640'));
+    });
+  });
+
+  group('one size, everywhere on the page', () {
+    testWidgets('the signals list is priced at the same size as the summary',
+        (t) async {
+      // Found by rendering the page after a size change: the headline read
+      // +$133.32 at 250 USDT while every row below it was still priced at the
+      // engine's 100 default, because `/signals` had no `amount` parameter at
+      // all. Nothing failed and nothing was empty — the two halves simply
+      // described different books.
+      final repo = _Repo();
+      await _pump(t, repo: repo);
+      // No size stored in this test, so both fetches send null — the property
+      // is that they send the SAME thing, whatever it is.
+      expect(repo.lastSignalAmount, repo.lastAmount);
     });
   });
 

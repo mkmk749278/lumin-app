@@ -16,6 +16,7 @@ import 'market_alert.dart';
 import 'mock_data.dart';
 import 'server_side_execution_models.dart';
 import 'swr_cache.dart';
+import 'track_record_prefs.dart';
 import 'timestamps.dart';
 
 class AutoModeStatus {
@@ -472,11 +473,33 @@ class TrackRecord {
     required this.rangeStart,
     required this.summary,
     required this.items,
+    this.month = '',
+    this.earliestDate = '',
   });
 
   final bool enabled;
   final String unavailableReason;
+
+  /// The rolling window in whole UTC days. What the summary, the bars and the
+  /// running total are read over.
   final int days;
+
+  /// `YYYY-MM` when this payload is a CALENDAR month rather than a rolling
+  /// window, empty otherwise.
+  ///
+  /// The two are **independent controls**. The calendar grid asks for a month
+  /// so that a month on screen is the month a reader means by the word — and,
+  /// more importantly, so that a day missing from [items] means *nothing
+  /// closed* rather than *outside the window we happened to fetch*. Those are
+  /// different facts and the grid draws them differently.
+  final String month;
+
+  /// Oldest close in the whole record, `YYYY-MM-DD`, or empty.
+  ///
+  /// Where a month stepper stops. Without it a reader paging backwards walks
+  /// into empty months forever and cannot tell "we never traded then" from
+  /// "you are past the beginning of the record".
+  final String earliestDate;
 
   /// The position notional every dollar figure assumes, straight from the
   /// engine.  Shown on the card: a dollar figure whose size the reader cannot
@@ -519,6 +542,8 @@ class TrackRecord {
         enabled: j['enabled'] as bool? ?? false,
         unavailableReason: j['unavailable_reason'] as String? ?? '',
         days: (j['days'] as num?)?.toInt() ?? 30,
+        month: j['month'] as String? ?? '',
+        earliestDate: j['earliest_date'] as String? ?? '',
         amountUsdt: (j['amount_usdt'] as num?)?.toDouble() ?? 100.0,
         feePct: (j['fee_pct'] as num?)?.toDouble() ?? 0.07,
         rangeStart: j['range_start'] as String? ?? '',
@@ -1675,7 +1700,12 @@ Future<PulseBundle> assemblePulseBundle(LuminRepository repo) async {
     // is ``enabled: false``) on any error, so the card hides rather than
     // rendering a performance claim we could not verify — and an engine that
     // predates the endpoint simply shows no card.
-    repo.fetchTrackRecord(days: 30).catchError((_) => TrackRecord.empty),
+    repo
+        .fetchTrackRecord(
+          days: 30,
+          amount: TrackRecordPrefs.instance.amountOrNull,
+        )
+        .catchError((_) => TrackRecord.empty),
     // Per-user PnL — replaces the engine-global todayPnlUsd that
     // was leaking across users.  Already error-tolerant inside the
     // assembler (falls through to ``UserPnlSnapshot.empty``).
@@ -2015,7 +2045,11 @@ abstract class LuminRepository {
   /// Pooled and identical for every caller, so the engine endpoint takes no
   /// identity; `days` is the only thing the app varies. Never merge its numbers
   /// with [fetchPnlHistory]'s, which is the caller's OWN per-user paper book.
-  Future<TrackRecord> fetchTrackRecord({int days = 30});
+  Future<TrackRecord> fetchTrackRecord({
+    int days = 30,
+    String month = '',
+    double? amount,
+  });
 
   /// The individual closed signals behind [fetchTrackRecord]'s buckets.
   ///
@@ -2026,6 +2060,7 @@ abstract class LuminRepository {
     int days = 30,
     String date = '',
     int limit = 200,
+    double? amount,
   });
   /// Pre-TP grab settings page — engine-wide defaults (owner-only writes).
   /// Used by Settings → Engine defaults.
@@ -2604,13 +2639,22 @@ class MockRepository implements LuminRepository {
   }
 
   @override
-  Future<TrackRecord> fetchTrackRecord({int days = 30}) async {
+  Future<TrackRecord> fetchTrackRecord({
+    int days = 30,
+    String month = '',
+    double? amount,
+  }) async {
     // Preview mode: a plausible book so the card has something to render
     // offline. Shaped like the real one on purpose — a losing stretch, a
     // couple of blank days where nothing closed (ABSENT from the series, not
     // zero), and today still running — so the preview exercises every branch
     // the live card has to handle rather than only the happy one.
     final now = DateTime.now().toUtc();
+    // A month request is a different span from a rolling window, and the
+    // preview must produce that difference or the calendar grid is only ever
+    // exercised against a shape the live engine does not return.
+    final monthMode = month.isNotEmpty;
+    final scale = (amount ?? 100.0) / 100.0;
     const pattern = <double>[
       -1.9, 0.8, 2.4, -0.7, 3.1, -2.2, 0.4, 1.6, -1.1, 2.9,
       0.6, -0.3, 4.2, -1.7, 0.9, 2.0, -2.6, 1.3, 0.2, 3.4,
@@ -2618,21 +2662,50 @@ class MockRepository implements LuminRepository {
     ];
     // Days on which "nothing closed" — omitted entirely, never emitted as 0.
     const blank = <int>{4, 17};
+
+    // Which dates this answer covers. A month is a CALENDAR month, closed at
+    // both ends; a window is the last N whole days ending today.
+    final List<DateTime> span;
+    if (monthMode) {
+      final parts = month.split('-');
+      final y = int.tryParse(parts.first) ?? now.year;
+      final m = parts.length > 1 ? (int.tryParse(parts[1]) ?? now.month) : now.month;
+      final first = DateTime.utc(y, m, 1);
+      final next = DateTime.utc(m == 12 ? y + 1 : y, m == 12 ? 1 : m + 1, 1);
+      span = [
+        for (var d = first; d.isBefore(next); d = d.add(const Duration(days: 1)))
+          // A month in the future has no book, and inventing one would teach
+          // the preview a shape the engine cannot produce.
+          if (!d.isAfter(now)) d,
+      ];
+    } else {
+      span = [
+        for (int offset = days - 1; offset >= 0; offset--)
+          now.subtract(Duration(days: offset)),
+      ];
+    }
+
     final items = <TrackRecordDay>[];
     var cum = 0.0;
     var wins = 0;
     var losses = 0;
     var net = 0.0;
-    for (int offset = days - 1; offset >= 0; offset--) {
+    for (var i = 0; i < span.length; i++) {
+      final offset = span.length - 1 - i;
       if (blank.contains(offset)) continue;
-      final date = now.subtract(Duration(days: offset));
+      final date = span[i];
       final iso = '${date.year.toString().padLeft(4, '0')}-'
           '${date.month.toString().padLeft(2, '0')}-'
           '${date.day.toString().padLeft(2, '0')}';
-      final v = pattern[offset % pattern.length];
+      // Scaled by the reader's size, because the engine scales too — a preview
+      // whose figures ignored the size would make the control look inert.
+      final v = pattern[offset % pattern.length] * scale;
       cum += v;
       net += v;
       v > 0 ? wins++ : losses++;
+      final isToday = date.year == now.year &&
+          date.month == now.month &&
+          date.day == now.day;
       items.add(TrackRecordDay(
         date: iso,
         trades: 3,
@@ -2642,15 +2715,18 @@ class MockRepository implements LuminRepository {
         netUsd: v,
         netPct: v,
         cumNetUsd: cum,
-        partialReason: offset == 0 ? 'in_progress' : null,
+        partialReason: isToday ? 'in_progress' : null,
       ));
     }
     final trades = items.length * 3;
+    final fee = trades * 0.07 * scale;
     return TrackRecord(
       enabled: true,
       unavailableReason: '',
       days: days,
-      amountUsdt: 100.0,
+      month: month,
+      earliestDate: '2026-06-01',
+      amountUsdt: amount ?? 100.0,
       feePct: 0.07,
       rangeStart: items.isEmpty ? '' : items.first.date,
       summary: TrackRecordSummary(
@@ -2659,12 +2735,12 @@ class MockRepository implements LuminRepository {
         tradesPriced: trades,
         wins: wins * 2,
         losses: losses * 2,
-        winRate: wins / (wins + losses),
-        grossUsd: net + trades * 0.07,
-        feeUsd: trades * 0.07,
+        winRate: (wins + losses) == 0 ? null : wins / (wins + losses),
+        grossUsd: net + fee,
+        feeUsd: fee,
         netUsd: net,
-        avgPnlPct: (net + trades * 0.07) / trades,
-        avgNetPct: net / trades,
+        avgPnlPct: trades == 0 ? null : (net + fee) / trades,
+        avgNetPct: trades == 0 ? null : net / trades,
         bestPnlPct: 4.2,
         worstPnlPct: -2.6,
       ),
@@ -2677,6 +2753,7 @@ class MockRepository implements LuminRepository {
     int days = 30,
     String date = '',
     int limit = 200,
+    double? amount,
   }) async {
     // Preview mode: a handful of plausible closed signals, including one whose
     // outcome could not be read — the live list carries those rather than
@@ -2702,7 +2779,7 @@ class MockRepository implements LuminRepository {
         closedAt: base.subtract(Duration(minutes: 37 * i)).toIso8601String(),
         pnlPct: pnl,
         netPct: pnl == null ? null : pnl - 0.07,
-        netUsd: pnl == null ? null : pnl - 0.07,
+        netUsd: pnl == null ? null : (pnl - 0.07) * ((amount ?? 100.0) / 100.0),
       ));
     }
     return TrackRecordSignals(
@@ -4282,14 +4359,25 @@ class HttpRepository implements LuminRepository {
   }
 
   @override
-  Future<TrackRecord> fetchTrackRecord({int days = 30}) async {
+  Future<TrackRecord> fetchTrackRecord({
+    int days = 30,
+    String month = '',
+    double? amount,
+  }) async {
     // No identity is sent and none is wanted: the book is pooled across every
     // subscriber and identical for every caller, and the reader it exists for
-    // is the one who has never traded. Amount and fee are the engine's
-    // defaults — they ride back in the payload so the card can state the
-    // assumption it is rendering rather than hide one.
-    final j = (await client.get('/api/track-record', query: {'days': days}))
-        as Map<String, dynamic>;
+    // is the one who has never traded.
+    //
+    // `amount` is the reader's own position size when they have set one, and
+    // is ABSENT otherwise — so an unset size inherits whatever the engine
+    // assumes rather than this file asserting a default that could drift from
+    // it. Either way the engine echoes `amount_usdt` back, and that is what the
+    // UI labels its figures with.
+    final j = (await client.get('/api/track-record', query: {
+      'days': days,
+      if (month.isNotEmpty) 'month': month,
+      if (amount != null) 'amount': amount,
+    })) as Map<String, dynamic>;
     return TrackRecord.fromJson(j);
   }
 
@@ -4298,10 +4386,17 @@ class HttpRepository implements LuminRepository {
     int days = 30,
     String date = '',
     int limit = 200,
+    double? amount,
   }) async {
+    // `amount` rides here too, and it is not optional in practice: a list
+    // priced at one size under a summary priced at another is two books on one
+    // screen. Caught by rendering the page after a size change — the headline
+    // read +$133.32 at 250 USDT while every row below it was still priced at
+    // 100, and nothing failed.
     final j = (await client.get('/api/track-record/signals', query: {
       'days': days,
       if (date.isNotEmpty) 'date': date,
+      if (amount != null) 'amount': amount,
       'limit': limit,
     })) as Map<String, dynamic>;
     return TrackRecordSignals.fromJson(j);

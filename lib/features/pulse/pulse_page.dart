@@ -25,6 +25,7 @@ import '../trade/paper_trades_page.dart';
 import '../trial/trial_gate.dart';
 import 'alerts_tab.dart';
 import 'track_record_card.dart';
+import 'track_record_month_card.dart';
 
 // _PulseBundle promoted to ``PulseBundle`` in lib/data/repository.dart
 // (Phase 2b perf push) so the repository can cache the assembled bundle
@@ -261,6 +262,12 @@ class _PulsePageState extends State<PulsePage>
         // endpoint, or when the fetch failed: a performance claim we could not
         // verify is worse than no card.
         TrackRecordCard(initial: data.trackRecord),
+        const SizedBox(height: LuminSpacing.md),
+        // The same book as a CALENDAR month, beside the rolling-window card
+        // rather than inside it: the two answer different questions over
+        // different periods, and one control for two periods is the confusion
+        // the month mode exists to remove.
+        TrackRecordMonthCard(window: data.trackRecord),
         const SizedBox(height: LuminSpacing.md),
         if (data.userPnl.hasAnyTrading) ...[
           _PnlChartCard(history: data.pnlHistory),
