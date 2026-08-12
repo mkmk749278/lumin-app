@@ -25,9 +25,20 @@
 ///   would assert that signals closed and netted flat. The calendar exists
 ///   largely *for* this distinction — the bar chart omits such a day entirely
 ///   and cannot draw the difference between "quiet" and "no data".
-/// * The calendar is a **continuous week grid over the fetched window**, not a
-///   month with a stepper. A stepper implies months we have not fetched, and an
-///   empty January would read as "no trades" when it means "not loaded".
+/// * The calendar **is** a month grid with a stepper, as Binance's is — but it
+///   FETCHES the month rather than slicing a window (owner, 2026-08-11). The
+///   first cut refused a stepper on the grounds that it implies months we have
+///   not loaded; the answer to that was to load them, not to avoid the shape.
+///   And it is what makes a `—` honest: every day of the month was asked for,
+///   so a missing day is *nothing closed* rather than *outside our window*.
+///   The stepper stops at the engine's `earliest_date`, because paging past
+///   the record's beginning is a blank with no cause.
+///
+/// The calendar and the period chips are **independent controls**. The chips
+/// drive the summary, the bars, the running total and the signals list over a
+/// rolling window; the calendar is one calendar month. Before this they were
+/// one control answering two questions, and a "month" on screen was never the
+/// month a reader means by the word.
 ///
 /// Everything the card carries about honesty carries here: RECORDED rather than
 /// back-tested, the position size and fee named beside the money, today marked
@@ -42,6 +53,9 @@ import '../../data/repository.dart';
 import '../../shared/format.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
+import '../../data/track_record_prefs.dart';
+import 'month_calendar.dart';
+import 'notional_sheet.dart';
 import 'track_record_card.dart' show TrackRecordChartScale;
 
 const _windows = <int>[7, 30, 90];
@@ -49,7 +63,13 @@ const _windows = <int>[7, 30, 90];
 enum _DailyView { bars, calendar }
 
 class TrackRecordPage extends StatefulWidget {
-  const TrackRecordPage({super.key, required this.initial, this.repo});
+  const TrackRecordPage({
+    super.key,
+    required this.initial,
+    this.repo,
+    this.initialMonth,
+    this.today,
+  });
 
   /// The window the Pulse card was showing, so opening the page continues the
   /// reader's context instead of resetting it.
@@ -63,6 +83,13 @@ class TrackRecordPage extends StatefulWidget {
   /// happens to synthesise, which means the branches that matter here (a
   /// truncated list, a day with nothing to open) go unasserted.
   final LuminRepository? repo;
+
+  /// The month the calendar opens on. Defaults to the current one.
+  final String? initialMonth;
+
+  /// "Now", in UTC, for the calendar. Defaults to the clock — see
+  /// [MonthCalendar.today] for why it is injectable at all.
+  final DateTime? today;
 
   @override
   State<TrackRecordPage> createState() => _TrackRecordPageState();
@@ -87,10 +114,25 @@ class _TrackRecordPageState extends State<TrackRecordPage> {
   bool _signalsLoading = false;
   int _signalsSeq = 0;
 
+  /// The calendar's OWN fetch, independent of the period chips.
+  ///
+  /// A month is a month: fetched as one, closed at both ends. Sharing the
+  /// chips' payload is what made a "month" mean "the last thirty days", and it
+  /// is also what made a missing day ambiguous between *nothing closed* and
+  /// *outside the window*.
+  late String _month =
+      widget.initialMonth ?? monthOf(widget.today ?? DateTime.now().toUtc());
+  TrackRecord _monthData = TrackRecord.empty;
+  bool _monthLoading = false;
+  int _monthSeq = 0;
+
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadSignals());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadSignals();
+      _loadMonth();
+    });
   }
 
   LuminRepository get _repo =>
@@ -108,8 +150,10 @@ class _TrackRecordPageState extends State<TrackRecordPage> {
       _selected = null;
     });
     try {
-      final got =
-          await _repo.fetchTrackRecord(days: days);
+      final got = await _repo.fetchTrackRecord(
+        days: days,
+        amount: TrackRecordPrefs.instance.amountOrNull,
+      );
       if (!mounted || seq != _seq) return;
       setState(() {
         _data = got;
@@ -132,9 +176,11 @@ class _TrackRecordPageState extends State<TrackRecordPage> {
     setState(() => _signalsLoading = true);
     try {
       final got = await _repo.fetchTrackRecordSignals(
-            days: _days,
-            date: _selected ?? '',
-          );
+        days: _days,
+        date: _selected ?? '',
+        // Same size as the summary above, always. See the repository method.
+        amount: TrackRecordPrefs.instance.amountOrNull,
+      );
       if (!mounted || seq != _signalsSeq) return;
       setState(() {
         _signals = got;
@@ -149,8 +195,73 @@ class _TrackRecordPageState extends State<TrackRecordPage> {
     }
   }
 
+  Future<void> _loadMonth() async {
+    final seq = ++_monthSeq;
+    setState(() => _monthLoading = true);
+    try {
+      final got = await _repo.fetchTrackRecord(
+        month: _month,
+        amount: TrackRecordPrefs.instance.amountOrNull,
+      );
+      if (!mounted || seq != _monthSeq) return;
+      setState(() {
+        _monthData = got;
+        _monthLoading = false;
+      });
+    } catch (_) {
+      if (!mounted || seq != _monthSeq) return;
+      setState(() => _monthLoading = false);
+    }
+  }
+
+  void _stepMonth(String month) {
+    setState(() {
+      _month = month;
+      // A day selected in the old month is not in the new one. Clearing it
+      // keeps the readout and the signals list from describing a day the grid
+      // no longer contains.
+      _selected = null;
+    });
+    _loadMonth();
+    _loadSignals();
+  }
+
+  Future<void> _editSize() async {
+    if (!await showNotionalSheet(context)) return;
+    // Everything re-prices: the engine does the arithmetic, so every surface
+    // has to ask again rather than scale what it is holding.
+    if (!mounted) return;
+    final seq = ++_seq;
+    setState(() => _loading = true);
+    try {
+      final got = await _repo.fetchTrackRecord(
+        days: _days,
+        amount: TrackRecordPrefs.instance.amountOrNull,
+      );
+      if (!mounted || seq != _seq) return;
+      setState(() {
+        _data = got;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted || seq != _seq) return;
+      setState(() => _loading = false);
+    }
+    _loadMonth();
+    _loadSignals();
+  }
+
+  /// The selected day, looked up in whichever payload actually contains it.
+  ///
+  /// A day picked in the calendar may sit outside the chips' window — that is
+  /// the whole point of the two being independent — so searching only the
+  /// window's items would render "tap a day" over a day the reader had just
+  /// tapped. The month is searched first because it is what the calendar drew.
   TrackRecordDay? get _selectedDay {
     if (_selected == null) return null;
+    for (final d in _monthData.items) {
+      if (d.date == _selected) return d;
+    }
     for (final d in _data.items) {
       if (d.date == _selected) return d;
     }
@@ -245,10 +356,29 @@ class _TrackRecordPageState extends State<TrackRecordPage> {
               ),
             ),
             const SizedBox(height: 2),
-            Text(
-              'net, from every signal at ${_usdt(d.amountUsdt)} each',
-              style: const TextStyle(
-                  color: LuminColors.textSecondary, fontSize: 12),
+            // The size is a CONTROL, not a caption. It is the reader's own
+            // number, and the engine re-prices the whole book from it — the
+            // app never scales a figure itself.
+            GestureDetector(
+              onTap: _editSize,
+              // Flexible, not MainAxisSize.min: the sentence grows with the
+              // size the reader typed, and an unbounded Row lets it run off a
+              // phone. An overflow is content the reader cannot see, and the
+              // part that disappears here is the size the figure assumes.
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      'net, from every signal at ${_usdt(d.amountUsdt)} each',
+                      style: const TextStyle(
+                          color: LuminColors.textSecondary, fontSize: 12),
+                    ),
+                  ),
+                  const SizedBox(width: 5),
+                  const Icon(Icons.edit_outlined,
+                      size: 13, color: LuminColors.accent),
+                ],
+              ),
             ),
             const SizedBox(height: LuminSpacing.md),
             // Gross and fee beside net, never instead of it. The cost of
@@ -355,7 +485,20 @@ class _TrackRecordPageState extends State<TrackRecordPage> {
             if (_view == _DailyView.bars)
               _BarsView(record: d, selected: _selected, onTap: _selectDay)
             else
-              _CalendarView(record: d, selected: _selected, onTap: _selectDay),
+              // The calendar reads its OWN month payload, not the window's.
+              // Two controls, two questions — see the file docstring.
+              MonthCalendar(
+                month: _month,
+                record: _monthData,
+                loading: _monthLoading,
+                selected: _selected,
+                onSelectDay: _selectDay,
+                onStep: _stepMonth,
+                today: widget.today,
+                earliestDate: _monthData.earliestDate.isNotEmpty
+                    ? _monthData.earliestDate
+                    : d.earliestDate,
+              ),
           ],
         ),
       ),
@@ -897,155 +1040,6 @@ class _SeriesPainter extends CustomPainter {
 // ---------------------------------------------------------------------------
 // Calendar view
 // ---------------------------------------------------------------------------
-
-/// A continuous week grid over the fetched window.
-///
-/// **Not a month with a stepper**, which is what Binance uses. A stepper
-/// implies months we have not fetched, and an empty January would read as "no
-/// trades" when it means "not loaded" — a blank needs a cause before it gets a
-/// caption. The grid covers exactly the window the summary above describes.
-///
-/// A day on which nothing closed shows `—`, never `0.00`. That distinction is
-/// most of why this view exists: the bar chart omits such a day entirely and
-/// cannot draw the difference between a quiet day and a missing one.
-class _CalendarView extends StatelessWidget {
-  const _CalendarView({
-    required this.record,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final TrackRecord record;
-  final String? selected;
-  final ValueChanged<String?> onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final start = DateTime.tryParse('${record.rangeStart}T00:00:00Z');
-    if (start == null || record.items.isEmpty) return const SizedBox.shrink();
-    final last = DateTime.tryParse('${record.items.last.date}T00:00:00Z');
-    if (last == null) return const SizedBox.shrink();
-
-    final byDate = {for (final i in record.items) i.date: i};
-    // Pad back to the Monday on or before the window's first day so the
-    // columns line up under their weekday headers.
-    final gridStart = start.subtract(Duration(days: start.weekday - 1));
-    final totalDays = last.difference(gridStart).inDays + 1;
-    final weeks = (totalDays / 7).ceil();
-
-    return Column(
-      key: const ValueKey('track-record-calendar'),
-      children: [
-        Row(
-          children: [
-            for (final d in const ['M', 'T', 'W', 'T', 'F', 'S', 'S'])
-              Expanded(
-                child: Center(
-                  child: Text(
-                    d,
-                    style: const TextStyle(
-                        color: LuminColors.textMuted,
-                        fontSize: 9,
-                        fontWeight: FontWeight.w600),
-                  ),
-                ),
-              ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        for (var w = 0; w < weeks; w++)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 3),
-            child: Row(
-              children: [
-                for (var dow = 0; dow < 7; dow++)
-                  Expanded(
-                    child: _cell(
-                      gridStart.add(Duration(days: w * 7 + dow)),
-                      start,
-                      last,
-                      byDate,
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        const SizedBox(height: 6),
-        const Text(
-          '— nothing closed that day',
-          style: TextStyle(color: LuminColors.textMuted, fontSize: 9.5),
-        ),
-      ],
-    );
-  }
-
-  Widget _cell(
-    DateTime day,
-    DateTime windowStart,
-    DateTime windowEnd,
-    Map<String, TrackRecordDay> byDate,
-  ) {
-    final iso = '${day.year.toString().padLeft(4, '0')}-'
-        '${day.month.toString().padLeft(2, '0')}-'
-        '${day.day.toString().padLeft(2, '0')}';
-    final outside = day.isBefore(windowStart) || day.isAfter(windowEnd);
-    if (outside) return const SizedBox(height: 40);
-
-    final entry = byDate[iso];
-    final net = entry?.netUsd;
-    final isSel = iso == selected;
-    final tint = net == null
-        ? Colors.transparent
-        : (net >= 0 ? LuminColors.success : LuminColors.loss)
-            .withOpacity(isSel ? 0.30 : 0.14);
-
-    return GestureDetector(
-      onTap: entry == null ? null : () => onTap(iso),
-      child: Container(
-        height: 40,
-        margin: const EdgeInsets.symmetric(horizontal: 1.5),
-        decoration: BoxDecoration(
-          color: tint,
-          borderRadius: BorderRadius.circular(LuminRadii.sm),
-          border: Border.all(
-            color: isSel
-                ? LuminColors.accent.withOpacity(0.7)
-                : LuminColors.cardBorder,
-          ),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              '${day.day}',
-              style: TextStyle(
-                color: entry == null
-                    ? LuminColors.textMuted
-                    : LuminColors.textPrimary,
-                fontSize: 10,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            Text(
-              // `—`, never `0.00`. For an exchange a zero day is true; here it
-              // would assert that signals closed and netted flat.
-              net == null
-                  ? '—'
-                  : (net >= 0 ? '+' : '-') + net.abs().toStringAsFixed(1),
-              style: TextStyle(
-                color: net == null
-                    ? LuminColors.textMuted
-                    : (net >= 0 ? LuminColors.success : LuminColors.loss),
-                fontSize: 9,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Signal row

@@ -17,6 +17,7 @@ import 'data/app_config.dart';
 import 'data/auth_service.dart';
 import 'data/consent_storage.dart';
 import 'data/notification_service.dart';
+import 'data/track_record_prefs.dart';
 import 'data/repository.dart';
 import 'features/auth/pages/phone_signin_page.dart';
 import 'features/onboarding/pages/welcome_consent_page.dart';
@@ -55,6 +56,11 @@ Future<void> main() async {
   // Play-Services hiccup must not block app start.
   await NotificationService.instance.init();
   final cfg = await AppConfig.load();
+  // The reader's own position size for the track record. Loaded before the
+  // first frame so the Pulse bundle's fetch carries it — otherwise the card
+  // paints once at the engine's default and re-prices a moment later, which
+  // reads as the number changing on its own.
+  await TrackRecordPrefs.instance.load();
   runApp(LuminApp(initialConfig: cfg));
 }
 
