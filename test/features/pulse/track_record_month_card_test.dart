@@ -216,6 +216,62 @@ void main() {
     });
   });
 
+  group('the honesty furniture moved here with the grid', () {
+    // 2026-08-12: the Pulse rolling-window card was removed and this one kept
+    // (*"we don't need two track cards there, keep that signal book by day"*).
+    // That card carried the RECORDED badge and the sentences that make a
+    // performance figure showable at all. They are not decoration on the card
+    // that left — they are conditions on reading the one that stayed, and a
+    // layout change silently dropping them is the single regression this card
+    // must never ship. None of these assertions passes against the pre-move
+    // card, which is what makes them a guard rather than a restatement.
+
+    testWidgets('RECORDED — these trades happened, they were not replayed',
+        (t) async {
+      // The word that separates this book from every back-test, what-if and
+      // counterfactual surface we run internally (~0.38R optimistic). A reader
+      // must be able to tell at a glance which one they are looking at.
+      await _pump(t);
+      expect(find.text('RECORDED'), findsOneWidget);
+      expect(_text(t), contains('not a back-test'));
+    });
+
+    testWidgets('the reader is told this book is not their own', (t) async {
+      // Pooled, at one fixed notional, on our delivered signals. What any
+      // individual receives depends on their settings and their fills, and a
+      // figure that reads as the reader's own account is the flattering
+      // misreading — so the correction is on screen, not inferred.
+      await _pump(t);
+      expect(_text(t), contains('your own results will differ'));
+      expect(_text(t), contains('your settings and your fills'));
+    });
+
+    testWidgets('past performance carries no promise about the next month',
+        (t) async {
+      await _pump(t);
+      expect(
+        _text(t),
+        contains('past signal performance does not guarantee future results'),
+      );
+    });
+
+    testWidgets('the fee is named, and comes from the ENGINE', (t) async {
+      // A net figure with an unnamed fee is a gross figure the reader will
+      // read as net. The rate is the engine's, never a constant here.
+      await _pump(t);
+      expect(_text(t), contains('0.07% round-trip fee charged'));
+    });
+
+    testWidgets('the tap it promises is a tap it has', (t) async {
+      // The footer says "tap for every day and every signal". A promise with
+      // no control behind it is how a reader learns the card does nothing —
+      // this card is now the ONLY route from Pulse into the full record.
+      await _pump(t);
+      expect(_text(t), contains('tap for every day and every signal'));
+      expect(find.byIcon(Icons.chevron_right), findsWidgets);
+    });
+  });
+
   group('the — convention survives on the compact grid', () {
     testWidgets('a day with no close reads — and never 0.00', (t) async {
       await _pump(t);

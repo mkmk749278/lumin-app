@@ -1,14 +1,24 @@
 /// Pulse — the delivered-signal book as a calendar month.
 ///
 /// Added 2026-08-11 on the owner's direction: *"keep that month card in main
-/// pulse page"*. It sits beside the summary card rather than inside it,
-/// because the two answer different questions over **different periods** — the
-/// summary card is a rolling 7/30/90-day window, this is one calendar month —
-/// and folding them into one card with a toggle would put two periods behind
-/// one control, which is the confusion the month mode exists to remove.
+/// pulse page"*. It shipped **beside** a rolling 7/30/90-day summary card, and
+/// on 2026-08-12 that card was removed and this one kept: *"we don't need two
+/// track cards there, keep that signal book by day"*. Two cards over one book
+/// on two different periods made the reader reconcile two headlines before
+/// reading either — and the calendar is the half that answers *what happened*,
+/// which is the question a day-by-day book is for.
 ///
-/// Read-only here. Tapping opens the full track record, where a day can be
-/// selected and its individual signals read.
+/// **What had to come with it.** The removed card carried the RECORDED badge
+/// and the sentences that make a performance figure honest — that these trades
+/// happened rather than being replayed, the size and fee every dollar assumes,
+/// that the reader's own results will differ, and that past performance
+/// guarantees nothing. Those are not decoration on the other card; they are
+/// the conditions under which *any* of these numbers may be shown at all. They
+/// moved here with the grid. A performance surface that loses its disclosure
+/// in a layout change is the one regression this card must never ship.
+///
+/// The rolling window is not gone — it is the first thing on the page this
+/// card opens, along with per-day signal detail.
 import 'package:flutter/material.dart';
 
 import '../../data/app_config.dart';
@@ -123,6 +133,31 @@ class _TrackRecordMonthCardState extends State<TrackRecordMonthCard> {
                     ),
                   ),
                 ),
+                // "RECORDED" is the load-bearing word, inherited from the card
+                // removed on 2026-08-12. It separates this book from every
+                // back-test and what-if surface we run internally, and from
+                // the counterfactuals that measure ~0.38R optimistic. A reader
+                // must be able to tell at a glance that these trades happened.
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                  margin: const EdgeInsets.only(right: 8),
+                  decoration: BoxDecoration(
+                    color: LuminColors.success.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(LuminRadii.pill),
+                    border:
+                        Border.all(color: LuminColors.success.withOpacity(0.35)),
+                  ),
+                  child: const Text(
+                    'RECORDED',
+                    style: TextStyle(
+                      color: LuminColors.success,
+                      fontSize: 9,
+                      letterSpacing: 0.8,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
                 if (_loading)
                   const SizedBox(
                     width: 11,
@@ -159,21 +194,41 @@ class _TrackRecordMonthCardState extends State<TrackRecordMonthCard> {
               compact: true,
             ),
             const SizedBox(height: LuminSpacing.sm),
+            // The assumptions, inherited whole from the card removed on
+            // 2026-08-12. Every one of them is a condition on reading the grid
+            // above: the size each cell assumes, the fee already charged, that
+            // these are our delivered signals and not the reader's own fills,
+            // and that none of it predicts the next month. A grid of dollar
+            // figures whose size the reader cannot see is an assumption
+            // wearing a measurement's clothes, on every one of its cells.
             Text(
-              // The size is named here too. A grid of dollar figures whose
-              // size the reader cannot see is an assumption wearing a
-              // measurement's clothes, on every one of its cells.
-              'Each day: every signal that closed, at '
-              '${_usdt(_data.month == _month ? _data.amountUsdt : widget.window.amountUsdt)} '
-              'each with fees charged. UTC.',
+              'Each day: every signal we delivered that closed, recorded as it '
+              'happened — not a back-test. Taken at ${_usdt(_shown.amountUsdt)} '
+              'each, the same size every time, with a ${_fee(_shown.feePct)}% '
+              'round-trip fee charged. UTC. Your own results will differ: what '
+              'you receive depends on your settings and your fills. Past '
+              'signal performance does not guarantee future results. Tap for '
+              'every day and every signal behind these numbers.',
               style: const TextStyle(
-                  color: LuminColors.textMuted, fontSize: 10, height: 1.4),
+                  color: LuminColors.textMuted, fontSize: 10, height: 1.45),
             ),
           ],
         ),
       ),
     );
   }
+
+  /// The record whose assumptions are actually on screen.
+  ///
+  /// While a month is in flight `_data` still holds the *previous* month, so
+  /// naming its size beside this month's heading would state an assumption
+  /// that is not the one the cells were priced with. The window book carries
+  /// the same engine-supplied size and fee and is the honest stand-in until
+  /// the month lands.
+  TrackRecord get _shown => _data.month == _month ? _data : widget.window;
+
+  static String _fee(double f) =>
+      f == f.roundToDouble() ? f.toStringAsFixed(0) : f.toString();
 
   static String _usdt(double a) =>
       '${a == a.roundToDouble() ? a.toStringAsFixed(0) : a.toStringAsFixed(2)} USDT';
