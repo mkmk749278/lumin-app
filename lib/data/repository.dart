@@ -2339,6 +2339,24 @@ abstract class LuminRepository {
   /// side cap is 100; pass [limit] = 20 for the standard card view.
   Future<List<DispatchEvent>> getRecentDispatchEvents({int limit});
 
+  /// Fetch what happened to each recent signal ON THIS ACCOUNT
+  /// (``GET /api/auto-trade/signal-outcomes``).  Keyed by signal id so
+  /// the Signals tab can put the user's own outcome — the Binance fill,
+  /// the realised PnL, the close reason, or the reason nothing traded —
+  /// on the signal card itself.
+  ///
+  /// Owner, 2026-08-31: *"why don't we show actually same like signal
+  /// it's outcome, actually what traded in binance"*.  The two objects
+  /// existed on two tabs and had never been joined: the Signals tab is
+  /// the engine's signal, and the only per-signal record on the Trade
+  /// tab was the dispatch EVENT, which records a placement attempt and
+  /// carries no fill, no PnL and no close state.
+  ///
+  /// A signal absent from the result is NOT "not traded" — it means the
+  /// engine has no record for this account inside the windows named in
+  /// [SignalOutcomes]. The UI must render those as unknown.
+  Future<SignalOutcomes> getSignalOutcomes({int limit});
+
   /// Fetch the client's region info (``GET /api/region``).  Used by
   /// the auto-trade region gate (Play Store launch A6, 2026-05-20)
   /// to hide auto-trade UI in restricted jurisdictions.  Public
@@ -3811,6 +3829,59 @@ class MockRepository implements LuminRepository {
   }
 
   @override
+  Future<SignalOutcomes> getSignalOutcomes({int limit = 40}) async {
+    // Mock: one open, one closed at TP1, one declined by the user's own
+    // path preference.  Three DIFFERENT states on purpose — a fixture
+    // showing only the happy one lets a UI that renders every state the
+    // same way pass its widget tests.
+    final now = DateTime.now().toUtc();
+    return SignalOutcomes(
+      closedWindow: 1,
+      eventsWindow: 1,
+      bySignalId: {
+        'sig-1': SignalOutcome(
+          signalId: 'sig-1',
+          symbol: 'BTCUSDT',
+          direction: 'LONG',
+          status: 'open',
+          state: 'OPEN',
+          entryPriceFilled: 29005.5,
+          filledQty: 0.017,
+          realizedPnlUsd: 0.0,
+          openedAt: now.subtract(const Duration(minutes: 3)),
+          source: 'auto',
+        ),
+        'sig-2': SignalOutcome(
+          signalId: 'sig-2',
+          symbol: 'ETHUSDT',
+          direction: 'SHORT',
+          status: 'closed',
+          state: 'CLOSED',
+          entryPriceFilled: 1802.4,
+          filledQty: 0.27,
+          realizedPnlUsd: 4.12,
+          closeReason: 'TP1',
+          openedAt: now.subtract(const Duration(hours: 4)),
+          closedAt: now.subtract(const Duration(hours: 1)),
+          source: 'auto',
+        ),
+        'sig-3': SignalOutcome(
+          signalId: 'sig-3',
+          symbol: 'SOLUSDT',
+          direction: 'LONG',
+          status: 'not_traded',
+          notTradedClass: 'preference',
+          notTradedReason: 'path_preference',
+          notTradedDetail:
+              'RANGE_FADE is not in your auto-trade setup list.',
+          openedAt: now.subtract(const Duration(minutes: 40)),
+          source: 'auto',
+        ),
+      },
+    );
+  }
+
+  @override
   Future<List<DispatchEvent>> getRecentDispatchEvents({int limit = 20}) async {
     // Mock: one placed + one rejected (margin-insufficient) so the
     // Trade-tab Recent Activity card has visual content while
@@ -4878,6 +4949,14 @@ class HttpRepository implements LuminRepository {
         .whereType<Map<String, dynamic>>()
         .map(ServerSidePosition.fromJson)
         .toList(growable: false);
+  }
+
+  @override
+  Future<SignalOutcomes> getSignalOutcomes({int limit = 40}) async {
+    final j = (await client.get(
+      '/api/auto-trade/signal-outcomes?limit=$limit',
+    )) as Map<String, dynamic>;
+    return SignalOutcomes.fromJson(j);
   }
 
   @override

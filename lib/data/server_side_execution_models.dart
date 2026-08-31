@@ -282,7 +282,7 @@ class TakeSignalResult {
     this.detail,
   });
 
-  final String outcome; // 'placed' | 'rejected' | 'queued'
+  final String outcome; // 'placed' | 'rejected' | 'skipped' | 'queued'
   final String signalId;
   final String? symbol;
   final String? direction;
@@ -514,6 +514,7 @@ class DispatchEvent {
     this.rejectDetail,
     this.rejectBinanceCode,
     this.rejectBinanceMsg,
+    this.skipReason,
     this.source,
   });
 
@@ -530,6 +531,11 @@ class DispatchEvent {
   final int? rejectBinanceCode;
   final String? rejectBinanceMsg;
 
+  /// Which of the user's own per-signal preferences declined this signal
+  /// (``path_preference`` / ``regime_preference``).  Null unless
+  /// [outcome] is ``skipped``.
+  final String? skipReason;
+
   /// How the order originated: 'auto' (hands-off dispatch) or
   /// 'manual_take' (one-tap take).  Null on engines that pre-date the
   /// field (2026-07-17).
@@ -537,6 +543,13 @@ class DispatchEvent {
 
   bool get isPlaced => outcome == 'placed';
   bool get isRejected => outcome == 'rejected';
+
+  /// A signal the user's OWN per-signal preference declined, before the
+  /// order path.  Only ``path_preference`` and ``regime_preference``
+  /// persist a row (engine ``dispatch_log.record_skipped``); the
+  /// account-level gates are answered by the runtime-status card
+  /// instead of one write per signal per user.
+  bool get isSkipped => outcome == 'skipped';
 
   factory DispatchEvent.fromJson(Map<String, dynamic> j) => DispatchEvent(
         eventId: j['event_id'] as String? ?? '',
@@ -553,6 +566,7 @@ class DispatchEvent {
         rejectDetail: j['reject_detail'] as String?,
         rejectBinanceCode: (j['reject_binance_code'] as num?)?.toInt(),
         rejectBinanceMsg: j['reject_binance_msg'] as String?,
+        skipReason: j['skip_reason'] as String?,
         source: j['source'] as String?,
       );
 }
@@ -597,12 +611,67 @@ class DispatchEventTranslation {
   /// red (something deeper — operator should know).
   final DispatchEventSeverity severity;
 
-  static DispatchEventTranslation forEvent(DispatchEvent e) {
+  /// [outcome] is what the placement BECAME on Binance, when known.
+  ///
+  /// Until 2026-08-31 this returned the fixed sentence *"Position is open
+  /// — Lumin manages it from here."* for every placed event, forever.  A
+  /// [DispatchEvent] records a placement ATTEMPT: it carries no fill, no
+  /// PnL and no close state, so the sentence was a static string on a
+  /// record that could not know it.  Four such rows sat directly beneath
+  /// "YOUR OPEN POSITIONS 0" in the owner's screenshot — the card above
+  /// was engine truth, the rows below were copy, and each was internally
+  /// right while the page contradicted itself.
+  ///
+  /// With no [outcome] the row now states only what the event itself
+  /// witnessed: Binance accepted the order.  It claims nothing about the
+  /// position, because it cannot.
+  static DispatchEventTranslation forEvent(
+    DispatchEvent e, {
+    SignalOutcome? outcome,
+  }) {
     if (e.isPlaced) {
+      if (outcome != null && outcome.isClosed) {
+        final pnl = outcome.realizedPnlUsd;
+        final reason = outcome.closeReason;
+        final bits = <String>[
+          if (reason != null && reason.isNotEmpty) 'exit $reason',
+          if (pnl != null)
+            'realised ${pnl >= 0 ? '+' : '-'}\$${pnl.abs().toStringAsFixed(2)}',
+        ];
+        return DispatchEventTranslation(
+          headline: 'Closed on Binance',
+          action: bits.isEmpty
+              ? 'The position has closed.'
+              : bits.join(' · '),
+          severity: DispatchEventSeverity.success,
+        );
+      }
+      if (outcome != null && outcome.isOpen) {
+        final filled = outcome.entryPriceFilled;
+        return DispatchEventTranslation(
+          headline: 'Placed on Binance',
+          action: filled != null && filled > 0
+              ? 'Open at $filled — Lumin manages it from here.'
+              : 'Position is open — Lumin manages it from here.',
+          severity: DispatchEventSeverity.success,
+        );
+      }
       return DispatchEventTranslation(
         headline: 'Placed on Binance',
-        action: 'Position is open — Lumin manages it from here.',
+        action: 'Binance accepted the order.',
         severity: DispatchEventSeverity.success,
+      );
+    }
+    if (e.outcome == 'skipped') {
+      // The user's own path/regime filter declined this signal.  Nothing
+      // failed, so it must not be coloured or worded as an error — it is
+      // one of exactly two gates that can stop ONE signal on an
+      // otherwise-working account, which is what makes it worth a row.
+      return DispatchEventTranslation(
+        headline: 'Not auto-traded',
+        action: e.rejectDetail ??
+            'Your own auto-trade filter excluded this signal.',
+        severity: DispatchEventSeverity.transient,
       );
     }
     return forReject(
@@ -962,4 +1031,169 @@ class SelfReenableResult {
 
   /// User-facing refusal copy (cooldown), null on success.
   final String? message;
+}
+
+
+/// One row from ``GET /api/auto-trade/signal-outcomes`` — what happened
+/// to a signal **on this user's own Binance account**.
+///
+/// Why this exists (owner, 2026-08-31: *"why don't we show actually same
+/// like signal it's outcome, actually what traded in binance ... with
+/// that user can understand what actually engine produced and what's
+/// traded in binance"*).
+///
+/// The two halves already existed and had never been joined.  The
+/// Signals tab renders the ENGINE's object — entry / SL / TP and a live
+/// mark — and says so in its own subtitle.  The Trade tab renders the
+/// USER's object, and its only per-signal record was [DispatchEvent],
+/// which is a record of a placement ATTEMPT: it carries no fill price,
+/// no PnL and no close state.  That is why a placed row asserts
+/// "Position is open" in the present tense forever, and why four such
+/// rows could sit directly beneath "YOUR OPEN POSITIONS 0" — the card
+/// above was engine truth and the rows below were a static string.
+///
+/// This class is the join, keyed by [signalId], so a signal card can say
+/// what *your* account did with it.
+class SignalOutcome {
+  const SignalOutcome({
+    required this.signalId,
+    required this.symbol,
+    required this.direction,
+    required this.status,
+    this.state,
+    this.entryPriceFilled,
+    this.filledQty,
+    this.realizedPnlUsd,
+    this.closeReason,
+    this.openedAt,
+    this.closedAt,
+    this.notTradedClass,
+    this.notTradedReason,
+    this.notTradedDetail,
+    this.binanceCode,
+    this.source,
+  });
+
+  final String signalId;
+  final String symbol;
+  final String direction;
+
+  /// 'open' | 'closed' | 'not_traded'.  Absence of a [SignalOutcome]
+  /// for a signal is a FOURTH state and must never be rendered as
+  /// 'not_traded' — it means the engine has no record for this account
+  /// inside the windows the response names.
+  final String status;
+
+  /// The FSM state behind [status] (``OPEN``, ``CLOSED``, …).  Null when
+  /// no position exists.
+  final String? state;
+
+  /// What Binance actually filled at — not what the signal asked for.
+  /// The gap between this and the signal's `entry` is the whole reason
+  /// this endpoint exists.
+  final double? entryPriceFilled;
+  final double? filledQty;
+  final double? realizedPnlUsd;
+
+  /// 'TP1' | 'TP2' | 'TP3' | 'SL' | 'MANUAL' | … — engine truth about how
+  /// the position ended.
+  final String? closeReason;
+
+  final DateTime? openedAt;
+  final DateTime? closedAt;
+
+  /// 'rejected' (something refused the order — the user has something to
+  /// fix) or 'preference' (the user's own path/regime filter declined it
+  /// and nothing is wrong).  Two states with two different next moves;
+  /// pooling them makes a working account read as a broken one.
+  final String? notTradedClass;
+  final String? notTradedReason;
+  final String? notTradedDetail;
+  final int? binanceCode;
+
+  /// 'auto' | 'manual_take'.
+  final String? source;
+
+  bool get isOpen => status == 'open';
+  bool get isClosed => status == 'closed';
+  bool get isNotTraded => status == 'not_traded';
+
+  /// True when the user's OWN preference declined the signal — nothing
+  /// failed, so this must not be coloured or worded as an error.
+  bool get declinedByPreference => notTradedClass == 'preference';
+
+  factory SignalOutcome.fromJson(Map<String, dynamic> j) => SignalOutcome(
+        signalId: j['signal_id'] as String? ?? '',
+        symbol: j['symbol'] as String? ?? '',
+        direction: j['direction'] as String? ?? '',
+        status: j['status'] as String? ?? '',
+        state: j['state'] as String?,
+        entryPriceFilled: (j['entry_price_filled'] as num?)?.toDouble(),
+        filledQty: (j['filled_qty'] as num?)?.toDouble(),
+        realizedPnlUsd: (j['realized_pnl_usd'] as num?)?.toDouble(),
+        closeReason: j['close_reason'] as String?,
+        openedAt: DateTime.tryParse(j['opened_at'] as String? ?? ''),
+        closedAt: DateTime.tryParse(j['closed_at'] as String? ?? ''),
+        notTradedClass: j['not_traded_class'] as String?,
+        notTradedReason: j['not_traded_reason'] as String?,
+        notTradedDetail: j['not_traded_detail'] as String?,
+        binanceCode: (j['binance_code'] as num?)?.toInt(),
+        source: j['source'] as String?,
+      );
+}
+
+
+/// The response envelope for ``GET /api/auto-trade/signal-outcomes``.
+///
+/// The window counts are not decoration.  A signal with no [SignalOutcome]
+/// has no record on this account *within these windows*, which is a
+/// different fact from a signal the account declined — and only these
+/// numbers let the UI tell the reader which one it is looking at.
+class SignalOutcomes {
+  const SignalOutcomes({
+    required this.bySignalId,
+    this.closedWindow = 0,
+    this.closedTruncated = false,
+    this.eventsWindow = 0,
+    this.eventsTruncated = false,
+  });
+
+  const SignalOutcomes.empty()
+      : bySignalId = const <String, SignalOutcome>{},
+        closedWindow = 0,
+        closedTruncated = false,
+        eventsWindow = 0,
+        eventsTruncated = false;
+
+  final Map<String, SignalOutcome> bySignalId;
+  final int closedWindow;
+  final bool closedTruncated;
+  final int eventsWindow;
+  final bool eventsTruncated;
+
+  /// True when either window was full, so an absent signal may simply be
+  /// older than the read reached.
+  bool get truncated => closedTruncated || eventsTruncated;
+
+  SignalOutcome? operator [](String signalId) => bySignalId[signalId];
+
+  factory SignalOutcomes.fromJson(Map<String, dynamic> j) {
+    final raw = j['outcomes'];
+    final map = <String, SignalOutcome>{};
+    if (raw is List) {
+      for (final row in raw) {
+        if (row is Map<String, dynamic>) {
+          final o = SignalOutcome.fromJson(row);
+          if (o.signalId.isNotEmpty) map[o.signalId] = o;
+        }
+      }
+    }
+    return SignalOutcomes(
+      bySignalId: map,
+      closedWindow: (j['closed_window'] as num?)?.toInt() ?? 0,
+      closedTruncated: j['closed_truncated'] as bool? ?? false,
+      eventsWindow: (j['events_window'] as num?)?.toInt() ?? 0,
+      eventsTruncated: j['events_truncated'] as bool? ?? false,
+    );
+  }
 }
