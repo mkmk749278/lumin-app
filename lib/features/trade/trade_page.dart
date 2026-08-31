@@ -124,6 +124,18 @@ class _TradePageState extends State<TradePage>
   List<DispatchEvent>? _recentDispatchEvents;
   StreamSubscription<List<DispatchEvent>>? _dispatchEventsSub;
 
+  /// What each of those attempts actually BECAME on Binance, keyed by
+  /// signal id (``GET /api/auto-trade/signal-outcomes``).
+  ///
+  /// A [DispatchEvent] records a placement ATTEMPT and carries no fill,
+  /// no PnL and no close state, so a placed row said "Position is open —
+  /// Lumin manages it from here" in the present tense forever.  That is
+  /// how four such rows came to sit directly beneath "YOUR OPEN
+  /// POSITIONS 0" (owner screenshot, 2026-08-31): the card above was
+  /// engine truth and the rows below were a static string.  Null =
+  /// not loaded, which is not the same as "no outcome".
+  SignalOutcomes? _outcomes;
+
   // Orders placed from THIS phone via the device-key path (one-tap
   // signal takes + alert takes) — read from the existing per-user
   // OrderLogService so the Live feed shows everything the Binance API
@@ -204,7 +216,8 @@ class _TradePageState extends State<TradePage>
     );
 
     _dispatchEventsSub?.cancel();
-    _dispatchEventsSub = repo.watchRecentDispatchEvents(limit: 20).listen(
+    _dispatchEventsSub =
+        repo.watchRecentDispatchEvents(limit: kDispatchEventPageSize).listen(
       (events) {
         if (!mounted) return;
         setState(() => _recentDispatchEvents = events);
@@ -213,6 +226,25 @@ class _TradePageState extends State<TradePage>
         // Same posture — transient failure keeps the prior list.
       },
     );
+
+    unawaited(_loadOutcomes());
+  }
+
+  /// Best-effort load of what each attempt became on Binance.  A failure
+  /// leaves every row rendering exactly as it did before this shipped —
+  /// the placement facts, with no claim about the position's state.
+  Future<void> _loadOutcomes() async {
+    if (!mounted) return;
+    final repo = AppConfigScope.of(context).repo;
+    try {
+      final o = await repo.getSignalOutcomes(limit: 40);
+      if (!mounted || repo != _lastRepo) return;
+      setState(() => _outcomes = o);
+    } catch (_) {
+      // Not signed in, no server-side execution, or an engine that
+      // predates the endpoint.  All mean the same thing here: we do not
+      // know what the position did, so the row must not say.
+    }
   }
 
   @override
@@ -659,6 +691,7 @@ class _TradePageState extends State<TradePage>
               _RecentDispatchEventsCard(
                 events: recentEvents,
                 phoneOrders: _phoneOrders,
+                outcomes: _outcomes,
               ),
               const SizedBox(height: LuminSpacing.md),
             ],
@@ -1809,13 +1842,26 @@ class _ServerPositionRow extends StatelessWidget {
 /// audit log of "what did the engine try to do on MY account" —
 /// natural follow-on from "what's open on my account" and natural
 /// precursor to "what's the engine seeing globally".
+/// How many dispatch events the Trade tab asks the engine for.
+///
+/// Declared once and read by BOTH the fetch and the header, because the
+/// header renders this number and the two silently disagreeing is how a
+/// page size came to read as a trade count.
+const int kDispatchEventPageSize = 20;
+
+
 class _RecentDispatchEventsCard extends StatelessWidget {
   const _RecentDispatchEventsCard({
     required this.events,
     this.phoneOrders = const [],
+    this.outcomes,
   });
 
   final List<DispatchEvent> events;
+
+  /// What each of those attempts became on Binance, keyed by signal id.
+  /// Null while unloaded; a row with no entry states only the placement.
+  final SignalOutcomes? outcomes;
 
   /// Orders placed from this phone via device keys (one-tap signal
   /// takes + alert takes), merged chronologically with the server-side
@@ -1828,7 +1874,10 @@ class _RecentDispatchEventsCard extends StatelessWidget {
     // Merge the two sources newest-first.
     final rows = <(DateTime, Widget)>[
       for (final e in events)
-        (e.timestamp, _DispatchEventRow(event: e)),
+        (
+          e.timestamp,
+          _DispatchEventRow(event: e, outcome: outcomes?[e.signalId]),
+        ),
       for (final o in phoneOrders)
         (o.placedAt, _PhoneOrderRow(entry: o)),
     ]..sort((a, b) => b.$1.compareTo(a.$1));
@@ -1857,8 +1906,16 @@ class _RecentDispatchEventsCard extends StatelessWidget {
                   ),
                 ),
                 const Spacer(),
+                // ``rows.length`` is the PAGE SIZE, not a total: the
+                // engine read is ``recent-events?limit=20`` and this
+                // rendered that 20 as if it were how many trades the
+                // account has ever had.  A row cap is a render bound and
+                // has to say when it bit — the owner's screenshot read
+                // "YOUR TRADES 20" over an account with more than that.
                 Text(
-                  '${rows.length}',
+                  events.length >= kDispatchEventPageSize
+                      ? 'newest ${rows.length}'
+                      : '${rows.length}',
                   style: const TextStyle(
                     color: LuminColors.textSecondary,
                     fontSize: 11,
@@ -1873,8 +1930,9 @@ class _RecentDispatchEventsCard extends StatelessWidget {
                 padding: EdgeInsets.symmetric(vertical: LuminSpacing.sm),
                 child: Text(
                   'No trades on your account yet.  Every order Lumin '
-                  'places — or skips — for you shows up here with the '
-                  'reason.',
+                  'places, and every one Binance refuses, shows up here '
+                  'with the reason — along with signals your own '
+                  'auto-trade filters declined.',
                   style: TextStyle(
                     color: LuminColors.textSecondary,
                     fontSize: 11,
@@ -2036,13 +2094,17 @@ class _NoTradesYetCard extends StatelessWidget {
 
 
 class _DispatchEventRow extends StatelessWidget {
-  const _DispatchEventRow({required this.event});
+  const _DispatchEventRow({required this.event, this.outcome});
 
   final DispatchEvent event;
 
+  /// What this placement became on Binance, when the engine could say.
+  /// Null keeps the row to what the event itself witnessed.
+  final SignalOutcome? outcome;
+
   @override
   Widget build(BuildContext context) {
-    final tx = DispatchEventTranslation.forEvent(event);
+    final tx = DispatchEventTranslation.forEvent(event, outcome: outcome);
     final chipColor = _chipColor(tx.severity);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),

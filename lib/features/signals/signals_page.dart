@@ -16,6 +16,7 @@ import '../charts/chart_page.dart';
 import '../../data/app_config.dart';
 import '../../data/mock_data.dart';
 import '../../data/repository.dart';
+import '../../data/server_side_execution_models.dart';
 import '../../shared/format.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/free_tier_gate.dart';
@@ -176,6 +177,22 @@ class _SignalsPageState extends State<SignalsPage>
   final Map<String, ValueNotifier<double>> _priceNotifiers = {};
   Timer? _priceTimer;
 
+  /// What THIS account did with each signal, keyed by signal id
+  /// (``GET /api/auto-trade/signal-outcomes``).
+  ///
+  /// Owner, 2026-08-31: *"why don't we show actually same like signal
+  /// it's outcome, actually what traded in binance"*.  Until now this
+  /// page rendered the engine's object and nothing else, and said so in
+  /// its own subtitle — *"All Lumin signals · Your own trades → Trade
+  /// tab"*.  So a subscriber could read a card and had no way to learn
+  /// whether their own account took it, at what price, or what it made.
+  ///
+  /// Loaded best-effort and strictly beside the signal list: a failure
+  /// here leaves the strip off the cards and never touches the feed.
+  /// Null = not loaded yet (or unavailable), which is NOT the same as
+  /// loaded-and-empty and must not render as "nothing traded".
+  SignalOutcomes? _outcomes;
+
   /// Persistent HTTP connection pool for Binance mark-price polls.
   /// Reused across every 5 s tick so TCP connections are kept alive
   /// instead of torn down and re-established on every poll.
@@ -257,6 +274,10 @@ class _SignalsPageState extends State<SignalsPage>
   void _resubscribe() {
     _sub?.cancel();
     final repo = AppConfigScope.of(context).repo;
+    // Refreshed on the same triggers as the feed (first load, filter
+    // switch, pull-to-refresh, foreground resume) so a card and its own
+    // account strip can never describe two different moments.
+    unawaited(_loadOutcomes());
     // Capture the current filter so the listener closure always writes
     // to the right bucket even if the user switches filters before the
     // async fetch completes.
@@ -312,6 +333,27 @@ class _SignalsPageState extends State<SignalsPage>
       // Stream didn't emit within 5s — release the spinner anyway.
     } finally {
       if (identical(_refreshDone, completer)) _refreshDone = null;
+    }
+  }
+
+  /// Best-effort load of this account's per-signal outcomes.
+  ///
+  /// Deliberately not part of the signal stream: the feed is the
+  /// product and must render for a user with no Binance key, no
+  /// entitlement and no server-side execution at all.  Every failure
+  /// path here ends in "leave the strip off", never in an error on the
+  /// feed.
+  Future<void> _loadOutcomes() async {
+    if (!mounted) return;
+    final repo = AppConfigScope.of(context).repo;
+    try {
+      final o = await repo.getSignalOutcomes(limit: 60);
+      if (!mounted || repo != _lastRepo) return;
+      setState(() => _outcomes = o);
+    } catch (_) {
+      // Not signed in, no server-side execution, engine unreachable, or
+      // an engine that predates the endpoint.  All four mean the same
+      // thing to this page: we do not know, so we claim nothing.
     }
   }
 
@@ -445,6 +487,9 @@ class _SignalsPageState extends State<SignalsPage>
       itemBuilder: (_, i) => _SignalCard(
         sig: items[i],
         priceNotifier: _priceNotifiers[items[i].symbol],
+        outcome: _outcomes?[items[i].id],
+        outcomesLoaded: _outcomes != null,
+        outcomesTruncated: _outcomes?.truncated ?? false,
       ),
     );
   }
@@ -756,9 +801,97 @@ class _SignalsError extends StatelessWidget {
   }
 }
 
+/// One line on a signal card saying what the USER's Binance account did
+/// with it — distinct from every other row on the card, all of which
+/// describe the engine's signal.
+///
+/// Kept deliberately plain: an icon, a headline and a detail line.  The
+/// card already carries the engine's own status dot and PnL, and a
+/// second element competing with them at the same weight is how a
+/// reader stops being able to tell whose number they are looking at.
+class _AccountStrip extends StatelessWidget {
+  const _AccountStrip({
+    required this.icon,
+    required this.color,
+    required this.headline,
+    required this.detail,
+  });
+
+  final IconData icon;
+  final Color color;
+  final String headline;
+  final String detail;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: LuminSpacing.sm,
+        vertical: LuminSpacing.xs,
+      ),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(LuminRadii.sm),
+        border: Border.all(color: color.withOpacity(0.22)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: LuminSpacing.xs),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  headline,
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (detail.isNotEmpty)
+                  Text(
+                    detail,
+                    style: const TextStyle(
+                      color: LuminColors.textSecondary,
+                      fontSize: 11,
+                      height: 1.35,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
 class _SignalCard extends StatelessWidget {
-  const _SignalCard({required this.sig, this.priceNotifier});
+  const _SignalCard({
+    required this.sig,
+    this.priceNotifier,
+    this.outcome,
+    this.outcomesLoaded = false,
+    this.outcomesTruncated = false,
+  });
   final MockSignal sig;
+
+  /// What THIS account did with this signal, or null when there is no
+  /// record for it.  Null has TWO causes and they are not the same
+  /// claim: [outcomesLoaded] false means we have not asked (or could
+  /// not), and null-while-loaded means the engine has no record for
+  /// this signal on this account inside the windows it read.
+  final SignalOutcome? outcome;
+  final bool outcomesLoaded;
+
+  /// True when the engine's read hit its window cap, so an absent
+  /// outcome may simply be older than the read reached.  Without this
+  /// the strip would state "not traded" about a signal it never saw.
+  final bool outcomesTruncated;
   /// Per-symbol live-price notifier from the 5 s Binance poll.  When
   /// non-null and the signal is ACTIVE, the bottom price+PnL row
   /// rebuilds independently on each tick without rebuilding the rest of
@@ -815,6 +948,7 @@ class _SignalCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isLong = sig.direction == 'LONG';
+    final accountStrip = _accountStrip();
     final card = LuminCard(
       onTap: () => _showDetail(context),
       child: Column(
@@ -1050,6 +1184,17 @@ class _SignalCard extends StatelessWidget {
               );
             },
           ),
+          // What YOUR account did with this signal.  Rendered only when
+          // the engine has a record for it — an absent outcome is never
+          // written as "not traded", because absence has three innocent
+          // causes (no server-side execution on this account, a read
+          // window that did not reach back this far, or an account-level
+          // gate that persists no per-signal row) and asserting the
+          // fourth would be a claim we cannot support.
+          if (accountStrip != null) ...[
+            const SizedBox(height: LuminSpacing.sm),
+            accountStrip,
+          ],
         ],
       ),
     );
@@ -1057,6 +1202,72 @@ class _SignalCard extends StatelessWidget {
     // 2026-06-24) — the story stays, the eye goes to live signals.  A runner
     // mover at TP1_HIT is OPEN (engine is_open) and must not fade.
     return sig.effectiveIsOpen ? card : Opacity(opacity: 0.55, child: card);
+  }
+
+  /// The per-account row: what Binance actually did, beside what the
+  /// engine asked for.  Returns null when we have nothing to say.
+  ///
+  /// Three rules, each one this system has already paid for elsewhere:
+  ///
+  /// * **The fill is not the signal price.**  ``entry`` above is what the
+  ///   engine asked for; [SignalOutcome.entryPriceFilled] is what Binance
+  ///   gave.  Showing only the first is what made "what the engine
+  ///   produced" and "what traded" indistinguishable in the first place.
+  /// * **Declined-by-your-own-filter is not a failure**, and must not be
+  ///   coloured or worded like one — it is the user's own setting doing
+  ///   exactly what they asked, and one of the two states that can stop
+  ///   ONE signal on an otherwise-working account.
+  /// * **Nothing is asserted from absence.**  No record renders no row.
+  Widget? _accountStrip() {
+    final o = outcome;
+    if (o == null) return null;
+
+    if (o.isNotTraded) {
+      final preference = o.declinedByPreference;
+      return _AccountStrip(
+        icon: preference
+            ? Icons.filter_alt_outlined
+            : Icons.error_outline_rounded,
+        color: preference ? LuminColors.textMuted : LuminColors.warn,
+        headline: preference ? 'Not auto-traded' : 'Not placed',
+        detail: o.notTradedDetail ??
+            (preference
+                ? 'Your own auto-trade filter excluded this signal.'
+                : 'Binance or a safety gate refused the order.'),
+      );
+    }
+
+    final filled = o.entryPriceFilled;
+    final parts = <String>[
+      if (filled != null && filled > 0) 'filled ${formatPrice(filled)}',
+      if (o.filledQty != null && o.filledQty! > 0)
+        'qty ${o.filledQty!.toStringAsFixed(4)}',
+    ];
+    if (o.isClosed) {
+      final pnl = o.realizedPnlUsd;
+      return _AccountStrip(
+        icon: Icons.check_circle_outline_rounded,
+        color: (pnl ?? 0) >= 0 ? LuminColors.success : LuminColors.loss,
+        headline: o.closeReason == null || o.closeReason!.isEmpty
+            ? 'Closed on Binance'
+            : 'Closed on Binance · ${o.closeReason}',
+        detail: [
+          ...parts,
+          if (pnl != null) 'realised ${formatPnl(pnl)}',
+        ].join(' · '),
+      );
+    }
+    return _AccountStrip(
+      icon: Icons.bolt_rounded,
+      color: LuminColors.accent,
+      headline: o.source == 'manual_take'
+          ? 'Open on Binance · your tap'
+          : 'Open on Binance',
+      // The engine manages it from here — but this row says so only
+      // while the position is genuinely open, which is the difference
+      // between this and the placement record it replaces.
+      detail: parts.isEmpty ? 'Lumin manages it from here.' : parts.join(' · '),
+    );
   }
 
   void _showDetail(BuildContext context) {
