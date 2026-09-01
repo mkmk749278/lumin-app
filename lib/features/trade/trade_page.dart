@@ -116,8 +116,8 @@ class _TradePageState extends State<TradePage>
   // prewarmed at sign-in for instant first paint.
   AutoTradeRuntimeStatus? _runtimeStatus;
   StreamSubscription<AutoTradeRuntimeStatus>? _runtimeStatusSub;
-  List<ServerSidePosition>? _serverPositions;
-  StreamSubscription<List<ServerSidePosition>>? _positionsSub;
+  ServerSidePositions? _serverPositions;
+  StreamSubscription<ServerSidePositions>? _positionsSub;
   // Recent dispatch events (placed + rejected) — same SWR-stream
   // pattern.  Engine endpoint ``/api/auto-trade/recent-events`` is
   // user-scoped via Firebase ID token.
@@ -604,7 +604,8 @@ class _TradePageState extends State<TradePage>
     // trade cards would all be structurally empty.
     final hasBinanceKey =
         runtime != null && runtime.binanceKeyConnected;
-    final hasAnyTrades = (serverPositions?.isNotEmpty ?? false) ||
+    final hasAnyTrades = (serverPositions?.positions.isNotEmpty ?? false) ||
+        (serverPositions?.unmanaged.isNotEmpty ?? false) ||
         (recentEvents?.isNotEmpty ?? false) ||
         _phoneOrders.isNotEmpty;
     // Is the engine ACTUALLY dispatching live orders right now?  Same
@@ -685,7 +686,7 @@ class _TradePageState extends State<TradePage>
           else ...[
             if (serverPositions != null) ...[
               _ServerPositionsCard(
-                positions: serverPositions,
+                book: serverPositions,
                 // A close is the one action on this page that changes what
                 // the list should say, so it refreshes rather than waiting
                 // out the poll — the row the user just closed staying on
@@ -1674,9 +1675,9 @@ class _EmbeddedPaperTrades extends StatelessWidget {
 ///   this symbol"; rendering 0.00 there would read as a position worth
 ///   nothing, which is a claim nobody made.
 class _ServerPositionsCard extends StatelessWidget {
-  const _ServerPositionsCard({required this.positions, this.onClosed});
+  const _ServerPositionsCard({required this.book, this.onClosed});
 
-  final List<ServerSidePosition> positions;
+  final ServerSidePositions book;
 
   /// Called after a close resolves, so the page can refresh rather than wait
   /// out the poll interval with a row the user has already closed.
@@ -1684,9 +1685,9 @@ class _ServerPositionsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // One stamp for the card, because it describes the read rather than any
-    // row — the engine sends it once and the repository copies it down.
-    final age = positions.isEmpty ? null : positions.first.marksAgeSec;
+    final positions = book.positions;
+    final unmanaged = book.unmanaged;
+    final age = book.exchangeAgeSec ?? book.marksAgeSec;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
       child: LuminCard(
@@ -1713,7 +1714,7 @@ class _ServerPositionsCard extends StatelessWidget {
                 ),
                 const Spacer(),
                 Text(
-                  '${positions.length}',
+                  '${positions.length + unmanaged.length}',
                   style: const TextStyle(
                     color: LuminColors.textSecondary,
                     fontSize: 11,
@@ -1722,51 +1723,219 @@ class _ServerPositionsCard extends StatelessWidget {
                 ),
               ],
             ),
-            if (age != null && positions.isNotEmpty) ...[
-              const SizedBox(height: 2),
-              Text(
-                // Named, not implied.  A price with no age beside it is a
-                // claim, and this is the line that stops a frozen engine
-                // reading as a live position.
-                age < 60
-                    ? 'Priced by the engine ${age.round()}s ago'
-                    : 'Prices are ${(age / 60).round()} min old — '
-                        'the engine may have stopped marking',
-                style: TextStyle(
-                  color: age < 60
-                      ? LuminColors.textMuted
-                      : LuminColors.warn,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
+            const SizedBox(height: 2),
+            _sourceLine(age),
             const SizedBox(height: LuminSpacing.sm),
-            if (positions.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: LuminSpacing.sm),
+            if (positions.isEmpty && unmanaged.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: LuminSpacing.sm),
                 child: Text(
-                  'No open positions right now.  When an eligible signal '
-                  'fires, Lumin places the order on your Binance account '
-                  'and it shows up here.\n\n'
-                  'A signal can still be running in the feed after your '
-                  'position has closed — the Signals tab shows what the '
-                  'setup is doing, this shows what your account is holding.',
-                  style: TextStyle(
+                  book.exchangeIsReporting
+                      ? 'Binance shows no open positions on your account '
+                          'right now.  When an eligible signal fires, Lumin '
+                          'places the order and it shows up here.\n\n'
+                          'A signal can still be running in the feed after '
+                          'your position has closed — the Signals tab shows '
+                          'what the setup is doing, this shows what your '
+                          'account is holding.'
+                      // Not the same sentence, because it is not the same
+                      // fact: we have not heard from Binance, so we must not
+                      // tell the user their account is flat.
+                      : 'Lumin has not heard from Binance about your account '
+                          'yet, so it cannot say what you are holding.  This '
+                          'clears on its own once your key is connected and '
+                          'the engine is watching it.',
+                  style: const TextStyle(
                     color: LuminColors.textSecondary,
                     fontSize: 11,
                     height: 1.45,
                   ),
                 ),
               )
-            else
+            else ...[
               for (final p in positions)
                 _ServerPositionRow(position: p, onClosed: onClosed),
+              if (unmanaged.isNotEmpty) ...[
+                const SizedBox(height: LuminSpacing.sm),
+                const Text(
+                  'NOT OPENED BY LUMIN',
+                  style: TextStyle(
+                    color: LuminColors.warn,
+                    fontSize: 10,
+                    letterSpacing: 1.2,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                const Text(
+                  'On your Binance account, with no Lumin signal behind it. '
+                  'Lumin is not managing a stop or a target for these — '
+                  'close them in the Binance app.',
+                  style: TextStyle(
+                    color: LuminColors.textSecondary,
+                    fontSize: 11,
+                    height: 1.4,
+                  ),
+                ),
+                for (final u in unmanaged) _UnmanagedPositionRow(position: u),
+              ],
+            ],
           ],
         ),
       ),
     );
   }
+
+  /// Where these numbers came from and how old they are.
+  ///
+  /// Leads the card because a position with no provenance beside it is a
+  /// claim: the whole point of this rewrite is that size, entry and
+  /// liquidation price come from Binance rather than from what the engine
+  /// intended, and a reader cannot check that unless it is said.
+  Widget _sourceLine(double? age) {
+    if (!book.exchangeIsReporting) {
+      return const Text(
+        'Showing what Lumin set up — Binance has not reported in',
+        style: TextStyle(
+          color: LuminColors.warn,
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+        ),
+      );
+    }
+    final stale = age != null && age >= 60;
+    return Text(
+      age == null
+          ? "From Binance's own position data"
+          : stale
+              ? "Binance data is ${(age / 60).round()} min old — the engine "
+                  'may have stopped reporting'
+              : "From Binance's own position data, ${age.round()}s ago",
+      style: TextStyle(
+        color: stale ? LuminColors.warn : LuminColors.textMuted,
+        fontSize: 10,
+        fontWeight: FontWeight.w600,
+      ),
+    );
+  }
+}
+
+
+/// A position on the user's Binance account that Lumin did not open.
+///
+/// Its own widget rather than a variant of the managed row, because it has no
+/// signal, no stop and no target — every field the managed row leads with is
+/// absent, and rendering blanks in their place would read as data we lost
+/// rather than data that was never there.
+class _UnmanagedPositionRow extends StatelessWidget {
+  const _UnmanagedPositionRow({required this.position});
+
+  final UnmanagedPosition position;
+
+  @override
+  Widget build(BuildContext context) {
+    final isLong = position.side == 'LONG';
+    final dirColor = isLong ? LuminColors.success : LuminColors.loss;
+    final pct = position.unrealizedPnlPct;
+    final pnlColor = pct == null
+        ? LuminColors.textMuted
+        : (pct >= 0 ? LuminColors.success : LuminColors.loss);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 6,
+                  vertical: 2,
+                ),
+                decoration: BoxDecoration(
+                  color: dirColor.withOpacity(0.16),
+                  borderRadius: BorderRadius.circular(LuminRadii.sm),
+                ),
+                child: Text(
+                  position.side,
+                  style: TextStyle(
+                    color: dirColor,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+              const SizedBox(width: LuminSpacing.sm),
+              Expanded(
+                child: Text(
+                  position.symbol,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: LuminColors.textPrimary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              Text(
+                pct == null
+                    ? '—'
+                    : '${pct >= 0 ? '+' : ''}${pct.toStringAsFixed(2)}%',
+                style: TextStyle(
+                  color: pnlColor,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 3),
+          Text(
+            'Size ${_fmtQty(position.openQty)}'
+            ' • Entry ${position.entryPrice == null ? '—' : _fmtPrice(position.entryPrice!)}'
+            ' • Mark ${position.markPrice == null ? '—' : _fmtPrice(position.markPrice!)}'
+            '${_liqSuffix(position.liquidationPrice, position.leverage)}',
+            style: const TextStyle(
+              color: LuminColors.textSecondary,
+              fontSize: 11,
+              height: 1.35,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+/// Liquidation price and leverage, or nothing at all.
+///
+/// Never `Liq —`: an em-dash beside the word liquidation reads as "no
+/// liquidation risk", which is a claim nobody made. Binance sends 0 for a
+/// cross position with no liquidation in range and sends nothing before its
+/// first REST cycle, and the engine keeps those apart, so the absent case
+/// simply omits the column.
+String _liqSuffix(double? liq, double? leverage) {
+  final parts = <String>[
+    if (liq != null && liq > 0) 'Liq ${_fmtPrice(liq)}',
+    if (leverage != null && leverage > 0) '${leverage.toStringAsFixed(0)}x',
+  ];
+  return parts.isEmpty ? '' : ' • ${parts.join(' • ')}';
+}
+
+
+String _fmtPrice(double v) {
+  if (v >= 1000) return v.toStringAsFixed(2);
+  if (v >= 1) return v.toStringAsFixed(4);
+  return v.toStringAsFixed(6);
+}
+
+
+String _fmtQty(double v) {
+  if (v >= 1000) return v.toStringAsFixed(0);
+  if (v >= 1) return v.toStringAsFixed(3);
+  return v.toStringAsFixed(6);
 }
 
 
@@ -1994,18 +2163,22 @@ class _ServerPositionRowState extends State<_ServerPositionRow> {
             ],
           ),
           const SizedBox(height: 3),
-          // The columns Binance's own position row carries: size, entry,
-          // mark.  Protective levels follow on their own line, because they
-          // are the engine's intent rather than the exchange's state.
+          // The columns Binance's own position row carries — size, entry,
+          // mark, liquidation, leverage — and where they came from.  The
+          // protective levels follow on their own line, because those are the
+          // engine's intent rather than the exchange's state, and the whole
+          // point of this card is that the two are different things.
           Text(
-            'Size ${_fmtQty(qty)} • Entry ${_fmtPrice(position.entryPrice)}'
-            ' • Mark ${position.markPrice == null ? '—' : _fmtPrice(position.markPrice!)}',
+            'Size ${_fmtQty(qty)} • Entry ${_fmtPrice(position.effectiveEntry)}'
+            ' • Mark ${position.markPrice == null ? '—' : _fmtPrice(position.markPrice!)}'
+            '${_liqSuffix(position.liquidationPrice, position.leverage)}',
             style: const TextStyle(
               color: LuminColors.textSecondary,
               fontSize: 11,
               height: 1.35,
             ),
           ),
+          if (position.isExchangeFlat) _closedOnBinance(position),
           Text(
             'SL ${_fmtPrice(position.slPrice)}'
             ' • TP1 ${_fmtPrice(position.tp1Price)}$banked',
@@ -2048,17 +2221,49 @@ class _ServerPositionRowState extends State<_ServerPositionRow> {
     );
   }
 
-  String _fmtPrice(double v) {
-    if (v >= 1000) return v.toStringAsFixed(2);
-    if (v >= 1) return v.toStringAsFixed(4);
-    return v.toStringAsFixed(6);
+  /// The state the owner was actually looking at on 2026-09-01: an ACTIVE
+  /// signal in the feed over a Trade tab showing nothing, with no surface
+  /// anywhere joining the two.
+  ///
+  /// Binance says the account is out while the engine still holds the
+  /// position open — almost always the engine's own two-hour backstop, which
+  /// closed 39 of 140 positions in that week's window. Said in words, on the
+  /// row it applies to, because the alternative is a blank the reader has to
+  /// interpret.
+  Widget _closedOnBinance(ServerSidePosition p) {
+    final at = p.exchangeFlatSinceEpoch;
+    final when = at == null
+        ? ''
+        : ' at ${_hhmm(DateTime.fromMillisecondsSinceEpoch(
+            (at * 1000).round(),
+            isUtc: true,
+          ).toLocal())}';
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.info_outline, size: 12, color: LuminColors.warn),
+          const SizedBox(width: 4),
+          Expanded(
+            child: Text(
+              'Binance closed this$when. The signal is still running in the '
+              'feed — you are out of the trade.',
+              style: const TextStyle(
+                color: LuminColors.warn,
+                fontSize: 11,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
-  String _fmtQty(double v) {
-    if (v >= 1000) return v.toStringAsFixed(0);
-    if (v >= 1) return v.toStringAsFixed(3);
-    return v.toStringAsFixed(6);
-  }
+  static String _hhmm(DateTime d) =>
+      '${d.hour.toString().padLeft(2, '0')}:'
+      '${d.minute.toString().padLeft(2, '0')}';
 }
 
 

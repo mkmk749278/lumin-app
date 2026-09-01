@@ -45,8 +45,9 @@ void main() {
       expect(p.unrealizedPnlPct, 0.6017);
       expect(p.closeable, isTrue);
       expect(p.marksAgeSec, 4.0);
-      // The price the position is actually working against.
-      expect(p.entryPrice, 29005.5);
+      // The price the position is actually working against — the engine's
+      // fill here, because this payload carries no exchange entry.
+      expect(p.effectiveEntry, 29005.5);
     });
 
     test('an unmarked symbol stays null and never becomes zero', () {
@@ -89,7 +90,12 @@ void main() {
       // is the worse half.
       expect(p.closeable, isFalse);
       // No filled price yet — fall back to the target rather than 0.
-      expect(p.entryPrice, 101.6);
+      expect(p.effectiveEntry, 101.6);
+      // And nothing from the exchange at all.
+      expect(p.entryPrice, isNull);
+      expect(p.liquidationPrice, isNull);
+      expect(p.qtySource, '');
+      expect(p.divergence, isNull);
     });
   });
 
@@ -137,6 +143,125 @@ void main() {
       final r = ClosePositionResult.fromJson(<String, dynamic>{});
       expect(r.isClosed, isFalse);
       expect(r.message, 'Could not close the position.');
+    });
+  });
+
+  _exchangeColumns();
+}
+
+/// The exchange's own columns, and the envelope they arrive in.
+///
+/// Added 2026-09-01 with the engine change that stopped inferring a position
+/// and started reading the one Binance was already describing: the
+/// `ACCOUNT_UPDATE` push (size, entry, its own unrealized PnL) and the
+/// `positionRisk` row (liquidation price, leverage), both of which were
+/// arriving at the engine and being discarded.
+void _exchangeColumns() {
+  group('ServerSidePosition — the exchange-sourced columns', () {
+    ServerSidePosition parse(Map<String, dynamic> extra) =>
+        ServerSidePosition.fromJson({
+          'signal_id': 'sig-1',
+          'symbol': 'BTCUSDT',
+          'side': 'LONG',
+          'state': 'OPEN',
+          'entry_price_filled': 100.0,
+          'total_qty': 2.0,
+          ...extra,
+        });
+
+    test('the exchange answer wins and the row says so', () {
+      final p = parse({
+        'entry_price': 101.5,
+        'open_qty': 1.4,
+        'qty_source': 'exchange',
+        'entry_source': 'exchange',
+        'liquidation_price': 82.5,
+        'leverage': 10.0,
+        'margin_type': 'cross',
+      });
+      // The engine's document says the fill was 100.0; Binance says 101.5.
+      expect(p.effectiveEntry, 101.5);
+      expect(p.entrySource, 'exchange');
+      expect(p.qtySource, 'exchange');
+      expect(p.liquidationPrice, 82.5);
+      expect(p.leverage, 10.0);
+      expect(p.marginType, 'cross');
+    });
+
+    test('a missing liquidation price stays null, never zero', () {
+      // `0.0` beside the word liquidation reads as "you cannot be
+      // liquidated", which is a claim nobody made.
+      final p = parse({});
+      expect(p.liquidationPrice, isNull);
+      expect(p.leverage, isNull);
+      expect(p.exchangeUnrealizedPnl, isNull);
+    });
+
+    test('the divergence the owner saw is carried as a named state', () {
+      final p = parse({
+        'divergence': 'exchange_flat',
+        'exchange_flat_since_epoch': 1_700_000_000.0,
+        'closeable': false,
+      });
+      expect(p.isExchangeFlat, isTrue);
+      expect(p.exchangeFlatSinceEpoch, 1_700_000_000.0);
+      // A close against a position Binance says is flat is a -2022.
+      expect(p.closeable, isFalse);
+    });
+
+    test('agreement is not a divergence', () {
+      expect(parse({'divergence': null}).isExchangeFlat, isFalse);
+    });
+  });
+
+  group('ServerSidePositions — the envelope', () {
+    test('parses rows, unmanaged positions and both clocks', () {
+      final b = ServerSidePositions.fromJson({
+        'positions': [
+          {'signal_id': 'sig-1', 'symbol': 'BTCUSDT', 'side': 'LONG'},
+        ],
+        'unmanaged': [
+          {
+            'symbol': 'DOGEUSDT',
+            'side': 'SHORT',
+            'open_qty': 250.0,
+            'entry_price': 0.0851,
+            'liquidation_price': 0.0993,
+          },
+        ],
+        'marks_age_sec': 4.0,
+        'exchange_state': 'reporting',
+        'exchange_age_sec': 3.0,
+      });
+      expect(b.positions, hasLength(1));
+      expect(b.unmanaged, hasLength(1));
+      expect(b.unmanaged.first.symbol, 'DOGEUSDT');
+      expect(b.unmanaged.first.liquidationPrice, 0.0993);
+      // Two clocks, kept apart: a single "as of" over two sources is a
+      // freshness claim neither of them made.
+      expect(b.marksAgeSec, 4.0);
+      expect(b.exchangeAgeSec, 3.0);
+      expect(b.exchangeIsReporting, isTrue);
+    });
+
+    test('an engine that says nothing is unavailable, never reporting', () {
+      // The single most dangerous default here. `reporting` would let the
+      // card assert "Binance closed this" on no evidence at all, and tell a
+      // user with an open position that their account is flat.
+      final b = ServerSidePositions.fromJson(<String, dynamic>{});
+      expect(b.exchangeState, 'unavailable');
+      expect(b.exchangeIsReporting, isFalse);
+      expect(b.positions, isEmpty);
+      expect(b.unmanaged, isEmpty);
+    });
+
+    test('a malformed body degrades to empty rather than throwing', () {
+      final b = ServerSidePositions.fromJson({
+        'positions': 'not a list',
+        'unmanaged': 42,
+      });
+      expect(b.positions, isEmpty);
+      expect(b.unmanaged, isEmpty);
     });
   });
 }
