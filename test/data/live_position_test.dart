@@ -200,11 +200,14 @@ void _exchangeColumns() {
     test('the divergence the owner saw is carried as a named state', () {
       final p = parse({
         'divergence': 'exchange_flat',
-        'exchange_flat_since_epoch': 1_700_000_000.0,
+        // Plain digits: this project's Dart language version does not enable
+        // the `digit-separators` feature, so `1_700_000_000.0` is a compile
+        // error rather than a readability nicety.
+        'exchange_flat_since_epoch': 1700000000.0,
         'closeable': false,
       });
       expect(p.isExchangeFlat, isTrue);
-      expect(p.exchangeFlatSinceEpoch, 1_700_000_000.0);
+      expect(p.exchangeFlatSinceEpoch, 1700000000.0);
       // A close against a position Binance says is flat is a -2022.
       expect(p.closeable, isFalse);
     });
