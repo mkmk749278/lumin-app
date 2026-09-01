@@ -1620,7 +1620,7 @@ Future<UserPnlSnapshot> assembleUserPnlSnapshot(LuminRepository repo) async {
             onError: (_) => null,
           ),
     ]);
-    final positions = results[0] as List<ServerSidePosition>;
+    final positions = (results[0] as ServerSidePositions).positions;
     final runtime = results[1] as AutoTradeRuntimeStatus?;
     final modeOptedIn =
         runtime != null && (runtime.userMode ?? 'off') != 'off';
@@ -1986,7 +1986,7 @@ abstract class LuminRepository {
   }
   void invalidateAutoTradeRuntimeStatusCache() {}
 
-  Stream<List<ServerSidePosition>> watchAutoTradePositions() async* {
+  Stream<ServerSidePositions> watchAutoTradePositions() async* {
     yield await getAutoTradePositions();
   }
   void invalidateAutoTradePositionsCache() {}
@@ -2328,7 +2328,7 @@ abstract class LuminRepository {
   /// only non-terminal states — the Live tab is meant to show what's
   /// open right now.  Historical PnL flows through the trade-records
   /// surface (TBD).
-  Future<List<ServerSidePosition>> getAutoTradePositions();
+  Future<ServerSidePositions> getAutoTradePositions();
 
   /// Close ONE of the user's own open positions at market
   /// (``POST /api/auto-trade/close``).
@@ -2571,7 +2571,7 @@ class MockRepository implements LuminRepository {
   void invalidateAutoTradeRuntimeStatusCache() {}
 
   @override
-  Stream<List<ServerSidePosition>> watchAutoTradePositions() async* {
+  Stream<ServerSidePositions> watchAutoTradePositions() async* {
     yield await getAutoTradePositions();
   }
 
@@ -3839,58 +3839,98 @@ class MockRepository implements LuminRepository {
   }
 
   @override
-  Future<List<ServerSidePosition>> getAutoTradePositions() async {
-    // Mock: one position in profit and one under water, both marked, so the
-    // preview exercises the sign handling on the live columns.  An empty
-    // fixture let the position card ship untested for as long as it did —
-    // "no open positions" renders the same whether the card works or not.
+  Future<ServerSidePositions> getAutoTradePositions() async {
+    // Mock: one position in profit and one under water, both marked and both
+    // carrying the exchange's own columns, so the preview exercises the sign
+    // handling AND the Binance-sourced fields.  An empty fixture let the
+    // position card ship untested for as long as it did — "no open positions"
+    // renders the same whether the card works or not.
     final now = DateTime.now().toUtc();
-    return [
-      ServerSidePosition(
-        signalId: 'sig-1',
-        symbol: 'BTCUSDT',
-        side: 'LONG',
-        state: 'OPEN',
-        entryPriceTarget: 29000.0,
-        entryPriceFilled: 29005.5,
-        slPrice: 28500.0,
-        tp1Price: 29500.0,
-        totalQty: 0.017,
-        filledQty: 0.017,
-        realizedPnlTotal: 0.0,
-        pretpFired: false,
-        createdAt: now.subtract(const Duration(minutes: 14)),
-        openQty: 0.017,
-        markPrice: 29180.0,
-        notional: 496.06,
-        unrealizedPnl: 2.9665,
-        unrealizedPnlPct: 0.6017,
-        closeable: true,
-        marksAgeSec: 4.0,
-      ),
-      ServerSidePosition(
-        signalId: 'sig-3',
-        symbol: 'SOLUSDT',
-        side: 'SHORT',
-        state: 'OPEN',
-        entryPriceTarget: 101.6,
-        entryPriceFilled: 101.6,
-        slPrice: 104.0,
-        tp1Price: 99.0,
-        totalQty: 0.09,
-        filledQty: 0.09,
-        realizedPnlTotal: 0.0,
-        pretpFired: false,
-        createdAt: now.subtract(const Duration(hours: 1, minutes: 2)),
-        openQty: 0.09,
-        markPrice: 102.4,
-        notional: 9.216,
-        unrealizedPnl: -0.072,
-        unrealizedPnlPct: -0.7874,
-        closeable: true,
-        marksAgeSec: 4.0,
-      ),
-    ];
+    return ServerSidePositions(
+      exchangeState: 'reporting',
+      marksAgeSec: 4.0,
+      exchangeAgeSec: 3.0,
+      unmanaged: const [
+        // A position on the account that the engine did not open. Present in
+        // the fixture because it is the case the app is most likely to render
+        // wrong, and the one that matters most when it happens for real.
+        UnmanagedPosition(
+          symbol: 'DOGEUSDT',
+          side: 'SHORT',
+          openQty: 250.0,
+          entryPrice: 0.0851,
+          markPrice: 0.0844,
+          unrealizedPnl: 0.175,
+          unrealizedPnlPct: 0.8225,
+          liquidationPrice: 0.0993,
+          leverage: 10.0,
+          marginType: 'cross',
+          exchangePushAgeSec: 6.0,
+        ),
+      ],
+      positions: [
+        ServerSidePosition(
+          signalId: 'sig-1',
+          symbol: 'BTCUSDT',
+          side: 'LONG',
+          state: 'OPEN',
+          entryPriceTarget: 29000.0,
+          entryPriceFilled: 29005.5,
+          slPrice: 28500.0,
+          tp1Price: 29500.0,
+          totalQty: 0.017,
+          filledQty: 0.017,
+          realizedPnlTotal: 0.0,
+          pretpFired: false,
+          createdAt: now.subtract(const Duration(minutes: 14)),
+          openQty: 0.017,
+          markPrice: 29180.0,
+          notional: 496.06,
+          unrealizedPnl: 2.9665,
+          unrealizedPnlPct: 0.6017,
+          closeable: true,
+          marksAgeSec: 4.0,
+          entryPrice: 29005.5,
+          liquidationPrice: 26310.0,
+          leverage: 10.0,
+          marginType: 'cross',
+          exchangeUnrealizedPnl: 2.96,
+          exchangePushAgeSec: 3.0,
+          qtySource: 'exchange',
+          entrySource: 'exchange',
+        ),
+        ServerSidePosition(
+          signalId: 'sig-3',
+          symbol: 'SOLUSDT',
+          side: 'SHORT',
+          state: 'OPEN',
+          entryPriceTarget: 101.6,
+          entryPriceFilled: 101.6,
+          slPrice: 104.0,
+          tp1Price: 99.0,
+          totalQty: 0.09,
+          filledQty: 0.09,
+          realizedPnlTotal: 0.0,
+          pretpFired: false,
+          createdAt: now.subtract(const Duration(hours: 1, minutes: 2)),
+          openQty: 0.09,
+          markPrice: 102.4,
+          notional: 9.216,
+          unrealizedPnl: -0.072,
+          unrealizedPnlPct: -0.7874,
+          closeable: true,
+          marksAgeSec: 4.0,
+          entryPrice: 101.6,
+          liquidationPrice: 111.4,
+          leverage: 10.0,
+          marginType: 'cross',
+          exchangeUnrealizedPnl: -0.072,
+          exchangePushAgeSec: 3.0,
+          qtySource: 'exchange',
+          entrySource: 'exchange',
+        ),
+      ],
+    );
   }
 
   @override
@@ -4250,8 +4290,8 @@ class HttpRepository implements LuminRepository {
       _swr.invalidate(_kAutoTradeRuntimeStatusKey);
 
   @override
-  Stream<List<ServerSidePosition>> watchAutoTradePositions() {
-    return _swr.watch<List<ServerSidePosition>>(
+  Stream<ServerSidePositions> watchAutoTradePositions() {
+    return _swr.watch<ServerSidePositions>(
       _kAutoTradePositionsKey,
       fetch: () => getAutoTradePositions(),
     );
@@ -5058,23 +5098,15 @@ class HttpRepository implements LuminRepository {
   }
 
   @override
-  Future<List<ServerSidePosition>> getAutoTradePositions() async {
+  Future<ServerSidePositions> getAutoTradePositions() async {
+    // Parsed whole rather than reduced to a list.  Two of the three things
+    // this endpoint says are properties of the READ and not of any row — how
+    // old the prices are, and whether the exchange is reporting at all — and
+    // the first cut copied the age onto every row to avoid widening this
+    // signature, with nowhere at all to put the second.
     final j = (await client.get('/api/auto-trade/positions'))
         as Map<String, dynamic>;
-    final rawList = j['positions'];
-    if (rawList is! List) return const <ServerSidePosition>[];
-    // ``marks_age_sec`` describes the READ — how old the prices on every row
-    // are — so the engine sends it once on the envelope.  Copied onto each
-    // row here rather than widening this method's return type, which would
-    // ripple through the SWR cache, the mock repository and the Pulse card
-    // for one number.  See ``ServerSidePosition.marksAgeSec``.
-    final age = j['marks_age_sec'];
-    return rawList
-        .whereType<Map<String, dynamic>>()
-        .map((row) => ServerSidePosition.fromJson(
-              age is num ? {...row, 'marks_age_sec': age} : row,
-            ))
-        .toList(growable: false);
+    return ServerSidePositions.fromJson(j);
   }
 
   @override

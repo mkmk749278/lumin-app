@@ -463,6 +463,16 @@ class ServerSidePosition {
     this.unrealizedPnlPct,
     this.closeable = false,
     this.marksAgeSec,
+    this.entryPrice,
+    this.liquidationPrice,
+    this.leverage,
+    this.marginType,
+    this.exchangeUnrealizedPnl,
+    this.exchangePushAgeSec,
+    this.exchangeFlatSinceEpoch,
+    this.qtySource = '',
+    this.entrySource = '',
+    this.divergence,
   });
 
   final String signalId;
@@ -520,6 +530,74 @@ class ServerSidePosition {
   /// null — this stamp is the softer, earlier warning.
   final double? marksAgeSec;
 
+  // --- The exchange's own columns -------------------------------------
+  //
+  // These come from Binance itself: the `ACCOUNT_UPDATE` push (size, entry,
+  // its own unrealized PnL) and the `positionRisk` row (liquidation price,
+  // leverage, margin type). Both were already arriving at the engine and
+  // being discarded, which is why the first version of this card had to
+  // infer a position the exchange was describing for free.
+
+  /// The price the position is working against, preferring the exchange's
+  /// answer. Falls back to [entryPriceFilled] / [entryPriceTarget] — see
+  /// [entrySource], which says which one this is.
+  final double? entryPrice;
+
+  /// Binance's liquidation price. `null` = not reported.
+  ///
+  /// Never rendered as a number when null, and this is not fussiness: `0.0`
+  /// on screen reads as "you cannot be liquidated", which is a claim nobody
+  /// made. Binance sends "0" for a cross position with no liquidation in
+  /// range AND sends nothing at all before the first REST cycle — two states
+  /// the engine keeps apart, so this does too.
+  final double? liquidationPrice;
+
+  /// Account leverage on this symbol, from `positionRisk`.
+  final double? leverage;
+
+  /// `"cross"` / `"isolated"`.
+  final String? marginType;
+
+  /// Binance's OWN unrealized PnL as of its last push.
+  ///
+  /// Not what the card renders: between pushes the mark moves and this does
+  /// not, so [unrealizedPnl] is recomputed from a live mark against the
+  /// exchange's entry and size. Kept because a divergence between the two is
+  /// the signal that our mark or our arithmetic is wrong.
+  final double? exchangeUnrealizedPnl;
+
+  /// Seconds since Binance last pushed this position. Its own clock, kept
+  /// apart from [marksAgeSec] — a single "as of" over two sources is a
+  /// freshness claim neither of them made.
+  final double? exchangePushAgeSec;
+
+  /// Wall-clock epoch (seconds) at which Binance reported this position flat.
+  /// Present only when it has closed, and the reason the card can say
+  /// "Binance closed this at 14:32" instead of rendering a blank.
+  final double? exchangeFlatSinceEpoch;
+
+  /// `"exchange"` or `"engine"` — which source supplied [openQty].
+  final String qtySource;
+
+  /// `"exchange"` or `"engine"` — which source supplied [entryPrice].
+  final String entrySource;
+
+  /// Set when the engine and the exchange disagree about this position.
+  ///
+  /// * `exchange_flat` — the engine holds it open and Binance says the
+  ///   account is out. **This is the state the owner was looking at**: the
+  ///   two-hour reconciler backstop closes the position while the signal runs
+  ///   on, which was 39 of 140 positions in the 24 Aug – 1 Sep window.
+  /// * `exchange_silent` — Binance is reporting this account and has never
+  ///   mentioned this symbol.
+  ///
+  /// `null` means they agree, OR that the exchange has said nothing at all —
+  /// [ServerSidePositions.exchangeState] is what separates those, because an
+  /// engine that has not spoken is not evidence that a position closed.
+  final String? divergence;
+
+  bool get isExchangeFlat => divergence == 'exchange_flat';
+
   factory ServerSidePosition.fromJson(Map<String, dynamic> j) =>
       ServerSidePosition(
         signalId: j['signal_id'] as String? ?? '',
@@ -550,11 +628,151 @@ class ServerSidePosition {
         // that ships with this app is deployed.
         closeable: j['closeable'] as bool? ?? false,
         marksAgeSec: (j['marks_age_sec'] as num?)?.toDouble(),
+        entryPrice: (j['entry_price'] as num?)?.toDouble(),
+        liquidationPrice: (j['liquidation_price'] as num?)?.toDouble(),
+        leverage: (j['leverage'] as num?)?.toDouble(),
+        marginType: j['margin_type'] as String?,
+        exchangeUnrealizedPnl:
+            (j['exchange_unrealized_pnl'] as num?)?.toDouble(),
+        exchangePushAgeSec: (j['exchange_push_age_sec'] as num?)?.toDouble(),
+        exchangeFlatSinceEpoch:
+            (j['exchange_flat_since_epoch'] as num?)?.toDouble(),
+        qtySource: j['qty_source'] as String? ?? '',
+        entrySource: j['entry_source'] as String? ?? '',
+        divergence: j['divergence'] as String?,
       );
 
-  /// The price this position is actually working against.
-  double get entryPrice =>
-      entryPriceFilled > 0 ? entryPriceFilled : entryPriceTarget;
+  /// The price this position is actually working against: the exchange's
+  /// answer when it gave one, else the engine's own fill, else the target.
+  double get effectiveEntry {
+    final ex = entryPrice;
+    if (ex != null && ex > 0) return ex;
+    return entryPriceFilled > 0 ? entryPriceFilled : entryPriceTarget;
+  }
+}
+
+
+/// A position Binance holds that the engine has no live record for.
+///
+/// It carries no signal, no stop and no target — every field a managed row
+/// renders is simply absent — which is why these are their own type and their
+/// own list rather than nullable columns on [ServerSidePosition]. They are
+/// never dropped either: an unmanaged position on a subscriber's account is
+/// the most important thing this endpoint can say, and until 2026-09-01 it was
+/// invisible on every surface we have.
+class UnmanagedPosition {
+  const UnmanagedPosition({
+    required this.symbol,
+    required this.side,
+    required this.openQty,
+    this.entryPrice,
+    this.markPrice,
+    this.unrealizedPnl,
+    this.unrealizedPnlPct,
+    this.liquidationPrice,
+    this.leverage,
+    this.marginType,
+    this.exchangePushAgeSec,
+  });
+
+  final String symbol;
+  final String side; // 'LONG' | 'SHORT'
+  final double openQty;
+  final double? entryPrice;
+  final double? markPrice;
+  final double? unrealizedPnl;
+  final double? unrealizedPnlPct;
+  final double? liquidationPrice;
+  final double? leverage;
+  final String? marginType;
+  final double? exchangePushAgeSec;
+
+  factory UnmanagedPosition.fromJson(Map<String, dynamic> j) =>
+      UnmanagedPosition(
+        symbol: j['symbol'] as String? ?? '',
+        side: j['side'] as String? ?? '',
+        openQty: (j['open_qty'] as num?)?.toDouble() ?? 0.0,
+        entryPrice: (j['entry_price'] as num?)?.toDouble(),
+        markPrice: (j['mark_price'] as num?)?.toDouble(),
+        unrealizedPnl: (j['unrealized_pnl'] as num?)?.toDouble(),
+        unrealizedPnlPct: (j['unrealized_pnl_pct'] as num?)?.toDouble(),
+        liquidationPrice: (j['liquidation_price'] as num?)?.toDouble(),
+        leverage: (j['leverage'] as num?)?.toDouble(),
+        marginType: j['margin_type'] as String?,
+        exchangePushAgeSec: (j['exchange_push_age_sec'] as num?)?.toDouble(),
+      );
+}
+
+
+/// The whole answer to `GET /api/auto-trade/positions`.
+///
+/// A type rather than a bare list, because two of the three things this
+/// endpoint says are properties of the READ and not of any position: how old
+/// the prices are, and whether the exchange is reporting at all. The first cut
+/// copied the age onto every row to avoid widening the repository's return
+/// type — a compromise its own comment admitted to — and had nowhere at all to
+/// put the second.
+class ServerSidePositions {
+  const ServerSidePositions({
+    this.positions = const <ServerSidePosition>[],
+    this.unmanaged = const <UnmanagedPosition>[],
+    this.marksAgeSec,
+    this.exchangeState = 'unavailable',
+    this.exchangeAgeSec,
+  });
+
+  /// Positions the engine opened and manages: signal, stop, targets.
+  final List<ServerSidePosition> positions;
+
+  /// Positions Binance holds that the engine has no live record for.
+  final List<UnmanagedPosition> unmanaged;
+
+  /// Seconds since the engine stamped the marks these rows are priced with.
+  final double? marksAgeSec;
+
+  /// Whether Binance's own view of this account reached us, in three states —
+  /// and the three-ness is the point:
+  ///
+  /// * `reporting` — the engine is publishing and this IS the account. An
+  ///   empty [positions] here really does mean nothing is open.
+  /// * `not_reported` — the engine is publishing and has never heard anything
+  ///   about this user: no worker running, or nothing since boot.
+  /// * `unavailable` — we could not read at all (engine stopped publishing,
+  ///   Redis down, or an engine predating the field).
+  ///
+  /// Collapsing them renders a cold engine as a flat account, which is the
+  /// confusion this endpoint exists to end. The card must not claim a position
+  /// closed on anything but `reporting`.
+  final String exchangeState;
+
+  /// Seconds since the exchange view was stamped. Its own clock, deliberately
+  /// not pooled with [marksAgeSec].
+  final double? exchangeAgeSec;
+
+  bool get exchangeIsReporting => exchangeState == 'reporting';
+
+  static const empty = ServerSidePositions();
+
+  factory ServerSidePositions.fromJson(Map<String, dynamic> j) {
+    List<T> parse<T>(String key, T Function(Map<String, dynamic>) f) {
+      final raw = j[key];
+      if (raw is! List) return <T>[];
+      return raw.whereType<Map<String, dynamic>>().map(f).toList(
+            growable: false,
+          );
+    }
+
+    return ServerSidePositions(
+      positions: parse('positions', ServerSidePosition.fromJson),
+      unmanaged: parse('unmanaged', UnmanagedPosition.fromJson),
+      marksAgeSec: (j['marks_age_sec'] as num?)?.toDouble(),
+      // An engine that predates the field said nothing about the exchange,
+      // and "said nothing" is `unavailable` — never `reporting`, which would
+      // let the card assert a position closed on no evidence at all.
+      exchangeState: j['exchange_state'] as String? ?? 'unavailable',
+      exchangeAgeSec: (j['exchange_age_sec'] as num?)?.toDouble(),
+    );
+  }
 }
 
 
