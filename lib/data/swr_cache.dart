@@ -136,6 +136,49 @@ class SwrCache {
     }
   }
 
+  /// One-shot cached read — the ``Future`` sibling of [watch].
+  ///
+  /// Added 2026-09-01 for the track record, whose every interaction (a window
+  /// chip, a month step, tapping a day, changing the size) fires two or three
+  /// UNCACHED round trips.  Stepping back to a month already on screen
+  /// re-fetched it; re-tapping the same day re-fetched its signal list.  At
+  /// ~0.8s a call that is what "always laggy" was.
+  ///
+  /// Two properties it buys, and the second matters as much as the first:
+  ///
+  /// * a repeat of the same request inside [ttl] is answered from memory, so
+  ///   moving back and forth costs nothing;
+  /// * concurrent callers for one key share a single request, via the same
+  ///   ``_runDeduped`` [watch] uses — and the track record's loaders fire
+  ///   together by design, so this collapses a burst into one flight.
+  ///
+  /// Deliberately NOT persisted.  [watch]'s SharedPreferences layer exists to
+  /// kill the blank screen on a cold open; here the page already renders from
+  /// its previous payload while a fetch is in flight, and persisting a priced
+  /// book across restarts risks showing figures for a position size the reader
+  /// has since changed.
+  ///
+  /// [invalidate] clears these entries exactly as it does [watch]'s, so
+  /// pull-to-refresh still reaches the network.
+  Future<T> read<T>(
+    String key, {
+    required Future<T> Function() fetch,
+    Duration ttl = const Duration(seconds: 60),
+  }) async {
+    if (_bypassed.remove(key)) {
+      // An explicit invalidate outranks a fresh entry: the caller asked for
+      // the network.
+      final fresh = await _runDeduped<T>(key, fetch);
+      _store[key] = _Entry<T>(fresh, _clock());
+      return fresh;
+    }
+    final cached = _readFresh<T>(key, ttl);
+    if (cached != null) return cached;
+    final fresh = await _runDeduped<T>(key, fetch);
+    _store[key] = _Entry<T>(fresh, _clock());
+    return fresh;
+  }
+
   /// Read a cached value synchronously if present and not yet expired.
   /// Returns null on miss or expiry — callers fall through to fetch.
   T? _readFresh<T>(String key, Duration ttl) {
@@ -176,6 +219,21 @@ class SwrCache {
   void invalidate(String key) {
     _store.remove(key);
     _bypassed.add(key);
+  }
+
+  /// Invalidate every key starting with [prefix].
+  ///
+  /// Exists because [read]'s keys carry their arguments (``track_record:30::``
+  /// and ``track_record::2026-08:250``), so pull-to-refresh has no single
+  /// name to drop and would otherwise re-fetch a bundle only to be served the
+  /// cached parts of it — a refresh that reaches the network for one call and
+  /// memory for the next is worse than no refresh, because it looks like it
+  /// worked.
+  void invalidatePrefix(String prefix) {
+    final doomed = _store.keys.where((k) => k.startsWith(prefix)).toList();
+    for (final k in doomed) {
+      invalidate(k);
+    }
   }
 
   /// Bypass the in-memory layer entirely and return whatever's cached

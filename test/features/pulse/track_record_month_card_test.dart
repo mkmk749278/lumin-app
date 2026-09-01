@@ -16,6 +16,23 @@ import 'package:lumin/data/repository.dart';
 import 'package:lumin/features/pulse/month_calendar.dart';
 import 'package:lumin/features/pulse/track_record_month_card.dart';
 
+/// The clock every pump in this file runs on.
+///
+/// Pinned 2026-09-01. `MonthCalendar` draws NO figure on a day that has not
+/// happened yet — "a day that has not happened is not a quiet day" — and the
+/// month fixture below puts its data on the 4th, 5th and 10th of whatever
+/// month the card opens on. Against the real clock those cells exist for
+/// twenty-seven days in thirty and do not exist on the 1st, 2nd or 3rd, so
+/// `cells hold neither month while the fetch is open` was green for three
+/// weeks in four and went red on the first CI run to land on a 1st.
+///
+/// The 20th is chosen so every fixture day is comfortably in the past and the
+/// forward stepper is disabled either way — no assertion here depends on
+/// which day of the month it happens to be. Same repair as the engine's
+/// calendar-lucky assertion two days earlier: re-anchor where the collision
+/// is arithmetically impossible rather than wait the month out.
+final _clock = DateTime.utc(2026, 8, 20);
+
 TrackRecordDay _day(String date, double net, {String? partial}) =>
     TrackRecordDay(
       date: date,
@@ -112,6 +129,7 @@ Future<void> _pump(
           child: TrackRecordMonthCard(
             window: window ?? _window(),
             repo: repo ?? _Repo(),
+            today: _clock,
           ),
         ),
       ),
@@ -147,7 +165,7 @@ void main() {
       final repo = _Repo();
       await _pump(t, repo: repo);
       expect(repo.months, isNotEmpty);
-      expect(repo.months.first, monthOf(DateTime.now().toUtc()));
+      expect(repo.months.first, monthOf(_clock));
     });
 
     testWidgets('and renders THAT payload, not the window\'s', (t) async {
@@ -297,7 +315,9 @@ Future<void> tester_pumpWithDelay(WidgetTester t, _Repo repo) async {
     MaterialApp(
       home: Scaffold(
         body: SingleChildScrollView(
-          child: TrackRecordMonthCard(window: _window(), repo: repo),
+          child: TrackRecordMonthCard(
+            window: _window(), repo: repo, today: _clock,
+          ),
         ),
       ),
     ),

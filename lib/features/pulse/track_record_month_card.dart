@@ -31,7 +31,12 @@ import 'month_calendar.dart';
 import 'track_record_page.dart';
 
 class TrackRecordMonthCard extends StatefulWidget {
-  const TrackRecordMonthCard({super.key, required this.window, this.repo});
+  const TrackRecordMonthCard({
+    super.key,
+    required this.window,
+    this.repo,
+    this.today,
+  });
 
   /// The rolling-window book from the Pulse bundle. Used only to decide
   /// whether there is a record worth showing at all, and to hand the page a
@@ -41,12 +46,27 @@ class TrackRecordMonthCard extends StatefulWidget {
 
   final LuminRepository? repo;
 
+  /// The clock, injectable for tests — mirrors [MonthCalendar.today], which
+  /// has carried the same seam since it shipped and which this card was
+  /// simply not forwarding.
+  ///
+  /// It is load-bearing because the month this card opens on is derived from
+  /// the clock, and `MonthCalendar` draws NO figure on a day that has not
+  /// happened yet ("a day that has not happened is not a quiet day"). A test
+  /// whose fixture puts data on the 4th of the current month therefore
+  /// asserts a cell that does not exist on the 1st, 2nd or 3rd — green for
+  /// three weeks in four, red on the rest, and it went red on the first CI
+  /// run that happened to land on a 1st (2026-09-01). Same class as the
+  /// engine's calendar-lucky assertion two days earlier: pin the date rather
+  /// than wait out the month.
+  final DateTime? today;
+
   @override
   State<TrackRecordMonthCard> createState() => _TrackRecordMonthCardState();
 }
 
 class _TrackRecordMonthCardState extends State<TrackRecordMonthCard> {
-  late String _month = monthOf(DateTime.now().toUtc());
+  late String _month = monthOf(widget.today ?? DateTime.now().toUtc());
   TrackRecord _data = TrackRecord.empty;
   bool _loading = true;
   int _seq = 0;
@@ -188,6 +208,7 @@ class _TrackRecordMonthCardState extends State<TrackRecordMonthCard> {
               record: _data,
               loading: _loading,
               onStep: _step,
+              today: widget.today,
               earliestDate: _data.earliestDate.isNotEmpty
                   ? _data.earliestDate
                   : widget.window.earliestDate,

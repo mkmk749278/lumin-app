@@ -1248,9 +1248,13 @@ class _SignalCard extends StatelessWidget {
       return _AccountStrip(
         icon: Icons.check_circle_outline_rounded,
         color: (pnl ?? 0) >= 0 ? LuminColors.success : LuminColors.loss,
-        headline: o.closeReason == null || o.closeReason!.isEmpty
+        // ``closeReasonLabel``, not the raw token: the commonest reason a
+        // position is closed under a signal the feed still shows as ACTIVE is
+        // the engine's two-hour backstop, and "STALE_EXPIRY" reads as a fault
+        // rather than as a rule.
+        headline: o.closeReasonLabel == null
             ? 'Closed on Binance'
-            : 'Closed on Binance · ${o.closeReason}',
+            : 'Closed on Binance · ${o.closeReasonLabel}',
         detail: [
           ...parts,
           if (pnl != null) 'realised ${formatPnl(pnl)}',

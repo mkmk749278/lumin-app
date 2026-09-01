@@ -174,4 +174,107 @@ void main() {
       expect(cache.peek<int>('k'), 1);
     });
   });
+
+  group('SwrCache.read — the one-shot sibling of watch', () {
+    // Added 2026-09-01 for the track record, whose every interaction (a
+    // window chip, a month step, tapping a day, changing the size) fired two
+    // or three UNCACHED round trips at ~0.8s each.  Stepping back to a month
+    // already on screen re-fetched it.  That is what "always laggy" meant.
+
+    test('a repeat inside the TTL is answered from memory', () async {
+      var now = DateTime(2026, 9, 1, 12);
+      final cache = SwrCache(clock: () => now);
+      var calls = 0;
+      Future<int> fetch() async {
+        calls++;
+        return 7;
+      }
+
+      expect(await cache.read<int>('k', fetch: fetch), 7);
+      expect(await cache.read<int>('k', fetch: fetch), 7);
+      expect(calls, 1);
+
+      // Past the TTL it goes back to the network — the cache is a latency
+      // fix, not a claim that the book stopped changing.
+      now = now.add(const Duration(seconds: 61));
+      expect(await cache.read<int>('k', fetch: fetch), 7);
+      expect(calls, 2);
+    });
+
+    test('concurrent reads of one key share a single request', () async {
+      // The track record's loaders fire together by design: a month step
+      // calls the summary and the signal list in the same frame.
+      final cache = SwrCache();
+      var calls = 0;
+      final gate = Completer<int>();
+      Future<int> fetch() {
+        calls++;
+        return gate.future;
+      }
+
+      final a = cache.read<int>('k', fetch: fetch);
+      final b = cache.read<int>('k', fetch: fetch);
+      gate.complete(3);
+      expect(await a, 3);
+      expect(await b, 3);
+      expect(calls, 1);
+    });
+
+    test('a different question is never served a cached answer', () async {
+      final cache = SwrCache();
+      var calls = 0;
+      Future<String> fetch(String v) async {
+        calls++;
+        return v;
+      }
+
+      expect(await cache.read<String>('r:30::', fetch: () => fetch('a')), 'a');
+      expect(
+        await cache.read<String>('r::2026-08:250', fetch: () => fetch('b')),
+        'b',
+      );
+      expect(calls, 2);
+    });
+
+    test('invalidate outranks a fresh entry', () async {
+      // Pull-to-refresh must reach the network even one second after the
+      // last read, or the spinner is theatre.
+      final cache = SwrCache();
+      var calls = 0;
+      Future<int> fetch() async {
+        calls++;
+        return calls;
+      }
+
+      expect(await cache.read<int>('k', fetch: fetch), 1);
+      cache.invalidate('k');
+      expect(await cache.read<int>('k', fetch: fetch), 2);
+    });
+
+    test('invalidatePrefix drops every argument-keyed variant', () async {
+      // ``read`` keys carry their arguments, so a refresh has no single name
+      // to drop.  Dropping only some of them is worse than dropping none:
+      // half the screen reaches the network and half is served from memory,
+      // and it looks like it worked.
+      final cache = SwrCache();
+      var calls = 0;
+      Future<int> fetch() async => ++calls;
+
+      await cache.read<int>('track_record:30::', fetch: fetch);
+      await cache.read<int>('track_record_signals:30:2026-08-31:200:',
+          fetch: fetch);
+      await cache.read<int>('pulse_bundle', fetch: fetch);
+      expect(calls, 3);
+
+      cache.invalidatePrefix('track_record');
+
+      await cache.read<int>('track_record:30::', fetch: fetch);
+      await cache.read<int>('track_record_signals:30:2026-08-31:200:',
+          fetch: fetch);
+      expect(calls, 5);
+      // The unrelated key is untouched.
+      await cache.read<int>('pulse_bundle', fetch: fetch);
+      expect(calls, 5);
+    });
+  });
 }

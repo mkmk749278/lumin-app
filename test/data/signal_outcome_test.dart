@@ -144,9 +144,52 @@ void main() {
         ),
       );
       expect(tx.headline, 'Closed on Binance');
-      expect(tx.action, contains('exit SL'));
+      // The engine's token, translated: 2026-09-01.  It used to read
+      // "exit SL" — right, and in the engine's vocabulary rather than the
+      // reader's.
+      expect(tx.action, contains('exit: stop loss'));
       expect(tx.action, contains('-\$6.50'));
       expect(tx.action, isNot(contains('is open')));
+    });
+
+    test('the two-hour backstop is named, not printed as a token', () {
+      // ``STALE_EXPIRY`` is the reconciler's age ceiling — 39 of 140 matched
+      // positions in the 24 Aug – 1 Sep window — and it is the reason a
+      // signal can still be running in the feed with nothing left on the
+      // account.  Rendered raw it reads as a fault rather than as a rule,
+      // which is precisely the confusion this copy exists to end.
+      final tx = DispatchEventTranslation.forEvent(
+        _placed(),
+        outcome: const SignalOutcome(
+          signalId: 'sig-A',
+          symbol: 'BTCUSDT',
+          direction: 'LONG',
+          status: 'closed',
+          state: 'CLOSED',
+          closeReason: 'STALE_EXPIRY',
+          realizedPnlUsd: 0.12,
+        ),
+      );
+      expect(tx.action, contains('2-hour position limit'));
+      expect(tx.action, isNot(contains('STALE_EXPIRY')));
+    });
+
+    test('an untranslated reason falls through to itself', () {
+      // A reason nobody has worded yet is still information.  Collapsing it
+      // to a generic "closed" is how the NEXT new close reason becomes
+      // invisible — the deny-list failure, at the copy layer.
+      final tx = DispatchEventTranslation.forEvent(
+        _placed(),
+        outcome: const SignalOutcome(
+          signalId: 'sig-A',
+          symbol: 'BTCUSDT',
+          direction: 'LONG',
+          status: 'closed',
+          state: 'CLOSED',
+          closeReason: 'SOME_NEW_REASON',
+        ),
+      );
+      expect(tx.action, contains('SOME_NEW_REASON'));
     });
   });
 
