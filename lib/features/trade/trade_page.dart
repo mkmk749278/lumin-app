@@ -684,7 +684,14 @@ class _TradePageState extends State<TradePage>
             const _NoTradesYetCard()
           else ...[
             if (serverPositions != null) ...[
-              _ServerPositionsCard(positions: serverPositions),
+              _ServerPositionsCard(
+                positions: serverPositions,
+                // A close is the one action on this page that changes what
+                // the list should say, so it refreshes rather than waiting
+                // out the poll — the row the user just closed staying on
+                // screen is how a working close reads as a broken one.
+                onClosed: _refresh,
+              ),
               const SizedBox(height: LuminSpacing.md),
             ],
             if (recentEvents != null) ...[
@@ -1646,15 +1653,40 @@ class _EmbeddedPaperTrades extends StatelessWidget {
 
 
 /// Live-tab open-positions card backed by ``/api/auto-trade/positions``.
-/// Empty list → empty-state copy explaining that auto-trade will
-/// surface positions here when a whitelisted signal fires.
+///
+/// **Rewritten 2026-09-01** (owner, holding the Binance app beside this tab:
+/// *"there we have to show exactly how live open traded position shows in
+/// binance, and also user can close that trade from our app to without
+/// visiting binance"*).  Before that a row showed the entry price and the
+/// geometry — everything the engine INTENDED — and nothing about what the
+/// position is worth now, so a user had to leave the app to find out and
+/// leave it again to act.
+///
+/// Two rules the card carries:
+///
+/// * **the mark comes from the engine, never from here.**  The app can reach
+///   Binance directly (Charts does), and using that would put a live price
+///   beside position state on a clock this page supplies — how a surface ends
+///   up reporting a position as current when the state next to it is stale.
+///   [ServerSidePosition.marksAgeSec] is the engine's own stamp and it leads
+///   the live columns;
+/// * **an unpriced row says so.**  A dash means "the engine is not marking
+///   this symbol"; rendering 0.00 there would read as a position worth
+///   nothing, which is a claim nobody made.
 class _ServerPositionsCard extends StatelessWidget {
-  const _ServerPositionsCard({required this.positions});
+  const _ServerPositionsCard({required this.positions, this.onClosed});
 
   final List<ServerSidePosition> positions;
 
+  /// Called after a close resolves, so the page can refresh rather than wait
+  /// out the poll interval with a row the user has already closed.
+  final Future<void> Function()? onClosed;
+
   @override
   Widget build(BuildContext context) {
+    // One stamp for the card, because it describes the read rather than any
+    // row — the engine sends it once and the repository copies it down.
+    final age = positions.isEmpty ? null : positions.first.marksAgeSec;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
       child: LuminCard(
@@ -1690,6 +1722,25 @@ class _ServerPositionsCard extends StatelessWidget {
                 ),
               ],
             ),
+            if (age != null && positions.isNotEmpty) ...[
+              const SizedBox(height: 2),
+              Text(
+                // Named, not implied.  A price with no age beside it is a
+                // claim, and this is the line that stops a frozen engine
+                // reading as a live position.
+                age < 60
+                    ? 'Priced by the engine ${age.round()}s ago'
+                    : 'Prices are ${(age / 60).round()} min old — '
+                        'the engine may have stopped marking',
+                style: TextStyle(
+                  color: age < 60
+                      ? LuminColors.textMuted
+                      : LuminColors.warn,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
             const SizedBox(height: LuminSpacing.sm),
             if (positions.isEmpty)
               const Padding(
@@ -1697,7 +1748,10 @@ class _ServerPositionsCard extends StatelessWidget {
                 child: Text(
                   'No open positions right now.  When an eligible signal '
                   'fires, Lumin places the order on your Binance account '
-                  'and it shows up here.',
+                  'and it shows up here.\n\n'
+                  'A signal can still be running in the feed after your '
+                  'position has closed — the Signals tab shows what the '
+                  'setup is doing, this shows what your account is holding.',
                   style: TextStyle(
                     color: LuminColors.textSecondary,
                     fontSize: 11,
@@ -1706,7 +1760,8 @@ class _ServerPositionsCard extends StatelessWidget {
                 ),
               )
             else
-              for (final p in positions) _ServerPositionRow(position: p),
+              for (final p in positions)
+                _ServerPositionRow(position: p, onClosed: onClosed),
           ],
         ),
       ),
@@ -1715,52 +1770,174 @@ class _ServerPositionsCard extends StatelessWidget {
 }
 
 
-class _ServerPositionRow extends StatelessWidget {
-  const _ServerPositionRow({required this.position});
+class _ServerPositionRow extends StatefulWidget {
+  const _ServerPositionRow({required this.position, this.onClosed});
 
   final ServerSidePosition position;
+  final Future<void> Function()? onClosed;
+
+  @override
+  State<_ServerPositionRow> createState() => _ServerPositionRowState();
+}
+
+
+class _ServerPositionRowState extends State<_ServerPositionRow> {
+  bool _closing = false;
+
+  Future<void> _confirmAndClose() async {
+    final p = widget.position;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: LuminColors.bgCard,
+        title: Text(
+          'Close ${p.symbol} at market?',
+          style: const TextStyle(
+            color: LuminColors.textPrimary,
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Lumin will close your ${p.side.toLowerCase()} position on '
+              'Binance now, at whatever the market is, and cancel its stop '
+              'and take-profit orders.',
+              style: const TextStyle(
+                color: LuminColors.textPrimary,
+                fontSize: 13,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: LuminSpacing.sm),
+            const Text(
+              // The one thing a user is most likely to get wrong here.
+              'The signal stays in the feed — you are exiting your own '
+              'trade, not cancelling the signal.',
+              style: TextStyle(
+                color: LuminColors.textSecondary,
+                fontSize: 12,
+                height: 1.45,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Keep it open'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: TextButton.styleFrom(foregroundColor: LuminColors.loss),
+            child: const Text('Close position'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    setState(() => _closing = true);
+    try {
+      final repo = AppConfigScope.of(context).repo;
+      final result = await repo.closeAutoTradePosition(p.signalId);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result.message),
+          duration: Duration(seconds: result.isClosed ? 3 : 6),
+          backgroundColor:
+              result.isClosed ? null : LuminColors.loss,
+        ),
+      );
+      // Refresh on a queued outcome too: the engine has not answered, so the
+      // truth is whatever the next read says rather than what this tap
+      // assumed.  Only a rejection leaves the list alone, because nothing
+      // moved.
+      if (result.isClosed || result.isQueued) {
+        await widget.onClosed?.call();
+      }
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Could not reach the engine — your position is untouched and '
+            'its stop is still in place. Try again, or close it in the '
+            'Binance app.',
+          ),
+          duration: Duration(seconds: 6),
+          backgroundColor: LuminColors.loss,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _closing = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final position = widget.position;
     final isLong = position.side == 'LONG';
     final dirColor = isLong ? LuminColors.success : LuminColors.loss;
+    final pnlPct = position.unrealizedPnlPct;
+    final pnlUsd = position.unrealizedPnl;
+    final pnlColor = pnlPct == null
+        ? LuminColors.textMuted
+        : (pnlPct >= 0 ? LuminColors.success : LuminColors.loss);
+    final qty = position.openQty ?? position.filledQty;
+    // Realised-so-far, when a TP has already banked part of the position.
+    // Built here rather than inline: three levels of nested interpolation in
+    // one string literal is legal Dart and unreadable.
+    final realised = position.realizedPnlTotal;
+    final banked = realised.abs() > 0.005
+        ? ' • Banked ${realised >= 0 ? '+' : '-'}'
+            '\$${realised.abs().toStringAsFixed(2)}'
+        : '';
+
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 6,
-              vertical: 2,
-            ),
-            decoration: BoxDecoration(
-              color: dirColor.withOpacity(0.16),
-              borderRadius: BorderRadius.circular(LuminRadii.sm),
-            ),
-            child: Text(
-              position.side,
-              style: TextStyle(
-                color: dirColor,
-                fontSize: 10,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 0.5,
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 6,
+                  vertical: 2,
+                ),
+                decoration: BoxDecoration(
+                  color: dirColor.withOpacity(0.16),
+                  borderRadius: BorderRadius.circular(LuminRadii.sm),
+                ),
+                child: Text(
+                  position.side,
+                  style: TextStyle(
+                    color: dirColor,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.5,
+                  ),
+                ),
               ),
-            ),
-          ),
-          const SizedBox(width: LuminSpacing.sm),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+              const SizedBox(width: LuminSpacing.sm),
+              Expanded(
+                child: Row(
                   children: [
-                    Text(
-                      position.symbol,
-                      style: const TextStyle(
-                        color: LuminColors.textPrimary,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
+                    Flexible(
+                      child: Text(
+                        position.symbol,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: LuminColors.textPrimary,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                     const SizedBox(width: LuminSpacing.sm),
@@ -1785,32 +1962,87 @@ class _ServerPositionRow extends StatelessWidget {
                     ],
                   ],
                 ),
-                const SizedBox(height: 1),
-                Text(
-                  'Entry ${_fmtPrice(position.entryPriceFilled > 0 ? position.entryPriceFilled : position.entryPriceTarget)}'
-                  ' • SL ${_fmtPrice(position.slPrice)}'
-                  ' • TP1 ${_fmtPrice(position.tp1Price)}',
-                  style: const TextStyle(
-                    color: LuminColors.textSecondary,
-                    fontSize: 11,
-                    height: 1.35,
+              ),
+              // The headline, on the right where Binance puts it.  A dash
+              // when the engine is not marking the symbol — never 0.00.
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    pnlPct == null
+                        ? '—'
+                        : '${pnlPct >= 0 ? '+' : ''}'
+                            '${pnlPct.toStringAsFixed(2)}%',
+                    style: TextStyle(
+                      color: pnlColor,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
-                ),
-              ],
+                  if (pnlUsd != null)
+                    Text(
+                      '${pnlUsd >= 0 ? '+' : ''}'
+                      '\$${pnlUsd.abs() >= 1 ? pnlUsd.toStringAsFixed(2) : pnlUsd.toStringAsFixed(4)}',
+                      style: TextStyle(
+                        color: pnlColor,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 3),
+          // The columns Binance's own position row carries: size, entry,
+          // mark.  Protective levels follow on their own line, because they
+          // are the engine's intent rather than the exchange's state.
+          Text(
+            'Size ${_fmtQty(qty)} • Entry ${_fmtPrice(position.entryPrice)}'
+            ' • Mark ${position.markPrice == null ? '—' : _fmtPrice(position.markPrice!)}',
+            style: const TextStyle(
+              color: LuminColors.textSecondary,
+              fontSize: 11,
+              height: 1.35,
             ),
           ),
-          if (position.realizedPnlTotal.abs() > 0.01)
-            Text(
-              '${position.realizedPnlTotal >= 0 ? '+' : ''}'
-              '\$${position.realizedPnlTotal.toStringAsFixed(2)}',
-              style: TextStyle(
-                color: position.realizedPnlTotal >= 0
-                    ? LuminColors.success
-                    : LuminColors.loss,
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
+          Text(
+            'SL ${_fmtPrice(position.slPrice)}'
+            ' • TP1 ${_fmtPrice(position.tp1Price)}$banked',
+            style: const TextStyle(
+              color: LuminColors.textMuted,
+              fontSize: 11,
+              height: 1.35,
+            ),
+          ),
+          if (position.closeable) ...[
+            const SizedBox(height: 4),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: _closing ? null : _confirmAndClose,
+                icon: _closing
+                    ? const SizedBox(
+                        width: 12,
+                        height: 12,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.close_rounded, size: 14),
+                label: Text(_closing ? 'Closing…' : 'Close position'),
+                style: TextButton.styleFrom(
+                  foregroundColor: LuminColors.loss,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: LuminSpacing.sm,
+                  ),
+                  visualDensity: VisualDensity.compact,
+                  textStyle: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ),
             ),
+          ],
         ],
       ),
     );
@@ -1819,6 +2051,12 @@ class _ServerPositionRow extends StatelessWidget {
   String _fmtPrice(double v) {
     if (v >= 1000) return v.toStringAsFixed(2);
     if (v >= 1) return v.toStringAsFixed(4);
+    return v.toStringAsFixed(6);
+  }
+
+  String _fmtQty(double v) {
+    if (v >= 1000) return v.toStringAsFixed(0);
+    if (v >= 1) return v.toStringAsFixed(3);
     return v.toStringAsFixed(6);
   }
 }

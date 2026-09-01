@@ -2330,6 +2330,23 @@ abstract class LuminRepository {
   /// surface (TBD).
   Future<List<ServerSidePosition>> getAutoTradePositions();
 
+  /// Close ONE of the user's own open positions at market
+  /// (``POST /api/auto-trade/close``).
+  ///
+  /// Owner, 2026-09-01: *"user can close that trade from our app to without
+  /// visiting binance to close signals manually"*.  Until this shipped the
+  /// app could open a position server-side and could not close one — every
+  /// exit belonged to the engine, so wanting out early meant leaving the app.
+  ///
+  /// Scope: the caller's POSITION.  The signal stays in the feed for everyone
+  /// else, which is why [ClosePositionResult.signalStillActive] exists — the
+  /// user is looking at an ACTIVE signal card while this resolves.
+  ///
+  /// Never throws on a business refusal: "nothing open", "already closed" and
+  /// "Binance said no" all come back as ``outcome: rejected`` with copy the
+  /// caller shows.  Throws only on transport failures.
+  Future<ClosePositionResult> closeAutoTradePosition(String signalId);
+
   /// Fetch the user's recent dispatch events
   /// (``GET /api/auto-trade/recent-events``).  One row per order-
   /// placement attempt the engine made on this account — placed +
@@ -3823,9 +3840,71 @@ class MockRepository implements LuminRepository {
 
   @override
   Future<List<ServerSidePosition>> getAutoTradePositions() async {
-    // Mock: no open positions.  UI renders the empty-state copy
-    // ("Auto-trade armed — waiting for the next whitelisted signal").
-    return const <ServerSidePosition>[];
+    // Mock: one position in profit and one under water, both marked, so the
+    // preview exercises the sign handling on the live columns.  An empty
+    // fixture let the position card ship untested for as long as it did —
+    // "no open positions" renders the same whether the card works or not.
+    final now = DateTime.now().toUtc();
+    return [
+      ServerSidePosition(
+        signalId: 'sig-1',
+        symbol: 'BTCUSDT',
+        side: 'LONG',
+        state: 'OPEN',
+        entryPriceTarget: 29000.0,
+        entryPriceFilled: 29005.5,
+        slPrice: 28500.0,
+        tp1Price: 29500.0,
+        totalQty: 0.017,
+        filledQty: 0.017,
+        realizedPnlTotal: 0.0,
+        pretpFired: false,
+        createdAt: now.subtract(const Duration(minutes: 14)),
+        openQty: 0.017,
+        markPrice: 29180.0,
+        notional: 496.06,
+        unrealizedPnl: 2.9665,
+        unrealizedPnlPct: 0.6017,
+        closeable: true,
+        marksAgeSec: 4.0,
+      ),
+      ServerSidePosition(
+        signalId: 'sig-3',
+        symbol: 'SOLUSDT',
+        side: 'SHORT',
+        state: 'OPEN',
+        entryPriceTarget: 101.6,
+        entryPriceFilled: 101.6,
+        slPrice: 104.0,
+        tp1Price: 99.0,
+        totalQty: 0.09,
+        filledQty: 0.09,
+        realizedPnlTotal: 0.0,
+        pretpFired: false,
+        createdAt: now.subtract(const Duration(hours: 1, minutes: 2)),
+        openQty: 0.09,
+        markPrice: 102.4,
+        notional: 9.216,
+        unrealizedPnl: -0.072,
+        unrealizedPnlPct: -0.7874,
+        closeable: true,
+        marksAgeSec: 4.0,
+      ),
+    ];
+  }
+
+  @override
+  Future<ClosePositionResult> closeAutoTradePosition(String signalId) async {
+    // Mock: succeeds, and says the signal is still live — the state the real
+    // engine returns and the one the UI is easiest to get wrong.
+    return ClosePositionResult(
+      outcome: 'closed',
+      signalId: signalId,
+      symbol: 'BTCUSDT',
+      signalStillActive: true,
+      detail: 'Position closed at market. The signal stays in the feed — '
+          'you have exited it, not cancelled it.',
+    );
   }
 
   @override
@@ -4057,6 +4136,13 @@ class HttpRepository implements LuminRepository {
   static const _kAutoTradeRuntimeStatusKey = 'auto_trade_runtime_status';
   static const _kAutoTradePositionsKey = 'auto_trade_positions';
   static const _kUserPnlSnapshotKey = 'user_pnl_snapshot';
+  /// Freshness for the track-record reads.  Sixty seconds because that is
+  /// the ``max-age`` the engine advertises on ``/api/track-record`` — the
+  /// producer's own number rather than one chosen here, so the client and
+  /// the HTTP layer cannot disagree about how stale is stale.  A closed
+  /// signal lands at most once a minute, so the worst case is a minute of
+  /// lag on a 30-day chart.
+  static const _kTrackRecordTtl = Duration(seconds: 60);
   static String _recentDispatchEventsKey(int limit) =>
       'recent_dispatch_events:$limit';
   static String _paperTradesFirstPageKey(int limit) =>
@@ -4078,6 +4164,12 @@ class HttpRepository implements LuminRepository {
   @override
   void invalidatePulseBundleCache() {
     _swr.invalidate(_kPulseBundleKey);
+    // The bundle CONTAINS a track-record read, and that read is cached under
+    // its own argument-keyed name.  Dropping only the bundle key would
+    // re-assemble it and be handed the cached track record straight back —
+    // a pull-to-refresh that reaches the network for some of the screen and
+    // memory for the rest, which looks like it worked.
+    _swr.invalidatePrefix('track_record');
   }
 
   /// Phase 2c — SWR for the Trade page's engine slice.  Binance slice
@@ -4444,12 +4536,27 @@ class HttpRepository implements LuminRepository {
     // assumes rather than this file asserting a default that could drift from
     // it. Either way the engine echoes `amount_usdt` back, and that is what the
     // UI labels its figures with.
-    final j = (await client.get('/api/track-record', query: {
-      'days': days,
-      if (month.isNotEmpty) 'month': month,
-      if (amount != null) 'amount': amount,
-    })) as Map<String, dynamic>;
-    return TrackRecord.fromJson(j);
+    //
+    // Cached, because every interaction on that page fires two or three of
+    // these: a window chip, a month step, tapping a day, changing the size.
+    // Stepping back to a month already on screen re-fetched it; at ~0.8s a
+    // call that is what "always laggy" meant.  The key carries every argument
+    // that changes the answer, so a different question is never served a
+    // cached one — and the TTL matches the ``max-age=60`` the engine itself
+    // advertises on this endpoint rather than inventing a freshness rule the
+    // producer never agreed to.
+    return _swr.read<TrackRecord>(
+      'track_record:$days:$month:${amount ?? ''}',
+      ttl: _kTrackRecordTtl,
+      fetch: () async {
+        final j = (await client.get('/api/track-record', query: {
+          'days': days,
+          if (month.isNotEmpty) 'month': month,
+          if (amount != null) 'amount': amount,
+        })) as Map<String, dynamic>;
+        return TrackRecord.fromJson(j);
+      },
+    );
   }
 
   @override
@@ -4464,13 +4571,24 @@ class HttpRepository implements LuminRepository {
     // screen. Caught by rendering the page after a size change — the headline
     // read +$133.32 at 250 USDT while every row below it was still priced at
     // 100, and nothing failed.
-    final j = (await client.get('/api/track-record/signals', query: {
-      'days': days,
-      if (date.isNotEmpty) 'date': date,
-      if (amount != null) 'amount': amount,
-      'limit': limit,
-    })) as Map<String, dynamic>;
-    return TrackRecordSignals.fromJson(j);
+    //
+    // Cached on the same rule as the summary above, and it matters more here:
+    // this is what a calendar-day tap fires, so re-selecting a day the reader
+    // already looked at was a second round trip for an answer that had not
+    // changed.
+    return _swr.read<TrackRecordSignals>(
+      'track_record_signals:$days:$date:$limit:${amount ?? ''}',
+      ttl: _kTrackRecordTtl,
+      fetch: () async {
+        final j = (await client.get('/api/track-record/signals', query: {
+          'days': days,
+          if (date.isNotEmpty) 'date': date,
+          if (amount != null) 'amount': amount,
+          'limit': limit,
+        })) as Map<String, dynamic>;
+        return TrackRecordSignals.fromJson(j);
+      },
+    );
   }
 
   @override
@@ -4945,10 +5063,35 @@ class HttpRepository implements LuminRepository {
         as Map<String, dynamic>;
     final rawList = j['positions'];
     if (rawList is! List) return const <ServerSidePosition>[];
+    // ``marks_age_sec`` describes the READ — how old the prices on every row
+    // are — so the engine sends it once on the envelope.  Copied onto each
+    // row here rather than widening this method's return type, which would
+    // ripple through the SWR cache, the mock repository and the Pulse card
+    // for one number.  See ``ServerSidePosition.marksAgeSec``.
+    final age = j['marks_age_sec'];
     return rawList
         .whereType<Map<String, dynamic>>()
-        .map(ServerSidePosition.fromJson)
+        .map((row) => ServerSidePosition.fromJson(
+              age is num ? {...row, 'marks_age_sec': age} : row,
+            ))
         .toList(growable: false);
+  }
+
+  @override
+  Future<ClosePositionResult> closeAutoTradePosition(String signalId) async {
+    final j = (await client.post(
+      '/api/auto-trade/close',
+      body: {'signal_id': signalId},
+    )) as Map<String, dynamic>;
+    final result = ClosePositionResult.fromJson(j);
+    // Drop the cached positions so the next subscribe re-reads rather than
+    // serving a row the user has just closed.  Deliberately NOT on a
+    // ``queued`` outcome: the engine has not answered, so the position may
+    // still be open, and invalidating there would flicker it away and back.
+    if (result.isClosed) {
+      invalidateAutoTradePositionsCache();
+    }
+    return result;
   }
 
   @override

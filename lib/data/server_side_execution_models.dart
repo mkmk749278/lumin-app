@@ -420,6 +420,27 @@ class ManualTradeResult {
 /// ``GET /api/auto-trade/positions`` (engine reads Firestore under
 /// ``users/{firebase_uid}/positions/``).  Only the fields the Live-
 /// tab card actually renders — full FSM state lives engine-side.
+/// One open position on the user's own Binance Futures account, as the
+/// engine sees it.
+///
+/// **Marked live since 2026-09-01** (owner, holding the Binance app beside the
+/// Trade tab: *"there we have to show exactly how live open traded position
+/// shows in binance"*).  Before that this carried the entry price and the
+/// geometry and nothing about what the position is worth now, so the card
+/// could not answer the question a position card exists to answer.
+///
+/// [markPrice] and the two unrealized fields are priced by the ENGINE, never
+/// here.  The app could fetch a price from Binance directly — it already does
+/// for Charts — and that is precisely the mistake to avoid: a live number
+/// beside engine state on a clock this page supplies is how a surface reports
+/// a position as current when the state beside it is hours old.  The engine
+/// publishes the marks it is already holding and stamps their age; see
+/// [marksAgeSec].
+///
+/// Every live field is NULLABLE and that is load-bearing.  `null` means "the
+/// engine is not marking this symbol", which is a real state with its own
+/// cause; `0.0` would render as a position worth nothing, which is a claim
+/// nobody made.
 class ServerSidePosition {
   const ServerSidePosition({
     required this.signalId,
@@ -435,6 +456,13 @@ class ServerSidePosition {
     required this.realizedPnlTotal,
     required this.pretpFired,
     this.createdAt,
+    this.openQty,
+    this.markPrice,
+    this.notional,
+    this.unrealizedPnl,
+    this.unrealizedPnlPct,
+    this.closeable = false,
+    this.marksAgeSec,
   });
 
   final String signalId;
@@ -450,6 +478,47 @@ class ServerSidePosition {
   final double realizedPnlTotal;
   final bool pretpFired;
   final DateTime? createdAt;
+
+  /// Size still on the exchange — what is left after any TP that banked.
+  /// Not [totalQty]: a position that took TP1 is holding a residual, and
+  /// pricing the original order would overstate what the user owns.
+  final double? openQty;
+
+  /// The engine's current mark for [symbol]. `null` = not being marked.
+  final double? markPrice;
+
+  /// `markPrice x openQty`. `null` when unmarked.
+  final double? notional;
+
+  /// Unrealized PnL in quote currency, signed toward the trade.
+  final double? unrealizedPnl;
+
+  /// Unrealized move on the ENTRY price, signed toward the trade — the same
+  /// thing Binance's position row shows and the same thing the signal card
+  /// beside it shows.  Deliberately not an R multiple: the engine sizes at a
+  /// fixed notional, so dividing by the stop distance equalises nothing and
+  /// would put a number here that disagrees with both.
+  final double? unrealizedPnlPct;
+
+  /// Whether the engine will accept a close for this position right now.
+  /// Sent as a fact rather than inferred from [state] here, so the button and
+  /// the engine cannot come to different conclusions.
+  final bool closeable;
+
+  /// Seconds since the engine stamped the price on this row.
+  ///
+  /// Strictly a property of the READ rather than of this position — the
+  /// engine sends it once on the envelope and the repository copies it onto
+  /// every row, because widening the repository's return type would ripple
+  /// through the SWR cache, the mock repository and the Pulse card for one
+  /// number.  It is here at all because a mark with no age beside it is a
+  /// claim: the card leads the live columns with it, so a frozen engine reads
+  /// as a frozen engine rather than as a live position.
+  ///
+  /// `null` = the engine did not say.  Note the marks key carries a 90s TTL
+  /// server-side, so a truly stale engine surfaces first as [markPrice] going
+  /// null — this stamp is the softer, earlier warning.
+  final double? marksAgeSec;
 
   factory ServerSidePosition.fromJson(Map<String, dynamic> j) =>
       ServerSidePosition(
@@ -467,6 +536,79 @@ class ServerSidePosition {
             (j['realized_pnl_total'] as num?)?.toDouble() ?? 0.0,
         pretpFired: j['pretp_fired'] as bool? ?? false,
         createdAt: DateTime.tryParse(j['created_at'] as String? ?? ''),
+        // `as num?` throughout: an engine that predates these fields sends
+        // nothing, which must stay null rather than defaulting to zero.
+        openQty: (j['open_qty'] as num?)?.toDouble(),
+        markPrice: (j['mark_price'] as num?)?.toDouble(),
+        notional: (j['notional'] as num?)?.toDouble(),
+        unrealizedPnl: (j['unrealized_pnl'] as num?)?.toDouble(),
+        unrealizedPnlPct: (j['unrealized_pnl_pct'] as num?)?.toDouble(),
+        // An older engine sends no flag.  Defaulting to false would hide the
+        // Close button on every position; defaulting to true would offer it
+        // on a position with no size.  False is the safe half — the user can
+        // still close on Binance — and it disappears the moment the engine
+        // that ships with this app is deployed.
+        closeable: j['closeable'] as bool? ?? false,
+        marksAgeSec: (j['marks_age_sec'] as num?)?.toDouble(),
+      );
+
+  /// The price this position is actually working against.
+  double get entryPrice =>
+      entryPriceFilled > 0 ? entryPriceFilled : entryPriceTarget;
+}
+
+
+/// The result of `POST /api/auto-trade/close` — the user closing their own
+/// position from the app rather than opening Binance to do it.
+///
+/// Three outcomes, and the third is why this is a class rather than a bool:
+/// `closed` (done), `rejected` (a real reason the card can show), and
+/// `queued` (the engine has not answered yet — the close is in flight and the
+/// user must NOT tap again, because a second close on a flat position is how
+/// somebody opens the opposite side by accident).
+class ClosePositionResult {
+  const ClosePositionResult({
+    required this.outcome,
+    this.signalId = '',
+    this.symbol = '',
+    this.rejectClass = '',
+    this.rejectDetail = '',
+    this.detail = '',
+    this.signalStillActive = false,
+  });
+
+  final String outcome; // 'closed' | 'rejected' | 'queued'
+  final String signalId;
+  final String symbol;
+  final String rejectClass;
+  final String rejectDetail;
+  final String detail;
+
+  /// The signal stays in the feed for everyone else — this user has exited
+  /// it, not cancelled it.  Said explicitly because the app renders the
+  /// ACTIVE signal card right beside this answer.
+  final bool signalStillActive;
+
+  bool get isClosed => outcome == 'closed';
+  bool get isQueued => outcome == 'queued';
+
+  /// What to actually put in front of the user, whichever outcome it was.
+  String get message {
+    if (detail.isNotEmpty) return detail;
+    if (rejectDetail.isNotEmpty) return rejectDetail;
+    if (isClosed) return 'Position closed.';
+    return 'Could not close the position.';
+  }
+
+  factory ClosePositionResult.fromJson(Map<String, dynamic> j) =>
+      ClosePositionResult(
+        outcome: j['outcome'] as String? ?? 'rejected',
+        signalId: j['signal_id'] as String? ?? '',
+        symbol: j['symbol'] as String? ?? '',
+        rejectClass: j['reject_class'] as String? ?? '',
+        rejectDetail: j['reject_detail'] as String? ?? '',
+        detail: j['detail'] as String? ?? '',
+        signalStillActive: j['signal_still_active'] as bool? ?? false,
       );
 }
 
@@ -632,9 +774,9 @@ class DispatchEventTranslation {
     if (e.isPlaced) {
       if (outcome != null && outcome.isClosed) {
         final pnl = outcome.realizedPnlUsd;
-        final reason = outcome.closeReason;
+        final reason = outcome.closeReasonLabel;
         final bits = <String>[
-          if (reason != null && reason.isNotEmpty) 'exit $reason',
+          if (reason != null && reason.isNotEmpty) 'exit: $reason',
           if (pnl != null)
             'realised ${pnl >= 0 ? '+' : '-'}\$${pnl.abs().toStringAsFixed(2)}',
         ];
@@ -1098,6 +1240,53 @@ class SignalOutcome {
   /// 'TP1' | 'TP2' | 'TP3' | 'SL' | 'MANUAL' | … — engine truth about how
   /// the position ended.
   final String? closeReason;
+
+  /// [closeReason] in words the reader owns.
+  ///
+  /// The engine's tokens are internal — ``STALE_EXPIRY``, ``SL_BE``,
+  /// ``REGIME_EXIT`` — and both surfaces that show a close were printing them
+  /// verbatim ("Closed on Binance · STALE_EXPIRY").  ``STALE_EXPIRY`` is the
+  /// one that matters most and reads worst: it is the reconciler's two-hour
+  /// backstop, it accounted for **39 of 140** matched positions in the
+  /// 24 Aug – 1 Sep window, and it is the reason a signal can still be
+  /// running in the feed with nothing left on the account.  A user reading a
+  /// token cannot tell that from a fault.
+  ///
+  /// An unknown token falls through to itself rather than to a generic
+  /// phrase: a reason nobody has translated is still information, and hiding
+  /// it behind "closed" would make the next new reason invisible.
+  String? get closeReasonLabel {
+    final r = (closeReason ?? '').trim().toUpperCase();
+    if (r.isEmpty) return null;
+    switch (r) {
+      case 'STALE_EXPIRY':
+        return 'closed at the 2-hour position limit';
+      case 'USER_CLOSE':
+        return 'you closed it from the app';
+      case 'MANUAL':
+        return 'closed outside Lumin';
+      case 'SL':
+        return 'stop loss';
+      case 'SL_BE':
+        return 'stop at breakeven';
+      case 'TP1':
+        return 'take profit 1';
+      case 'TP2':
+        return 'take profit 2';
+      case 'TP3':
+        return 'take profit 3';
+      case 'REGIME_EXIT':
+        return 'the setup stopped holding';
+      case 'FUNDING_EXIT':
+        return 'exited before a funding charge';
+      case 'INVALIDATED':
+        return 'the signal was invalidated';
+      case 'EXPIRED':
+        return 'the signal expired';
+      default:
+        return closeReason;
+    }
+  }
 
   final DateTime? openedAt;
   final DateTime? closedAt;
