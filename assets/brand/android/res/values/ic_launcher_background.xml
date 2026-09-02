@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- LuminColors.accent — the adaptive icon's background layer. -->
+    <color name="ic_launcher_background">#7BD3F7</color>
+    <!-- LuminColors.bgDeep — the cold-start window background.  The Flutter
+         template paints @android:color/white here, which flashed white
+         before a deep-navy app on every launch. -->
+    <color name="lumin_splash_background">#0A0E1A</color>
+</resources>

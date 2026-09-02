@@ -48,6 +48,21 @@ The merged manifest in the AAB should declare only:
 and **not** `REQUEST_INSTALL_PACKAGES` (nor any storage/media/SMS/location/
 contacts permission the app doesn't use).
 
+## Store listing icon
+
+The Play Console's 512x512 listing icon is uploaded by hand — it is not part
+of the AAB — and it must match the launcher icon inside it, or the tile a
+user taps in the Play app is not the tile that lands on their home screen.
+
+Upload **`assets/brand/play_store_512.png`**. It is generated from the same
+geometry as every in-bundle icon by `python3 tool/gen_brand_assets.py`, so a
+change to the mark reaches both by regenerating rather than by remembering.
+
+> Until release 282 this listing showed, and the app installed, `flutter
+> create`'s stock Flutter chevron. If the Console still displays it, the
+> listing icon has not been re-uploaded — the in-bundle icon ships with the
+> build, this one does not.
+
 ## Pre-submission checklist
 
 - [x] **Self-update disabled** on Play builds — `LUMIN_DISTRIBUTION=play`

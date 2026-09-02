@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Shown from launch until Flutter renders its first frame. -->
+    <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:windowBackground">@drawable/launch_background</item>
+    </style>
+    <!-- Shown from the first frame on.  Pinned to bgDeep rather than
+         ?android:colorBackground: Lumin has no light theme, and inheriting
+         the system's put a white frame between splash and first paint. -->
+    <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
+        <item name="android:windowBackground">@color/lumin_splash_background</item>
+    </style>
+</resources>
