@@ -28,8 +28,23 @@ enum LiveBlockReason {
   /// Trading is off for everyone (operator/global) — no user action.
   globalOff,
 
+  /// We could not READ the global flags, so we do not know whether trading is
+  /// off (2026-09-02).  Distinct from [globalOff] on purpose: that one is a
+  /// deliberate operator pause that resumes on its own, and this one is a
+  /// fault that does not.  Telling a subscriber their capital is waiting on an
+  /// automatic resume that is never coming is the dangerous direction of this
+  /// error, which is why it gets its own reason rather than a softer sentence
+  /// under the old one.
+  statusUnknown,
+
   /// No server-connected Binance key yet.
   keyNotConnected,
+
+  /// We could not read whether a key is connected.  The owner's own screenshot
+  /// showed "Connect your Binance account" over an account whose key was
+  /// connected — an instruction to redo work that is already done, produced by
+  /// a failed read wearing an answer's caption.
+  keyStatusUnknown,
 
   /// User's own mode toggle is off.
   modeOff,
@@ -93,9 +108,16 @@ LiveStatus resolveLiveStatus({
     } else if (selfPaused) {
       reason = LiveBlockReason.autoPaused;
     } else if (!runtime.autoTradeGloballyEnabled) {
-      reason = LiveBlockReason.globalOff;
+      // An engine that publishes readability and says NO gets the honest
+      // "we could not check" copy. `null` is an older engine and keeps the
+      // original wording — never downgrade every old build to a fault.
+      reason = runtime.globalFlagsReadable == false
+          ? LiveBlockReason.statusUnknown
+          : LiveBlockReason.globalOff;
     } else if (!runtime.binanceKeyConnected) {
-      reason = LiveBlockReason.keyNotConnected;
+      reason = runtime.binanceKeyReadable == false
+          ? LiveBlockReason.keyStatusUnknown
+          : LiveBlockReason.keyNotConnected;
     } else if (!modeLive) {
       reason = LiveBlockReason.modeOff;
     } else if (runtime.tierAllowsAuto == false) {
@@ -112,7 +134,12 @@ LiveStatus resolveLiveStatus({
       ok: runtime.autoTradeGloballyEnabled,
       hint: runtime.autoTradeGloballyEnabled
           ? null
-          : 'Trading is switched off for everyone right now.',
+          : runtime.globalFlagsReadable == false
+              // Not "switched off" — we could not ask. Saying the first over
+              // the second is how a page reports a decision somebody made
+              // when what actually happened is that a read failed.
+              ? 'We couldn\'t check this just now.'
+              : 'Trading is switched off for everyone right now.',
     ),
     LiveGate(
       label: 'Your account active',
@@ -130,7 +157,12 @@ LiveStatus resolveLiveStatus({
       ok: runtime.binanceKeyConnected,
       hint: runtime.binanceKeyConnected
           ? null
-          : 'Settings → Server-side auto-trade.',
+          : runtime.binanceKeyReadable == false
+              // Never send someone to connect a key we could not check for:
+              // if it is already connected, that is an instruction to redo
+              // finished work on the screen that spends their money.
+              ? 'We couldn\'t check this just now — don\'t re-add your key.'
+              : 'Settings → Server-side auto-trade.',
     ),
     LiveGate(
       label: 'Live mode on',

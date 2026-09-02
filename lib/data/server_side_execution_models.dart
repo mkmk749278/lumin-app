@@ -163,11 +163,33 @@ class AutoTradeRuntimeStatus {
     this.pathPreference,
     this.regimePreference,
     this.preferencesBlockAll = false,
+    this.globalFlagsReadable,
+    this.binanceKeyReadable,
   });
 
   final bool autoTradeGloballyEnabled;
   final bool autoTradeUserDisabled;
   final bool binanceKeyConnected;
+
+  /// Whether the engine could OBSERVE the two global flags above, or is
+  /// serving a default because it could not ask (2026-09-02).
+  ///
+  /// `auto_trade_globally_enabled: false` carried three worlds at once — the
+  /// store was never initialised in the api process, the Firestore read
+  /// raised, or the flag is honestly off — and this app rendered all three as
+  /// *"A safety pause is active for all accounts. No action needed — trading
+  /// resumes automatically."*  Two of those never resume and none of them is a
+  /// safety pause; the owner's own account showed it while his key WAS
+  /// connected and the card told him to go and connect one.
+  ///
+  /// Tri-state on purpose. `null` is an engine predating the field and must
+  /// keep the old copy, because a silent downgrade to "we could not check" on
+  /// every older engine would be the alarming version of the same error.
+  final bool? globalFlagsReadable;
+
+  /// Same, for `binanceKeyConnected`.  `has_key` raises rather than answering
+  /// False when the keystore is unwired, precisely so this can be published.
+  final bool? binanceKeyReadable;
   final String? userMode; // 'live' | 'paper' | 'off' | null
 
   /// Effective subscription tier the dispatcher will apply (expiry-aware:
@@ -253,6 +275,8 @@ class AutoTradeRuntimeStatus {
       pathPreference: parseNullableList('path_preference'),
       regimePreference: parseNullableList('regime_preference'),
       preferencesBlockAll: j['preferences_block_all'] as bool? ?? false,
+      globalFlagsReadable: j['global_flags_readable'] as bool?,
+      binanceKeyReadable: j['binance_key_readable'] as bool?,
     );
   }
 }
