@@ -20,6 +20,8 @@ AutoTradeRuntimeStatus _runtime({
   bool? autoPaused = false,
   bool preferencesBlockAll = false,
   bool armed = true,
+  bool? globalFlagsReadable,
+  bool? binanceKeyReadable,
   List<String> effectiveAllowedSymbols = const ['BTCUSDT', 'ETHUSDT'],
 }) =>
     AutoTradeRuntimeStatus(
@@ -36,6 +38,8 @@ AutoTradeRuntimeStatus _runtime({
       allowedPaths: const [],
       regimeOptions: const [],
       armed: armed,
+      globalFlagsReadable: globalFlagsReadable,
+      binanceKeyReadable: binanceKeyReadable,
     );
 
 const _settings = AutoTradeSettings(mode: 'live');
@@ -201,6 +205,97 @@ void main() {
     for (final g in s.gates) {
       expect(banned.hasMatch(g.label), isFalse, reason: g.label);
       expect(banned.hasMatch(g.hint ?? ''), isFalse, reason: g.hint);
+    }
+  });
+
+  // ---- unknown is not a value (2026-09-02) ------------------------------
+  //
+  // Owner screenshot: the Trade tab read "Trading briefly paused for everyone
+  // — A safety pause is active for all accounts. No action needed, trading
+  // resumes automatically", and beside it "Binance key connected ✗ — Settings
+  // → Server-side auto-trade", on an account whose key WAS connected.
+  //
+  // Both flags were false because the api container had no Firestore client,
+  // not because either answer was no. The engine now publishes whether it
+  // could observe them.
+
+  test('an unreadable global flag is not a safety pause', () {
+    final s = resolveLiveStatus(
+      runtime: _runtime(
+          globallyEnabled: false, armed: false, globalFlagsReadable: false),
+      userSettings: _settings,
+    );
+    expect(s.reason, LiveBlockReason.statusUnknown);
+  });
+
+  test('a readable global flag that says off is still a safety pause', () {
+    final s = resolveLiveStatus(
+      runtime: _runtime(
+          globallyEnabled: false, armed: false, globalFlagsReadable: true),
+      userSettings: _settings,
+    );
+    expect(s.reason, LiveBlockReason.globalOff);
+  });
+
+  test('an engine predating the field keeps the original reason', () {
+    // null is an older build, not a fault. Downgrading every old engine to
+    // "we could not check" would be the alarming version of the same error —
+    // and an alarming wrong caption sends people to debug what works.
+    final s = resolveLiveStatus(
+      runtime: _runtime(globallyEnabled: false, armed: false),
+      userSettings: _settings,
+    );
+    expect(s.reason, LiveBlockReason.globalOff);
+  });
+
+  test('an unreadable key does not tell the user to connect one', () {
+    final s = resolveLiveStatus(
+      runtime: _runtime(
+          keyConnected: false, armed: false, binanceKeyReadable: false),
+      userSettings: _settings,
+    );
+    expect(s.reason, LiveBlockReason.keyStatusUnknown);
+  });
+
+  test('a genuinely missing key still asks for one', () {
+    final s = resolveLiveStatus(
+      runtime: _runtime(
+          keyConnected: false, armed: false, binanceKeyReadable: true),
+      userSettings: _settings,
+    );
+    expect(s.reason, LiveBlockReason.keyNotConnected);
+  });
+
+  test('the gate hint says we could not check, not that it is switched off',
+      () {
+    final s = resolveLiveStatus(
+      runtime: _runtime(
+          globallyEnabled: false,
+          armed: false,
+          globalFlagsReadable: false,
+          keyConnected: false,
+          binanceKeyReadable: false),
+      userSettings: _settings,
+    );
+    final global =
+        s.gates.firstWhere((g) => g.label == 'Lumin trading enabled');
+    expect(global.hint, contains("couldn't check"));
+    expect(global.hint, isNot(contains('switched off')));
+
+    final key = s.gates.firstWhere((g) => g.label == 'Binance key connected');
+    expect(key.hint, contains("don't re-add"));
+  });
+
+  test('readability never changes the ARMED verdict, only the words', () {
+    // The resolver's whole contract since the 2026-07-17 redesign: it changes
+    // the language, never the verdict.
+    for (final readable in <bool?>[null, true, false]) {
+      final s = resolveLiveStatus(
+        runtime: _runtime(globalFlagsReadable: readable),
+        userSettings: _settings,
+      );
+      expect(s.active, isTrue);
+      expect(s.reason, isNull);
     }
   });
 }

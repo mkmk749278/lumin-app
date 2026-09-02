@@ -62,7 +62,10 @@ class _LiveStatusCardState extends State<LiveStatusCard> {
               ? 'Paused — Futures wallet is empty'
               : 'Paused on your account',
         LiveBlockReason.globalOff => 'Trading briefly paused for everyone',
+        LiveBlockReason.statusUnknown => 'We can\'t confirm your trading status',
         LiveBlockReason.keyNotConnected => 'Connect your Binance account',
+        LiveBlockReason.keyStatusUnknown =>
+          'We can\'t confirm your Binance connection',
         LiveBlockReason.modeOff => 'Live trading is switched off',
         LiveBlockReason.tierBlocked => 'Auto plan needed for hands-off trading',
         LiveBlockReason.filtersBlockAll => 'Your filters exclude every signal',
@@ -82,9 +85,26 @@ class _LiveStatusCardState extends State<LiveStatusCard> {
         LiveBlockReason.globalOff =>
           'A safety pause is active for all accounts. No action needed — '
               'trading resumes automatically.',
+        // Deliberately promises no automatic resume and names no cause.
+        // Until 2026-09-02 this state was rendered with the sentence above:
+        // a subscriber whose orders had stopped because a Firestore read was
+        // failing was told to sit and wait for a resume that was never
+        // coming, while their capital sat idle behind nothing at all.
+        LiveBlockReason.statusUnknown =>
+          'Orders are paused because we couldn\'t reach the service that '
+              'confirms your trading status. Nothing is wrong with your '
+              'account and nothing is needed from you — but this will not '
+              'clear on its own, so contact support if it lasts.',
         LiveBlockReason.keyNotConnected =>
           'Link a Binance API key so Lumin can place and manage trades '
               'for you. Takes about two minutes.',
+        // The owner saw "Connect your Binance account" over an account whose
+        // key was connected. Telling somebody to redo finished work on the
+        // screen that spends their money is worse than saying nothing.
+        LiveBlockReason.keyStatusUnknown =>
+          'We couldn\'t check whether your Binance key is connected. If you '
+              'have already added one, don\'t add it again — this is on our '
+              'side and should clear shortly. Contact support if it doesn\'t.',
         LiveBlockReason.modeOff =>
           'Flip the Live auto-trade toggle above to start placing real '
               'orders on the next signal.',
@@ -151,6 +171,12 @@ class _LiveStatusCardState extends State<LiveStatusCard> {
         );
       case LiveBlockReason.globalOff:
       case LiveBlockReason.modeOff:
+      // Both unknown states offer no button ON PURPOSE. There is nothing the
+      // user can do, and the tempting action — "Reconnect key" on
+      // keyStatusUnknown — would send them to redo work that may already be
+      // done, on the screen that spends their money.
+      case LiveBlockReason.statusUnknown:
+      case LiveBlockReason.keyStatusUnknown:
         return null; // nothing for the user to do / the toggle is above
     }
   }
