@@ -39,6 +39,17 @@ const _baselineDp = <String, int>{
 
 const _resRoot = 'assets/brand/android/res';
 
+/// An XML file's *declarations* — comments stripped.
+///
+/// The "must not contain" assertions below are about what a resource file
+/// declares, and a comment declares nothing. Asserting against the raw text
+/// makes a prose explanation of a defect indistinguishable from the defect:
+/// the first run of this suite failed because `values/styles.xml` explains,
+/// in a comment, that it pins a colour *rather than* `?android:colorBackground`
+/// — and the words tripped the guard against the thing they describe.
+String _declarations(File f) =>
+    f.readAsStringSync().replaceAll(RegExp(r'<!--.*?-->', dotAll: true), '');
+
 /// Reads a PNG's dimensions straight out of the IHDR chunk — cheaper than
 /// decoding, and enough to catch an asset generated at the wrong density.
 ({int width, int height}) _pngSize(File f) {
@@ -85,7 +96,7 @@ void main() {
       for (final dir in ['drawable', 'drawable-v21']) {
         final f = File('$_resRoot/$dir/launch_background.xml');
         expect(f.existsSync(), isTrue, reason: 'missing $dir/launch_background.xml');
-        final s = f.readAsStringSync();
+        final s = _declarations(f);
         expect(s, isNot(contains('@android:color/white')),
             reason: '$dir still paints the Flutter template white');
         expect(s, contains('@color/lumin_splash_background'));
@@ -98,7 +109,7 @@ void main() {
       // hands it ?android:colorBackground, which is white under a light
       // system theme — a white frame after the splash we just fixed.
       for (final dir in ['values', 'values-night']) {
-        final s = File('$_resRoot/$dir/styles.xml').readAsStringSync();
+        final s = _declarations(File('$_resRoot/$dir/styles.xml'));
         expect(s, contains('name="LaunchTheme"'));
         expect(s, contains('name="NormalTheme"'));
         expect(s, contains('@color/lumin_splash_background'));
