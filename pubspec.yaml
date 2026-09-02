@@ -5,7 +5,12 @@ version: 0.1.0+23
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
-  flutter: ">=3.24.0"
+  # 3.27 is the real floor, not 3.24: the theme uses the *ThemeData
+  # component classes (CardThemeData / DialogThemeData / TabBarThemeData)
+  # that replaced the older *Theme types on ThemeData's fields, and
+  # Color.withValues. CI builds `channel: stable`, so this only records
+  # what the source already required.
+  flutter: ">=3.27.0"
 
 dependencies:
   flutter:
