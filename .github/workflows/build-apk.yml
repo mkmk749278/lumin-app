@@ -93,6 +93,53 @@ jobs:
           fi
           grep POST_NOTIFICATIONS "$MANIFEST" || (echo "FAIL: missing" && exit 1)
 
+      # Until 2026-09-02 nothing in this workflow touched a single cosmetic
+      # resource, and `android/` is not checked in — so every Play release
+      # shipped `flutter create`'s stock Flutter chevron as its launcher
+      # icon, `android:label="lumin"` (the --project-name, lowercase) as its
+      # home-screen caption, and the template's white `launch_background`,
+      # which flashed white before a deep-navy app on every cold start.
+      #
+      # The mark is not new: it is the accent tile + navy "L" already drawn
+      # on welcome slide 1.  `tool/gen_brand_assets.py` renders it into
+      # assets/brand/ (committed — this step copies, it never generates, so
+      # the runner needs no Pillow).
+      - name: Inject Lumin launcher icon, splash and app label
+        run: |
+          set -euo pipefail
+          RES=android/app/src/main/res
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+
+          # Overwrites the template's mipmaps, launch_background and styles;
+          # adds the adaptive-icon XML and colours the template has no
+          # equivalent of.  Idempotent: a plain overwrite every run.
+          cp -R assets/brand/android/res/. "$RES/"
+          echo "Copied $(find assets/brand/android/res -type f | wc -l) brand resources"
+
+          # flutter create writes android:label from --project-name verbatim,
+          # so the home screen read "lumin" while web/manifest.json — which is
+          # hand-edited and was always right — read "Lumin".
+          sed -i '0,/android:label="[^"]*"/s|android:label="[^"]*"|android:label="Lumin"|' "$MANIFEST"
+
+          echo "--- verification ---"
+          grep -q 'android:label="Lumin"' "$MANIFEST" \
+            || (echo "FAIL: app label is not Lumin" && grep -n 'android:label' "$MANIFEST" && exit 1)
+          test -f "$RES/mipmap-anydpi-v26/ic_launcher.xml" \
+            || (echo "FAIL: adaptive icon missing" && exit 1)
+          test -f "$RES/mipmap-xxxhdpi/ic_launcher.png" \
+            || (echo "FAIL: xxxhdpi launcher icon missing" && exit 1)
+          test -f "$RES/mipmap-xxxhdpi/ic_launcher_monochrome.png" \
+            || (echo "FAIL: themed-icon layer missing" && exit 1)
+          # The one that regresses silently: a template restore would put the
+          # white drawable back and nothing else here would notice.
+          if grep -q "@android:color/white" "$RES/drawable/launch_background.xml"; then
+            echo "FAIL: launch_background still paints white"
+            exit 1
+          fi
+          grep -q "lumin_splash_background" "$RES/drawable/launch_background.xml" \
+            || (echo "FAIL: launch_background is not the Lumin one" && exit 1)
+          echo "Launcher icon, adaptive + themed layers, splash and label all wired"
+
       - name: Inject google-services.json (if secret is set)
         id: gs_json
         env:
