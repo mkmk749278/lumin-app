@@ -15,16 +15,47 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Every change ships via PR — never push to `main` directly. A `main` push triggers the full CI build and auto-creates a GitHub Release the in-app updater picks up.
 
-**Wait ~16 minutes before checking CI here** — by a wide margin the longest of
-the four repos, because the workflow regenerates the whole Android scaffolding with `flutter
-create`, patches it, and builds both an APK and an AAB. For comparison: ops is
-~4 min and the engine ~8 min. The two jobs differ sharply: `Build web app (PWA)`
-finishes in ~2 min, `Build signed APK` is the long pole — so a green web job says
-nothing about the run. Polling a check run that cannot have finished yet
-burns API calls and turns one wait into six — sleep the known duration first,
-*then* read the conclusion. These are expected durations, not deadlines: a job
-still running at the mark gets another wait. If the number drifts materially,
-update it here rather than re-learning it every session.
+**Wait ~11 minutes before checking a full green here — but a test failure
+lands in ~1.5.** Measured 2026-09-03 over the seven most recent successful
+runs; this file previously said ~16 minutes, and that number sent a reader to
+wait ten times longer than the commonest failure needs.
+
+| Job | Duration | What it is |
+|---|---|---|
+| `Build signed APK` | **7 – 11.5 min** (n=7) | the long pole, and the whole run's duration |
+| ↳ its `Run unit tests` step | **~65s**, ending ~1m35s into the run | `flutter test` — where a red run usually goes red |
+| `Build web app (PWA)` | **~2m10s** | build, and on `main` the live deploy of `app.luminapp.org` |
+
+Three things follow, and none of them was in the old paragraph:
+
+- **A green web job says nothing about the run** — that half was right and still is.
+- **A red run is usually red at ~1m35s.** Unit tests run inside the APK job and
+  everything after them is skipped on failure, so a `flutter test` break is
+  readable long before the build would have finished. Waiting the full window to
+  discover a test failure is ten minutes spent on nothing.
+- **The web job IS the web deploy.** `Copy web build to VPS` / `Activate web
+  deploy on VPS (atomic swap)` run on a `main` push and are skipped on a branch,
+  so `app.luminapp.org` is live ~2 minutes after a merge — about eight minutes
+  before the APK it shipped alongside even exists. That is the surface an agent
+  session drives (`docs/AI_AGENT_APP_ACCESS.md`), so its clock is the one to use
+  there, not the APK's.
+
+For comparison, measured the same day: `360ce-ops` CI is **6m52s – 10m15s** and
+the engine's `test` job **4m54s – 7m31s**, so this repo is no longer "by a wide
+margin the longest" — ops has caught up with it.
+
+Polling a check run that cannot have finished yet burns API calls and turns one
+wait into six — sleep the known duration first, *then* read the conclusion.
+These are expected durations, not deadlines: a job still running at the mark
+gets another wait.
+
+**Re-derive rather than trust this table.** It is a constant asserting a
+property of a moving system, and it will go stale again:
+
+```bash
+gh run list --workflow=build-apk.yml --json startedAt,updatedAt,conclusion --limit 10
+gh run view <run-id> --json jobs        # per-job and per-step timings
+```
 
 ## Commands
 
