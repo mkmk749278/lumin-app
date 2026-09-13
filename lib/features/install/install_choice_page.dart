@@ -226,7 +226,7 @@ class InstallChoicePage extends StatelessWidget {
                       decoration: BoxDecoration(
                         color: LuminColors.bgElevated,
                         borderRadius:
-                            BorderRadius.circular(LuminRadius.md),
+                            BorderRadius.circular(LuminRadii.md),
                         border: Border.all(color: LuminColors.cardBorder),
                       ),
                       child: const Row(
