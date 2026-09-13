@@ -20,6 +20,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:lumin/features/install/install_banner.dart'
     show kPlayStoreListingUrl;
 import 'package:lumin/features/install/install_choice_page.dart';
+import 'package:url_launcher/url_launcher.dart' show LaunchMode;
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -100,20 +101,42 @@ void main() {
   });
 
   group('the Android offer', () {
-    Future<int> pumpAndroid(WidgetTester tester) async {
-      var continues = 0;
+    // Records what the page asked the opener for, and answers with a
+    // caller-chosen outcome. The real launchUrl never completes under
+    // `flutter test` — no platform implementation is registered — so the
+    // widget's own behaviour is only reachable through this seam.
+    late List<Uri> opened;
+    late List<LaunchMode> modes;
+
+    setUp(() {
+      opened = <Uri>[];
+      modes = <LaunchMode>[];
+    });
+
+    UrlOpener opener(bool outcome) =>
+        (Uri url, {LaunchMode mode = LaunchMode.platformDefault}) async {
+          opened.add(url);
+          modes.add(mode);
+          return outcome;
+        };
+
+    Future<void> pumpAndroid(
+      WidgetTester tester, {
+      required VoidCallback onContinue,
+      bool launchSucceeds = true,
+    }) async {
       await tester.pumpWidget(MaterialApp(
         home: InstallChoicePage(
           offer: InstallOffer.play,
-          onContinue: () => continues++,
+          onContinue: onContinue,
+          openUrl: opener(launchSucceeds),
         ),
       ));
       await tester.pumpAndSettle();
-      return continues;
     }
 
     testWidgets('offers Play and a way past it', (tester) async {
-      await pumpAndroid(tester);
+      await pumpAndroid(tester, onContinue: () {});
       expect(find.text('Get it on Google Play'), findsOneWidget);
       expect(find.text('Continue in browser'), findsOneWidget);
       // No performance claim on a surface a paid ad lands on — same rule
@@ -121,44 +144,59 @@ void main() {
       expect(find.textContaining('%'), findsNothing);
     });
 
-    testWidgets('a blocked Play launch still lets the visitor through',
+    testWidgets('sends the listing URL out to the real browser',
         (tester) async {
-      var continues = 0;
-      await tester.pumpWidget(MaterialApp(
-        home: InstallChoicePage(
-          offer: InstallOffer.play,
-          onContinue: () => continues++,
-        ),
-      ));
-      await tester.pumpAndSettle();
-      // url_launcher has no platform implementation under the test VM, so
-      // this exercises exactly the path an in-app browser that blocks the
-      // navigation takes. The visitor must not be stranded on a dead
-      // screen, and the flag must still be recorded.
+      await pumpAndroid(tester, onContinue: () {});
       await tester.tap(find.text('Get it on Google Play'));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 400));
-      // Flush the SnackBar's own auto-dismiss timer rather than settling:
-      // pumpAndSettle stops once no frame is scheduled and would leave it
-      // pending at teardown.
-      await tester.pump(const Duration(seconds: 6));
-      expect(continues, 1);
-      expect(await InstallChoiceStorage.seen(), isTrue);
+      await tester.pumpAndSettle();
+      expect(opened, [Uri.parse(kPlayStoreListingUrl)]);
+      // Not an in-app webview: a Play listing opened inside one cannot
+      // hand off to the Play app, which is the whole point of the tap.
+      expect(modes, [LaunchMode.externalApplication]);
     });
 
-    testWidgets('skipping records the answer and continues', (tester) async {
+    testWidgets('a successful launch still records the answer',
+        (tester) async {
       var continues = 0;
-      await tester.pumpWidget(MaterialApp(
-        home: InstallChoicePage(
-          offer: InstallOffer.play,
-          onContinue: () => continues++,
-        ),
-      ));
+      await pumpAndroid(tester, onContinue: () => continues++);
+      await tester.tap(find.text('Get it on Google Play'));
       await tester.pumpAndSettle();
+      expect(continues, 1);
+      expect(await InstallChoiceStorage.seen(), isTrue);
+      // Play opened, so there is nothing to apologise for.
+      expect(find.byType(SnackBar), findsNothing);
+    });
+
+    testWidgets('a blocked launch still lets the visitor through',
+        (tester) async {
+      var continues = 0;
+      await pumpAndroid(tester,
+          onContinue: () => continues++, launchSucceeds: false);
+      // Exactly the path the Instagram and Facebook in-app browsers take
+      // when they refuse the navigation. The visitor must not be stranded
+      // on a dead screen, the flag must still be recorded, and the
+      // fallback must name what to search for.
+      await tester.tap(find.text('Get it on Google Play'));
+      await tester.pumpAndSettle();
+      expect(continues, 1);
+      expect(await InstallChoiceStorage.seen(), isTrue);
+      expect(find.textContaining('Could not open Google Play'), findsOneWidget);
+      // pumpAndSettle stops once no frame is scheduled, which leaves the
+      // SnackBar's own 4s auto-dismiss timer pending at teardown. Run the
+      // clock past it and let the exit animation finish.
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('skipping records the answer and never opens Play',
+        (tester) async {
+      var continues = 0;
+      await pumpAndroid(tester, onContinue: () => continues++);
       await tester.tap(find.text('Continue in browser'));
       await tester.pumpAndSettle();
       expect(continues, 1);
       expect(await InstallChoiceStorage.seen(), isTrue);
+      expect(opened, isEmpty);
     });
   });
 

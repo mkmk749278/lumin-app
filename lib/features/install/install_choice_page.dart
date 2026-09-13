@@ -83,6 +83,21 @@ InstallOffer resolveOffer() {
   return InstallOffer.none;
 }
 
+/// How the page opens the Play listing.
+///
+/// Injectable for one reason: under `flutter test` the real [launchUrl]
+/// never completes — there is no platform implementation registered, and
+/// the future it returns is still pending when the fake-async pumps run
+/// out. So the *widget's* behaviour on a blocked launch (record the flag,
+/// tell the user, let them through) was untestable through the plugin,
+/// which is exactly the path the Instagram in-app browser takes.
+///
+/// The default **is** [launchUrl], so the assignment itself pins the
+/// signature: if url_launcher changes shape this stops compiling rather
+/// than quietly diverging from what production calls. A hand-written
+/// stand-in would have asserted my assumption back at me.
+typedef UrlOpener = Future<bool> Function(Uri url, {LaunchMode mode});
+
 /// Full-screen first-run offer. Rendered only when [resolveOffer] is not
 /// [InstallOffer.none] and the flag has not been recorded.
 class InstallChoicePage extends StatelessWidget {
@@ -90,6 +105,7 @@ class InstallChoicePage extends StatelessWidget {
     super.key,
     required this.offer,
     required this.onContinue,
+    this.openUrl = launchUrl,
   });
 
   /// Resolved by the caller so the gate and the page cannot disagree about
@@ -101,6 +117,9 @@ class InstallChoicePage extends StatelessWidget {
   /// sheet, both of which leave the page — so the web app continues
   /// underneath either way rather than stranding them on a dead screen.
   final VoidCallback onContinue;
+
+  /// Defaults to the real [launchUrl]; overridden only by tests.
+  final UrlOpener openUrl;
 
   bool get _isPlay => offer == InstallOffer.play;
 
@@ -117,7 +136,7 @@ class InstallChoicePage extends StatelessWidget {
     // window.open that has lost it.
     var launched = false;
     try {
-      launched = await launchUrl(
+      launched = await openUrl(
         Uri.parse(kPlayStoreListingUrl),
         mode: LaunchMode.externalApplication,
       );
