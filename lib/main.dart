@@ -20,6 +20,7 @@ import 'data/notification_service.dart';
 import 'data/track_record_prefs.dart';
 import 'data/repository.dart';
 import 'features/auth/pages/phone_signin_page.dart';
+import 'features/install/install_choice_page.dart';
 import 'features/onboarding/pages/welcome_consent_page.dart';
 import 'features/onboarding/pages/welcome_page.dart';
 import 'firebase_options.dart';
@@ -85,14 +86,30 @@ class LuminApp extends StatelessWidget {
   }
 }
 
-/// First-run gate — orchestrates the three-stage onboarding flow:
+/// First-run gate — orchestrates the onboarding flow:
 ///
 /// 1. **WelcomePage** — brand intro + value-prop + "Get Started"
 ///    (shows once per device, persists via ``welcomeSeen`` flag)
-/// 2. **WelcomeConsentPage** — 3-checkbox legal acknowledgement
+/// 2. **InstallChoicePage** — web only, and only when the browser is one
+///    we have an offer for: Android → Google Play, iOS → Add to Home
+///    Screen, everything else skipped entirely.  Added 2026-09-13 because
+///    the equivalent banner ([InstallBanner]) mounts inside [NavShell] —
+///    i.e. behind consent *and* behind Firebase phone sign-in — so a
+///    visitor arriving from a paid ad could never reach it.  It was
+///    wired, tested and deployed, and unreachable by the exact audience
+///    it was built for.  Placed after the welcome rather than before it
+///    so the offer arrives with one screen of context and still ahead of
+///    the two real drop-off points (the consent checkboxes and the SMS
+///    OTP); the welcome is a single tap.
+/// 3. **WelcomeConsentPage** — 3-checkbox legal acknowledgement
 ///    (18+ / risk / not-advice; re-shows on consent-version bump)
-/// 3. **AuthGate → PhoneSignInPage / NavShell** — Firebase phone-OTP
+/// 4. **AuthGate → PhoneSignInPage / NavShell** — Firebase phone-OTP
 ///    sign-in / sign-up, then the main app
+///
+/// Stage 2 is **skippable and stays suggested**: declining records its own
+/// flag and deliberately does not touch [InstallBanner]'s dismissal keys,
+/// so the in-app suggestion still appears while the app is in use.  One
+/// decline at the door is not a decline forever.
 ///
 /// We use a single gate widget instead of nested widgets because
 /// each stage needs to observe a SharedPreferences flag and the
@@ -107,10 +124,10 @@ class LuminApp extends StatelessWidget {
 /// SharedPreferences round-trip is slower, for long enough to read as
 /// a freeze.  Taps landing in that window hit the splash and did
 /// nothing, which is why the screen appeared to need pressing twice.
-/// Stage order is fixed (welcome → consent → ready), so the next
-/// stage is known without re-reading storage; the stage widgets still
-/// persist their flag before calling back, so a relaunch resumes at
-/// the right place.
+/// Stage order is fixed (welcome → install choice → consent → ready),
+/// so the next stage is known without re-reading storage; the stage
+/// widgets still persist their flag before calling back, so a relaunch
+/// resumes at the right place.
 ///
 /// Lives in front of [_AuthGate] (not behind it) because the welcome
 /// + consent disclosures are required BEFORE any data collection —
@@ -133,6 +150,15 @@ class _FirstRunGateState extends State<_FirstRunGate> {
   /// pick the next stage without another storage round-trip.
   bool _consentSatisfied = false;
 
+  /// What this browser gets offered, resolved once on mount so the gate
+  /// and the page cannot disagree about which platform this is.
+  /// [InstallOffer.none] on every native build (the stub environment
+  /// probes are constant false) and on desktop browsers.
+  InstallOffer _installOffer = InstallOffer.none;
+
+  /// True while there is an offer this visitor has not yet answered.
+  bool _installPending = false;
+
   @override
   void initState() {
     super.initState();
@@ -142,11 +168,21 @@ class _FirstRunGateState extends State<_FirstRunGate> {
   Future<void> _resolve() async {
     final welcomeSeen = await ConsentStorage.welcomeSeen();
     final consentDone = await ConsentStorage.isUpToDate();
+    // Same read-once discipline as the consent flags. The `none` check
+    // short-circuits, so a native build never touches SharedPreferences
+    // for a page it can never render.
+    final offer = resolveOffer();
+    final offerAnswered =
+        offer == InstallOffer.none || await InstallChoiceStorage.seen();
     if (!mounted) return;
     setState(() {
       _consentSatisfied = consentDone;
+      _installOffer = offer;
+      _installPending = !offerAnswered;
       if (!welcomeSeen) {
         _stage = _OnboardingState.welcome;
+      } else if (_installPending) {
+        _stage = _OnboardingState.installChoice;
       } else if (!consentDone) {
         _stage = _OnboardingState.consent;
       } else {
@@ -159,15 +195,28 @@ class _FirstRunGateState extends State<_FirstRunGate> {
   /// stored version is already current — a fresh install never hits that
   /// branch, but a welcome replay on a consented device would.
   void _advance() {
-    setState(() {
-      _stage = switch (_stage) {
-        _OnboardingState.welcome => _consentSatisfied
-            ? _OnboardingState.ready
-            : _OnboardingState.consent,
-        _ => _OnboardingState.ready,
-      };
-    });
+    setState(() => _stage = _nextStage(_stage));
   }
+
+  /// The stage after [from], written as an **exhaustive** switch rather
+  /// than the old `_ => ready` default.  That default is why adding a
+  /// stage is dangerous here: it compiles, and the new stage is silently
+  /// skipped for anyone who arrives at it from the stage before.
+  /// A further stage must now fail to compile instead.
+  _OnboardingState _nextStage(_OnboardingState? from) => switch (from) {
+        _OnboardingState.welcome => _installPending
+            ? _OnboardingState.installChoice
+            : _afterInstallChoice,
+        _OnboardingState.installChoice => _afterInstallChoice,
+        _OnboardingState.consent => _OnboardingState.ready,
+        _OnboardingState.ready => _OnboardingState.ready,
+        // Only reachable if something advances before the first flag read
+        // resolves; the blank splash swallows taps, so this is defensive.
+        null => _OnboardingState.ready,
+      };
+
+  _OnboardingState get _afterInstallChoice =>
+      _consentSatisfied ? _OnboardingState.ready : _OnboardingState.consent;
 
   @override
   Widget build(BuildContext context) {
@@ -181,6 +230,18 @@ class _FirstRunGateState extends State<_FirstRunGate> {
         );
       case _OnboardingState.welcome:
         return WelcomePage(onContinue: _advance);
+      case _OnboardingState.installChoice:
+        return InstallChoicePage(
+          offer: _installOffer,
+          // Fires whether the user took the offer or skipped it — the
+          // page records its own flag either way, so taking the offer
+          // still leaves a working web app underneath rather than
+          // stranding them on a dead screen if Play does not open.
+          onContinue: () {
+            _installPending = false;
+            _advance();
+          },
+        );
       case _OnboardingState.consent:
         return WelcomeConsentPage(onAccepted: () {
           _consentSatisfied = true;
@@ -192,7 +253,7 @@ class _FirstRunGateState extends State<_FirstRunGate> {
   }
 }
 
-enum _OnboardingState { welcome, consent, ready }
+enum _OnboardingState { welcome, installChoice, consent, ready }
 
 /// First-frame gate that decides between [PhoneSignInPage] and
 /// [NavShell].  Mock mode bypasses auth.  Live mode subscribes to
