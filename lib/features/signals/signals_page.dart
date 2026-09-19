@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import '../../app/foreground_refresh.dart';
+import '../../app/scroll_to_top.dart';
 import '../charts/chart_page.dart';
 import '../../data/app_config.dart';
 import '../../data/mock_data.dart';
@@ -144,7 +145,13 @@ class SignalsPage extends StatefulWidget {
 }
 
 class _SignalsPageState extends State<SignalsPage>
-    implements ForegroundRefreshable {
+    implements ForegroundRefreshable, ScrollToTop {
+  /// Drives the feed list so a tap on the already-active Signals tab returns
+  /// it to the newest signal. Attached to the POPULATED list only — the
+  /// skeleton, empty and error views are each their own short scroll view and
+  /// a controller shared across the AnimatedSwitcher's cross-fade would be
+  /// attached to two positions at once.
+  final ScrollController _listController = ScrollController();
   _SignalFilter _filter = _SignalFilter.all;
   _ClosedSubFilter _subFilter = _ClosedSubFilter.all;
   // Stream-based load (Phase 2a perf push) — yields cached signals
@@ -215,6 +222,7 @@ class _SignalsPageState extends State<SignalsPage>
 
   @override
   void dispose() {
+    _listController.dispose();
     _sub?.cancel();
     _priceTimer?.cancel();
     _markPriceClient.close();
@@ -301,6 +309,16 @@ class _SignalsPageState extends State<SignalsPage>
         final done = _refreshDone;
         if (done != null && !done.isCompleted) done.complete();
       },
+    );
+  }
+
+  @override
+  void scrollToTop() {
+    if (!_listController.hasClients) return;
+    _listController.animateTo(
+      0,
+      duration: kScrollToTopDuration,
+      curve: kScrollToTopCurve,
     );
   }
 
@@ -478,6 +496,7 @@ class _SignalsPageState extends State<SignalsPage>
     }
     return ListView.separated(
       key: const ValueKey('signals-data'),
+      controller: _listController,
       physics: const AlwaysScrollableScrollPhysics(
         parent: BouncingScrollPhysics(),
       ),
@@ -1012,23 +1031,14 @@ class _SignalCard extends StatelessWidget {
                 ),
               ],
               const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: LuminSpacing.sm,
-                  vertical: 2,
-                ),
-                decoration: BoxDecoration(
-                  color: LuminColors.accent.withOpacity(0.10),
-                  borderRadius: BorderRadius.circular(LuminRadii.sm),
-                ),
-                child: Text(
-                  '${sig.confidence.toStringAsFixed(1)} ${sig.tier}',
-                  style: const TextStyle(
-                    color: LuminColors.accent,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
+              // Handoff §11: this read "82.9 A" and left the reader to guess
+              // what the number was, what the letter was, and whether either
+              // meant the trade was likely to win. It says what it is now,
+              // and tapping it explains the scale — including, explicitly,
+              // that it is not a probability of profit.
+              _ConfidenceBadge(
+                confidence: sig.confidence,
+                grade: sig.tier,
               ),
             ],
           ),
@@ -1295,7 +1305,7 @@ class _SignalCard extends StatelessWidget {
   }
 }
 
-/// "Take signal" CTA on the detail sheet.  Opens the review sheet
+/// The live-order CTA on the detail sheet.  Opens the review sheet
 /// (sized to wallet equity + per-user settings) on tap; the user
 /// confirms there before any Binance call fires.
 class _TakeSignalAction extends StatelessWidget {
@@ -1352,7 +1362,12 @@ class _TakeSignalAction extends StatelessWidget {
         },
         icon: const Icon(Icons.bolt, size: 18),
         label: const Text(
-          'Take signal',
+          // Handoff §13: "Take signal" never said whether this spends real
+          // money. There is no paper path behind this button — it always
+          // places a live Binance order — so the label says so. It opens a
+          // review sheet rather than firing, which is why it reads "Review"
+          // and the sheet's own button is the point of no return.
+          'Review live order',
           style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
         ),
       ),
@@ -1991,3 +2006,149 @@ class _TradeDetailsCard extends StatelessWidget {
   }
 }
 
+/// The confidence score, labelled, with an explanation one tap away.
+///
+/// Why this is its own widget rather than a `Text`: the number needed a
+/// caption and the caption needed somewhere to live. Squeezing
+/// "Confidence 82.9 · A" into the card's top row at full size would crowd the
+/// symbol and the direction pill, which are what the card is read for — so
+/// the word is set small above the figure, and the detail that does not fit
+/// goes behind the tap.
+///
+/// **The explanation says what the score is not.** A high number beside a
+/// trade invites the reading "this one is likely to win", and nothing in the
+/// engine supports that claim: the score ranks how well a setup matched its
+/// own criteria at the moment it fired, which is a statement about the setup
+/// and not about the outcome.
+class _ConfidenceBadge extends StatelessWidget {
+  const _ConfidenceBadge({required this.confidence, required this.grade});
+
+  final double confidence;
+
+  /// The engine's letter grade (A+ / A / B / …). Rendered beside the number
+  /// rather than instead of it — they are one reading, and a letter alone
+  /// hides how close to the boundary a signal sat.
+  final String grade;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(LuminRadii.sm),
+      onTap: () => _explain(context),
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: LuminSpacing.sm,
+          vertical: 3,
+        ),
+        decoration: BoxDecoration(
+          color: LuminColors.accent.withOpacity(0.10),
+          borderRadius: BorderRadius.circular(LuminRadii.sm),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            const Text(
+              'CONFIDENCE',
+              style: TextStyle(
+                color: LuminColors.textMuted,
+                fontSize: 11,
+                letterSpacing: 0.6,
+                fontWeight: FontWeight.w600,
+                height: 1.1,
+              ),
+            ),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  confidence.toStringAsFixed(1),
+                  style: const TextStyle(
+                    color: LuminColors.accent,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    height: 1.2,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  '· $grade',
+                  style: const TextStyle(
+                    color: LuminColors.accent,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    height: 1.2,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _explain(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: LuminColors.bgCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius:
+            BorderRadius.vertical(top: Radius.circular(LuminRadii.lg)),
+      ),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.fromLTRB(
+          LuminSpacing.lg,
+          LuminSpacing.lg,
+          LuminSpacing.lg,
+          LuminSpacing.xl,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Confidence ${confidence.toStringAsFixed(1)} · $grade',
+              style: const TextStyle(
+                color: LuminColors.textPrimary,
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: LuminSpacing.md),
+            const Text(
+              'How cleanly this setup matched its own criteria when it fired '
+              '— structure, momentum, volume and market regime, scored out of '
+              '100 and graded A+ to C.',
+              style: TextStyle(
+                color: LuminColors.textSecondary,
+                fontSize: 14,
+                height: 1.45,
+              ),
+            ),
+            const SizedBox(height: LuminSpacing.md),
+            Container(
+              padding: const EdgeInsets.all(LuminSpacing.md),
+              decoration: BoxDecoration(
+                color: LuminColors.warn.withOpacity(0.10),
+                borderRadius: BorderRadius.circular(LuminRadii.sm),
+                border: Border.all(color: LuminColors.warn.withOpacity(0.30)),
+              ),
+              child: const Text(
+                'It is not a probability of profit. A high score does not '
+                'make a trade likely to win, and every signal can hit its '
+                'stop. Size accordingly.',
+                style: TextStyle(
+                  color: LuminColors.warn,
+                  fontSize: 13,
+                  height: 1.45,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

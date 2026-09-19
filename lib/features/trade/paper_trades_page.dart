@@ -30,6 +30,7 @@ import '../../shared/format.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
 import '../../shared/widgets/preview_badge.dart';
+import '../../shared/widgets/shimmer.dart';
 import 'paper_trade_detail_page.dart';
 
 class PaperTradesPage extends StatefulWidget {
@@ -419,15 +420,19 @@ class _PaperTradesPageState extends State<PaperTradesPage> {
 
   Widget _buildBody(bool isLive) {
     if (_initialLoading) {
-      return ListView(
-        physics: const AlwaysScrollableScrollPhysics(
-          parent: BouncingScrollPhysics(),
+      // Shimmered for the same reason as the Trade tab's own skeleton: a
+      // motionless grey card is indistinguishable from a stalled fetch.
+      return Shimmer(
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(
+            parent: BouncingScrollPhysics(),
+          ),
+          children: [
+            if (!isLive) const PreviewBadge(),
+            const SizedBox(height: LuminSpacing.md),
+            for (int i = 0; i < 3; i++) const _SkeletonCard(),
+          ],
         ),
-        children: [
-          if (!isLive) const PreviewBadge(),
-          const SizedBox(height: LuminSpacing.md),
-          for (int i = 0; i < 3; i++) const _SkeletonCard(),
-        ],
       );
     }
     if (_error != null) {

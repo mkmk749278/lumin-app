@@ -9,12 +9,14 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../app/scroll_to_top.dart';
 import '../../data/app_config.dart';
 import '../../data/market_alert.dart';
 import '../../data/repository.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
 import '../../shared/widgets/preview_badge.dart';
+import '../../shared/widgets/shimmer.dart';
 import '../charts/chart_page.dart';
 import 'alert_thumbnail.dart';
 
@@ -27,6 +29,10 @@ class AlertsTab extends StatefulWidget {
 
 class AlertsTabState extends State<AlertsTab>
     with AutomaticKeepAliveClientMixin {
+  /// Drives the alert feed so Pulse can hand a tap on its own active tab
+  /// through to whichever top tab is in front. Attached to the populated
+  /// list only; the empty state is one screen tall and has nowhere to go.
+  final ScrollController _listController = ScrollController();
   StreamSubscription<List<MarketAlert>>? _sub;
   List<MarketAlert>? _alerts;
   Object? _streamError;
@@ -72,8 +78,21 @@ class AlertsTabState extends State<AlertsTab>
 
   @override
   void dispose() {
+    _listController.dispose();
     _sub?.cancel();
     super.dispose();
+  }
+
+  /// Return the feed to the newest alert. Public because [PulsePage] owns the
+  /// bottom-tab contract and delegates here when Alerts is the visible top
+  /// tab — see `ScrollToTop`.
+  void scrollToTop() {
+    if (!_listController.hasClients) return;
+    _listController.animateTo(
+      0,
+      duration: kScrollToTopDuration,
+      curve: kScrollToTopCurve,
+    );
   }
 
   void _resubscribe() {
@@ -142,9 +161,12 @@ class AlertsTabState extends State<AlertsTab>
           onRetry: _refresh,
         );
       }
-      return const Center(
-        child: CircularProgressIndicator(color: LuminColors.accent),
-      );
+      // A spinner centred on an empty tab is the blank-dark-rectangle state
+      // the handoff (§17) asks to remove: it says "something is happening"
+      // and nothing about what is about to arrive. A skeleton in the shape of
+      // the real feed — filter chips, then alert cards with a thumbnail —
+      // makes the wait legible and stops the layout snapping when data lands.
+      return const _AlertsSkeleton();
     }
     if (alerts.isEmpty) {
       return ListView(
@@ -199,6 +221,7 @@ class AlertsTabState extends State<AlertsTab>
         ),
     ];
     return ListView.builder(
+      controller: _listController,
       physics: const AlwaysScrollableScrollPhysics(
         parent: BouncingScrollPhysics(),
       ),
@@ -457,6 +480,62 @@ class _AlertsErrorView extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Skeleton in the shape of the alert feed: the filter row, then cards each
+/// carrying a thumbnail block and two text lines.
+///
+/// Mirrors the populated layout closely enough that the cross-fade to real
+/// data does not move anything — a skeleton whose proportions are wrong is a
+/// second layout shift rather than a cure for the first.
+class _AlertsSkeleton extends StatelessWidget {
+  const _AlertsSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return Shimmer(
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics(),
+        ),
+        padding: const EdgeInsets.symmetric(
+          horizontal: LuminSpacing.lg,
+          vertical: LuminSpacing.md,
+        ),
+        children: [
+          Row(
+            children: [
+              for (final w in const [56.0, 74.0, 58.0, 70.0]) ...[
+                _box(width: w, height: 30, radius: LuminRadii.md),
+                const SizedBox(width: LuminSpacing.sm),
+              ],
+            ],
+          ),
+          const SizedBox(height: LuminSpacing.md),
+          for (int i = 0; i < 5; i++) ...[
+            _box(height: 108, radius: LuminRadii.md),
+            const SizedBox(height: LuminSpacing.sm),
+          ],
+        ],
+      ),
+    );
+  }
+
+  static Widget _box({
+    double? width,
+    required double height,
+    required double radius,
+  }) {
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: LuminColors.bgCard,
+        borderRadius: BorderRadius.circular(radius),
+        border: Border.all(color: LuminColors.cardBorder),
+      ),
     );
   }
 }

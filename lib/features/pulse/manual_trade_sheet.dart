@@ -402,7 +402,12 @@ class _ManualTradeSheetState extends State<ManualTradeSheet> {
               height: 18,
               child: CircularProgressIndicator(strokeWidth: 2),
             )
-          : Text(_parse(_slCtl) > 0 ? 'Confirm trade' : 'Confirm — no stop-loss'),
+          // Names the money, like the signal path's confirm button. The
+          // no-stop variant keeps leading with the missing protection —
+          // that is the more important word on that button.
+          : Text(_parse(_slCtl) > 0
+              ? 'Confirm live order'
+              : 'Confirm — NO STOP-LOSS'),
     );
   }
 }
