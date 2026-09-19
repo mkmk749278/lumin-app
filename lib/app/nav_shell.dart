@@ -11,6 +11,7 @@ import '../features/trade/trade_page.dart';
 import '../features/update/update_banner.dart';
 import 'distribution.dart';
 import 'foreground_refresh.dart';
+import 'scroll_to_top.dart';
 
 class NavShell extends StatefulWidget {
   const NavShell({super.key});
@@ -167,7 +168,23 @@ class _NavShellState extends State<NavShell> with WidgetsBindingObserver {
   }
 
   void _onSelect(int i) {
-    if (i == _index) return;
+    // Tapping the tab you are already on is the universal "take me back to
+    // the start" control, and this shell used to swallow it: the tabs live in
+    // an IndexedStack, so a feed scrolled deep stays scrolled deep, and the
+    // only way back to the top was to drag through the whole thing by hand.
+    //
+    // Reached through the same GlobalKey the foreground-refresh hook uses. The
+    // explicit cast (not `is`-promotion) is required for the same reason it is
+    // there: `currentState` is typed `State?` and `ScrollToTop` is an
+    // independent interface, not a subtype of `State`, so flow analysis will
+    // not promote.
+    if (i == _index) {
+      final tabState = _tabKeys[i].currentState;
+      if (tabState is ScrollToTop) {
+        (tabState as ScrollToTop).scrollToTop();
+      }
+      return;
+    }
     setState(() {
       _visited[i] = true;
       _index = i;

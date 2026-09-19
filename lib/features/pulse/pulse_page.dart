@@ -11,6 +11,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../app/foreground_refresh.dart';
+import '../../app/scroll_to_top.dart';
 import '../../data/app_config.dart';
 import '../../data/mock_data.dart';
 import '../../data/notification_service.dart';
@@ -39,7 +40,12 @@ class PulsePage extends StatefulWidget {
 
 class _PulsePageState extends State<PulsePage>
     with SingleTickerProviderStateMixin
-    implements ForegroundRefreshable {
+    implements ForegroundRefreshable, ScrollToTop {
+  /// Dashboard's own scroll view. Pulse has TWO top tabs and `TabBarView`
+  /// keeps both alive, so one controller cannot serve them: it would be
+  /// attached to two positions at once and a tap would scroll the tab the
+  /// user is not looking at. Alerts owns its own (see [AlertsTabState]).
+  final ScrollController _dashboardController = ScrollController();
   // Stream-based load (Phase 2b perf push) — yields the cached
   // PulseBundle synchronously on subscribe when HttpRepository has a
   // fresh SWR entry, then yields fresh data when the network
@@ -101,6 +107,7 @@ class _PulsePageState extends State<PulsePage>
     NotificationService.instance.pendingRoute
         .removeListener(_onNotificationRoute);
     _tabController.dispose();
+    _dashboardController.dispose();
     _sub?.cancel();
     super.dispose();
   }
@@ -128,6 +135,23 @@ class _PulsePageState extends State<PulsePage>
         final done = _refreshDone;
         if (done != null && !done.isCompleted) done.complete();
       },
+    );
+  }
+
+  @override
+  void scrollToTop() {
+    // Whichever top tab is in front — scrolling the Dashboard while the user
+    // is reading Alerts would move a list they cannot see and leave the one
+    // they can exactly where it was.
+    if (_tabController.index == 1) {
+      _alertsKey.currentState?.scrollToTop();
+      return;
+    }
+    if (!_dashboardController.hasClients) return;
+    _dashboardController.animateTo(
+      0,
+      duration: kScrollToTopDuration,
+      curve: kScrollToTopCurve,
     );
   }
 
@@ -235,6 +259,7 @@ class _PulsePageState extends State<PulsePage>
     }
     return ListView(
       key: const ValueKey('pulse-data'),
+      controller: _dashboardController,
       physics: const AlwaysScrollableScrollPhysics(
         parent: BouncingScrollPhysics(),
       ),

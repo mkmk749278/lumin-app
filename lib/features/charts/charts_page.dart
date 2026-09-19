@@ -12,11 +12,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../app/foreground_refresh.dart';
+import '../../app/scroll_to_top.dart';
 import '../../data/app_config.dart';
 import '../../data/binance_market_data.dart';
 import '../../data/mock_data.dart';
 import '../../data/repository.dart';
 import '../../shared/tokens.dart';
+import '../../shared/widgets/shimmer.dart';
 import 'chart_page.dart';
 import 'models/candle.dart';
 
@@ -43,7 +45,12 @@ class ChartsPage extends StatefulWidget {
 }
 
 class _ChartsPageState extends State<ChartsPage>
-    implements ForegroundRefreshable {
+    implements ForegroundRefreshable, ScrollToTop {
+  /// Drives the pair list so a tap on the already-active Charts tab returns
+  /// it to the top. This is the longest list in the app — the whole tradable
+  /// perpetual universe — so it is the one where dragging back by hand costs
+  /// the most.
+  final ScrollController _listController = ScrollController();
   final BinanceMarketData _md = BinanceMarketData();
   late Future<List<MarketTicker>> _future;
   String _query = '';
@@ -71,9 +78,20 @@ class _ChartsPageState extends State<ChartsPage>
 
   @override
   void dispose() {
+    _listController.dispose();
     _sigSub?.cancel();
     _md.close();
     super.dispose();
+  }
+
+  @override
+  void scrollToTop() {
+    if (!_listController.hasClients) return;
+    _listController.animateTo(
+      0,
+      duration: kScrollToTopDuration,
+      curve: kScrollToTopCurve,
+    );
   }
 
   @override
@@ -151,7 +169,12 @@ class _ChartsPageState extends State<ChartsPage>
               future: _future,
               builder: (context, snap) {
                 if (snap.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
+                  // Was a bare spinner on an empty page. This is the longest
+                  // list in the app and its first load is a round trip to
+                  // Binance, so it is the one place the wait is most visible
+                  // — and the one that most needs to look like it is filling
+                  // in rather than hanging (handoff §17).
+                  return const _PairListSkeleton();
                 }
                 if (snap.hasError) {
                   return _Error(onRetry: refreshFromForeground);
@@ -170,6 +193,7 @@ class _ChartsPageState extends State<ChartsPage>
                     return _future;
                   },
                   child: ListView.separated(
+                    controller: _listController,
                     itemCount: rows.length,
                     separatorBuilder: (_, __) =>
                         const Divider(height: 1, color: Color(0x22FFFFFF)),
@@ -301,6 +325,51 @@ class _Error extends StatelessWidget {
           const SizedBox(height: 12),
           OutlinedButton(onPressed: onRetry, child: const Text('Retry')),
         ],
+      ),
+    );
+  }
+}
+
+/// Skeleton in the shape of the pair list: one row per pair, each a symbol
+/// block on the left and a price/change block on the right.
+class _PairListSkeleton extends StatelessWidget {
+  const _PairListSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return Shimmer(
+      child: ListView.separated(
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: 12,
+        separatorBuilder: (_, __) =>
+            const Divider(height: 1, color: Color(0x22FFFFFF)),
+        itemBuilder: (_, __) => Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: LuminSpacing.lg,
+            vertical: LuminSpacing.md,
+          ),
+          child: Row(
+            children: [
+              _box(width: 96, height: 16),
+              const Spacer(),
+              _box(width: 64, height: 16),
+              const SizedBox(width: LuminSpacing.md),
+              _box(width: 52, height: 16),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  static Widget _box({required double width, required double height}) {
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: LuminColors.bgCard,
+        borderRadius: BorderRadius.circular(LuminRadii.sm),
+        border: Border.all(color: LuminColors.cardBorder),
       ),
     );
   }

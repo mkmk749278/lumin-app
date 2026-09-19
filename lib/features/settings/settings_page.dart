@@ -4,118 +4,85 @@
 /// controls (auto-trade preferences, Binance, profile, subscription,
 /// about, sign out).  Operator surfaces (engine defaults, agents,
 /// risk gates, dev tools) live in the separate ops app — not here.
+///
+/// **Restructured 2026-09-19 (handoff §27-§29).** This list had grown to
+/// sixteen rows under four headings, with two promotional banners above all
+/// of them — so the first screen of the Menu contained no settings at all,
+/// and the first row a user reached was `Pre-TP grab`. Two changes:
+///
+///  * **The five auto-trade pages collapsed to one row.** They now live
+///    behind `Auto-trade & execution` ([TradingSettingsPage]), and the three
+///    legal links behind `Legal` ([LegalPage]). Nothing was removed and
+///    nothing is more than one extra tap away; the root list went from
+///    sixteen rows to ten, ordered by what a user needs on day one rather
+///    than by subsystem.
+///  * **The banners moved below the settings.** They still pitch, and the
+///    dismissal still works — they simply no longer stand between the user
+///    and the reason they opened the Menu.
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 
+import '../../app/scroll_to_top.dart';
 import '../../data/app_config.dart';
-import '../../data/legal_urls.dart';
 import '../../data/repository.dart';
 import '../agents/agents_page.dart';
 import '../auth/pages/phone_signin_page.dart';
 import '../../shared/platform_input.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/free_tier_gate.dart';
-import '../../shared/widgets/lumin_card.dart';
 import '../../shared/widgets/upsell_banners.dart';
 import 'pages/about_page.dart';
+import 'pages/legal_page.dart';
 import 'pages/notification_settings_page.dart';
-import 'pages/server_side_execution_page.dart';
-import 'pages/auto_trade_settings_page.dart';
-import 'pages/invalidation_settings_page.dart';
-import 'pages/pretp_settings_page.dart';
 import 'pages/profile_settings_page.dart';
 import 'pages/referral_page.dart';
 import 'pages/subscription_page.dart';
-import 'pages/symbol_preference_page.dart';
+import 'pages/trading_settings_page.dart';
 import 'pages/web_paywall_page.dart';
+import 'settings_rows.dart';
 import '../../app/distribution.dart';
 
-class SettingsPage extends StatelessWidget {
+class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
+
+  @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> implements ScrollToTop {
+  /// Stateful only so the Menu can honour a tap on its own already-active
+  /// bottom-nav icon, like the other four tabs (see `ScrollToTop`). The page
+  /// itself still holds no state.
+  final ScrollController _listController = ScrollController();
+
+  @override
+  void dispose() {
+    _listController.dispose();
+    super.dispose();
+  }
+
+  @override
+  void scrollToTop() {
+    if (!_listController.hasClients) return;
+    _listController.animateTo(
+      0,
+      duration: kScrollToTopDuration,
+      curve: kScrollToTopCurve,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Menu')),
       body: ListView(
+        controller: _listController,
         physics: const BouncingScrollPhysics(),
         children: [
           const SizedBox(height: LuminSpacing.md),
-          // Growth banners at the top of the menu — the upgrade pitch
-          // auto-hides once the user reaches Auto; the invite banner shows
-          // the standing reward deal (engine truth) to everyone.
-          const UpgradeBanner(slot: 'menu'),
-          const InviteBanner(slot: 'menu'),
-          const SizedBox(height: LuminSpacing.md),
-          _section(
-            title: 'AUTO-TRADE',
-            rows: [
-              _Row(
-                icon: Icons.auto_mode,
-                label: 'Auto-trade',
-                subtitle: 'Your sizing, leverage, mode',
-                onTap: () => _push(context, const AutoTradeSettingsPage()),
-              ),
-              _Row(
-                icon: Icons.shield_moon_outlined,
-                label: 'Pre-TP grab',
-                subtitle: 'Your thresholds + regime allowlist',
-                onTap: () => _push(context, const PreTpSettingsPage()),
-              ),
-              _Row(
-                icon: Icons.shield_outlined,
-                label: 'Invalidation',
-                subtitle: 'Loose / Standard / Tight — capital preservation',
-                onTap: () =>
-                    _push(context, const InvalidationSettingsPage()),
-              ),
-              _Row(
-                icon: Icons.filter_list_alt,
-                label: 'Symbol preference',
-                subtitle: 'Which pairs auto-trade for you',
-                onTap: () =>
-                    _push(context, const SymbolPreferencePage()),
-              ),
-              // ``Binance`` (OLD client-side connect) menu entry REMOVED
-              // 2026-05-19.  The OLD path stored keys locally and ran
-              // ``AutoTradeWatcher`` in-app; server-side execution
-              // (Settings → Server-side auto-trade) replaces it entirely.
-              // The corresponding ``api_keys_settings_page.dart`` +
-              // ``auto_trade_watcher.dart`` + ``auto_trade_indicator.dart``
-              // files were deleted in the same PR.
-              _Row(
-                icon: Icons.cloud_done_outlined,
-                label: 'Server-side auto-trade',
-                subtitle: '24/7 execution from Lumin\'s engine (B18)',
-                onTap: () =>
-                    _push(context, const ServerSideExecutionPage()),
-              ),
-            ],
-          ),
-          const SizedBox(height: LuminSpacing.md),
-          _section(
-            title: 'INSIGHTS',
-            rows: [
-              _Row(
-                icon: Icons.psychology_outlined,
-                label: 'AI agents',
-                subtitle: 'The 15 setup specialists + their live stats',
-                onTap: () => _push(context, const AgentsPage()),
-              ),
-            ],
-          ),
-          const SizedBox(height: LuminSpacing.md),
-          _section(
+          SettingsSection(
             title: 'ACCOUNT',
             rows: [
-              _Row(
-                icon: Icons.notifications_outlined,
-                label: 'Notifications',
-                subtitle: 'Push for signals + market alerts',
-                onTap: () =>
-                    _push(context, const NotificationSettingsPage()),
-              ),
-              _Row(
+              SettingsRow(
                 icon: Icons.person_outline,
                 label: 'Profile',
                 subtitle: 'Name, country, display currency',
@@ -134,7 +101,7 @@ class SettingsPage extends StatelessWidget {
                     1 => 'Assist plan — one-tap trades',
                     _ => 'Free — upgrade to automate trades',
                   };
-                  return _Row(
+                  return SettingsRow(
                     icon: Icons.workspace_premium_outlined,
                     label: 'Subscription',
                     subtitle: subtitle,
@@ -149,22 +116,73 @@ class SettingsPage extends StatelessWidget {
                   );
                 },
               ),
-              _Row(
+              SettingsRow(
+                icon: Icons.notifications_outlined,
+                label: 'Notifications',
+                subtitle: 'Push for signals and market alerts',
+                onTap: () => _push(context, const NotificationSettingsPage()),
+              ),
+            ],
+          ),
+          const SizedBox(height: LuminSpacing.md),
+          // One row for what used to be five. Sizing, leverage, execution
+          // mode, the exchange connection and the three trading preferences
+          // all live behind it — see [TradingSettingsPage] for why.
+          SettingsSection(
+            title: 'TRADING',
+            rows: [
+              SettingsRow(
+                icon: Icons.auto_mode,
+                label: 'Auto-trade & execution',
+                subtitle: 'Sizing, leverage, exchange connection, preferences',
+                onTap: () => _push(context, const TradingSettingsPage()),
+              ),
+            ],
+          ),
+          const SizedBox(height: LuminSpacing.md),
+          SettingsSection(
+            title: 'INTELLIGENCE',
+            rows: [
+              SettingsRow(
+                icon: Icons.psychology_outlined,
+                label: 'AI agents',
+                subtitle: 'The 15 setup specialists and their live stats',
+                onTap: () => _push(context, const AgentsPage()),
+              ),
+            ],
+          ),
+          const SizedBox(height: LuminSpacing.md),
+          SettingsSection(
+            title: 'SUPPORT',
+            rows: [
+              SettingsRow(
+                icon: Icons.info_outline,
+                label: 'About',
+                subtitle: 'App version and what Lumin does',
+                onTap: () => _push(context, const AboutPage()),
+              ),
+              SettingsRow(
+                icon: Icons.gavel_outlined,
+                label: 'Legal',
+                subtitle: 'Privacy, terms, and risk disclosure',
+                onTap: () => _push(context, const LegalPage()),
+              ),
+            ],
+          ),
+          const SizedBox(height: LuminSpacing.md),
+          SettingsSection(
+            title: 'MORE',
+            rows: [
+              SettingsRow(
                 icon: Icons.person_add_alt_1_outlined,
-                label: 'Invite a friend',
+                label: 'Invite & earn',
                 subtitle: 'Earn rewards when friends join — they get a discount',
                 onTap: () => _push(context, const ReferralPage()),
               ),
-              _Row(
-                icon: Icons.info_outline,
-                label: 'About',
-                subtitle: 'Version, terms, risk disclosure',
-                onTap: () => _push(context, const AboutPage()),
-              ),
-              _Row(
+              SettingsRow(
                 icon: Icons.logout,
                 label: 'Sign out',
-                subtitle: 'Wipes the cached token; phone signin again next launch',
+                subtitle: 'You will verify your phone again next launch',
                 destructive: true,
                 onTap: () => _signOut(context),
               ),
@@ -175,104 +193,25 @@ class SettingsPage extends StatelessWidget {
               // user row (cascades override tables), and invalidates
               // the dispatch cache.  See ``_deleteAccount`` below
               // for the confirmation + post-success flow.
-              _Row(
+              SettingsRow(
                 icon: Icons.delete_forever_outlined,
                 label: 'Delete account',
-                subtitle: 'Permanently remove your account + revoke API keys',
+                subtitle: 'Permanently remove your account and revoke API keys',
                 destructive: true,
                 onTap: () => _deleteAccount(context),
               ),
             ],
           ),
-          const SizedBox(height: LuminSpacing.md),
-          // Legal section (Play Store launch A5, 2026-05-20) — three
-          // direct links to the hosted lumin-legal documents.  Each
-          // opens the device browser via ``url_launcher``; on launch
-          // failure we surface a SnackBar rather than silently no-op'ing.
-          _section(
-            title: 'LEGAL',
-            rows: [
-              _Row(
-                icon: Icons.privacy_tip_outlined,
-                label: 'Privacy Policy',
-                subtitle: 'What data we collect, why, your rights',
-                onTap: () => _openExternalUrl(context, LegalUrls.privacyUrl),
-              ),
-              _Row(
-                icon: Icons.gavel_outlined,
-                label: 'Terms of Service',
-                subtitle: 'Eligibility, responsibilities, limitations',
-                onTap: () => _openExternalUrl(context, LegalUrls.termsUrl),
-              ),
-              _Row(
-                icon: Icons.report_problem_outlined,
-                label: 'Risk Disclosure',
-                subtitle: 'Crypto futures trading carries risk of loss',
-                onTap: () => _openExternalUrl(context, LegalUrls.riskUrl),
-              ),
-            ],
-          ),
+          const SizedBox(height: LuminSpacing.lg),
+          // Growth banners, BELOW the settings rather than above them. The
+          // upgrade pitch auto-hides once the user reaches Auto; the invite
+          // banner shows the standing reward deal (engine truth) to everyone.
+          // They used to occupy the entire first screen of this tab, so a user
+          // who opened the Menu to change a setting saw two adverts and no
+          // settings (handoff §6 / §27).
+          const UpgradeBanner(slot: 'menu'),
+          const InviteBanner(slot: 'menu'),
           const SizedBox(height: LuminSpacing.xl),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _openExternalUrl(BuildContext context, String url) async {
-    final uri = Uri.parse(url);
-    // ``mode: externalApplication`` opens the system browser instead
-    // of a WebView inside the app — required for Privacy / ToS / Risk
-    // links per Play Store's prominent-disclosure expectations
-    // (legal pages should be reviewable outside the app's own UI
-    // chrome).
-    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!launched && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Could not open $url'),
-          duration: const Duration(seconds: 3),
-        ),
-      );
-    }
-  }
-
-  Widget _section({required String title, required List<Widget> rows}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(
-              left: LuminSpacing.sm,
-              bottom: LuminSpacing.sm,
-            ),
-            child: Text(
-              title,
-              style: const TextStyle(
-                color: LuminColors.textMuted,
-                fontSize: 10,
-                letterSpacing: 1.2,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          LuminCard(
-            padding: EdgeInsets.zero,
-            child: Column(
-              children: [
-                for (int i = 0; i < rows.length; i++) ...[
-                  rows[i],
-                  if (i < rows.length - 1)
-                    const Divider(
-                      color: LuminColors.cardBorder,
-                      height: 1,
-                      indent: 56,
-                    ),
-                ],
-              ],
-            ),
-          ),
         ],
       ),
     );
@@ -506,78 +445,6 @@ class _DeletingSpinner extends StatelessWidget {
             style: TextStyle(color: LuminColors.textPrimary),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _Row extends StatelessWidget {
-  const _Row({
-    required this.icon,
-    required this.label,
-    required this.subtitle,
-    required this.onTap,
-    this.destructive = false,
-  });
-
-  final IconData icon;
-  final String label;
-  final String subtitle;
-  final VoidCallback onTap;
-  final bool destructive;
-
-  @override
-  Widget build(BuildContext context) {
-    final fg = destructive ? LuminColors.loss : LuminColors.accent;
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: LuminSpacing.md,
-          vertical: LuminSpacing.md,
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: fg.withOpacity(0.10),
-                borderRadius: BorderRadius.circular(LuminRadii.sm),
-              ),
-              alignment: Alignment.center,
-              child: Icon(icon, color: fg, size: 18),
-            ),
-            const SizedBox(width: LuminSpacing.md),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    label,
-                    style: TextStyle(
-                      color: destructive
-                          ? LuminColors.loss
-                          : LuminColors.textPrimary,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    style: const TextStyle(
-                      color: LuminColors.textSecondary,
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const Icon(Icons.chevron_right,
-                color: LuminColors.textMuted, size: 18),
-          ],
-        ),
       ),
     );
   }

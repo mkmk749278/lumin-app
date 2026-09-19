@@ -830,7 +830,10 @@ class _AlertContextBar extends StatelessWidget {
                 currentPrice: alert.price,
                 bias: alert.bias,
               ),
-              child: const Text('Take trade'),
+              // Same rule as the signal card's CTA (handoff §13): this
+              // opens a review sheet that places a real Binance order, and
+              // "Take trade" said neither half of that.
+              child: const Text('Review live order'),
             ),
           ],
         ),

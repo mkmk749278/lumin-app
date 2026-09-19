@@ -28,6 +28,8 @@ import '../../data/take_error_mapper.dart';
 import '../../shared/format.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
+import 'take_recovery_action.dart';
+import 'planned_risk.dart';
 
 /// Show the Take Signal review sheet.  Returns ``true`` when an order
 /// was placed (caller can refresh the signals list); ``null`` when
@@ -77,6 +79,11 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
 
   bool _placing = false;
   String? _placeResult;
+
+  /// Where the last failure can be fixed, when it can be. Carried beside the
+  /// message so the banner can OFFER the page rather than naming it and
+  /// leaving the user to navigate there from a sentence (handoff §16).
+  TakeRecovery _placeRecovery = TakeRecovery.none;
   bool _placeSuccess = false;
   bool _placeQueued = false;
 
@@ -254,6 +261,7 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
     String message;
     var success = false;
     var queued = false;
+    var recovery = TakeRecovery.none;
     try {
       final result =
           await scope.repo.takeSignalServerSide(widget.signal.id);
@@ -273,10 +281,14 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
         // Business rejection — route through the same translation the
         // Recent Activity card uses, never the raw engine detail (which
         // can embed Firebase UIDs and internal error framing).
-        message = translateTakeRejection(result).combined;
+        final t = translateTakeRejection(result);
+        message = t.combined;
+        recovery = t.recovery;
       }
     } on ApiError catch (e) {
-      message = translateTakeHttpError(e.statusCode, e.message).combined;
+      final t = translateTakeHttpError(e.statusCode, e.message);
+      message = t.combined;
+      recovery = t.recovery;
     } catch (_) {
       message = translateTakeUnexpected().combined;
     }
@@ -284,6 +296,7 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
     setState(() {
       _placing = false;
       _placeResult = message;
+      _placeRecovery = recovery;
       _placeSuccess = success;
       _placeQueued = queued;
     });
@@ -570,6 +583,11 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
                   ? '\$${notional.toStringAsFixed(0)}'
                   : r'$500 (default)',
             ),
+            // What it can cost, not just how big it is (handoff §14). The
+            // engine sizes this path at a fixed notional, so when it has not
+            // told us that number we still publish the stop distance — the
+            // percentage is a property of the geometry and needs no size.
+            _plannedLossRow(notionalUsd: notional),
             const Padding(
               padding: EdgeInsets.symmetric(vertical: LuminSpacing.xs),
               child: Text(
@@ -612,6 +630,7 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
               '\$${p.notional.toStringAsFixed(2)}',
             ),
             _kv('Quantity', p.qty.toStringAsFixed(6)),
+            _plannedLossRow(notionalUsd: p.notional),
           ] else
             const Padding(
               padding: EdgeInsets.symmetric(vertical: LuminSpacing.xs),
@@ -645,9 +664,28 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
         borderRadius: BorderRadius.circular(LuminRadii.sm),
         border: Border.all(color: colour.withOpacity(0.30)),
       ),
-      child: Text(
-        msg,
-        style: TextStyle(color: colour, fontSize: 12, height: 1.4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            msg,
+            style: TextStyle(color: colour, fontSize: 12, height: 1.4),
+          ),
+          // The other half of a recovery. Naming the page and leaving the
+          // user to find it is the gap the handoff (§16) calls out: the
+          // explanation was already good, the next action was missing.
+          // Renders nothing when there is nowhere useful to go.
+          if (!ok)
+            TakeRecoveryAction(
+              recovery: _placeRecovery,
+              colour: colour,
+              // Close this sheet before pushing, so the user lands on the
+              // settings page rather than on top of a stale order review
+              // they can no longer confirm — and so Back returns them to
+              // the feed rather than to a dead sheet.
+              onNavigate: () => Navigator.of(context).pop(_placeSuccess),
+            ),
+        ],
       ),
     );
   }
@@ -686,12 +724,32 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
                     ),
                   )
                 : const Text(
-                    'Confirm',
+                    // Names the action and the fact that it is real money
+                    // (handoff §13). A bare "Confirm" on the one screen in
+                    // the app that spends the user's capital confirms
+                    // nothing in particular.
+                    'Confirm live order',
                     style: TextStyle(fontWeight: FontWeight.w700),
                   ),
           ),
         ),
       ],
+    );
+  }
+
+  /// Thin wrapper over [PlannedLossRow] for this sheet's two order cards.
+  ///
+  /// The rendering lives in a public widget so it can be pumped in a widget
+  /// test — this sheet itself cannot be, because reaching it needs Binance
+  /// keys, per-user settings, an `AppConfigScope` and an Assist-tier
+  /// entitlement. Pinning the figure's arithmetic without ever pumping the
+  /// thing that displays it is how a correct number ships behind a broken
+  /// layout.
+  Widget _plannedLossRow({double? notionalUsd}) {
+    return PlannedLossRow(
+      entry: widget.signal.entry,
+      stopLoss: widget.signal.sl,
+      notionalUsd: notionalUsd,
     );
   }
 

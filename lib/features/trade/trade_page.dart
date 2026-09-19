@@ -31,6 +31,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../app/foreground_refresh.dart';
+import '../../app/scroll_to_top.dart';
 import '../../data/app_config.dart';
 import '../../data/mock_data.dart';
 import '../../data/order_log.dart';
@@ -40,6 +41,7 @@ import '../../shared/format.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
 import '../../shared/widgets/preview_badge.dart';
+import '../../shared/widgets/shimmer.dart';
 import '../../shared/widgets/upsell_banners.dart';
 import 'live_status_card.dart';
 import 'live_status_resolver.dart';
@@ -82,7 +84,12 @@ class TradePage extends StatefulWidget {
 }
 
 class _TradePageState extends State<TradePage>
-    implements ForegroundRefreshable {
+    implements ForegroundRefreshable, ScrollToTop {
+  /// Drives whichever sub-tab body is built. Live and Paper are a ternary,
+  /// never both at once, so one controller serves both: Flutter detaches the
+  /// outgoing list before attaching the incoming one. Deliberately NOT
+  /// attached to `_TradeLoading` — a skeleton has nothing to return to.
+  final ScrollController _listController = ScrollController();
   _TradeView _view = _TradeView.live;
   // Phase 2c — engine slice as a SWR stream + Binance slice as a
   // parallel future; combined into a single Stream<_TradeBundle> via
@@ -249,6 +256,7 @@ class _TradePageState extends State<TradePage>
 
   @override
   void dispose() {
+    _listController.dispose();
     _engineSub?.cancel();
     _userStatusSub?.cancel();
     _runtimeStatusSub?.cancel();
@@ -315,6 +323,16 @@ class _TradePageState extends State<TradePage>
   // real Binance positions, so the OLD ``BinanceKeysService``-driven
   // fetch is no longer needed.  Server-side execution surfaces
   // positions via Firestore listeners in a follow-up PR.
+
+  @override
+  void scrollToTop() {
+    if (!_listController.hasClients) return;
+    _listController.animateTo(
+      0,
+      duration: kScrollToTopDuration,
+      curve: kScrollToTopCurve,
+    );
+  }
 
   @override
   void refreshFromForeground() {
@@ -591,11 +609,23 @@ class _TradePageState extends State<TradePage>
     final runtime = _runtimeStatus;
     final serverPositions = _serverPositions;
     final recentEvents = _recentDispatchEvents;
-    // usingDefaults is true when fetchUserAutoTradeSettings failed AND no
-    // disk cache exists — the engine couldn't be reached and we have no
-    // prior data.  In that case mode is null and we must NOT render both
-    // toggles as "Off" (that would falsely imply the engine is idle).
-    final settingsUnknown = data.userSettings.usingDefaults ?? false;
+    // The comment that used to sit here said `usingDefaults` is true "when
+    // fetchUserAutoTradeSettings failed AND no disk cache exists". It is not:
+    // the ENGINE sets `using_defaults` on a healthy 200 to mean "this user has
+    // saved no overrides", which is the state every new account is in and what
+    // the settings pages render as "Using engine defaults."
+    //
+    // So this banner — "Status unknown — could not reach engine" — showed to
+    // every subscriber who had simply never configured auto-trade, on a screen
+    // where every other card had just loaded from that same engine. Measured
+    // 2026-09-19 by driving the app: `GET /api/settings/user/auto-trade`
+    // returned 200 and the banner rendered anyway.
+    //
+    // `fetchFailed` is set ONLY by the app's own fallback, so it means what
+    // this banner says. Same two-causes-two-fields rule as the engine's
+    // `global_flags_readable` work: where a flag can be true because we could
+    // not ask, the copy must not name a cause we cannot observe.
+    final settingsUnknown = data.userSettings.fetchFailed;
     final activeMode = data.userSettings.mode ?? 'off';
     final liveActive = activeMode == 'live' || activeMode == 'both';
     final paperActive = activeMode == 'paper' || activeMode == 'both';
@@ -620,6 +650,7 @@ class _TradePageState extends State<TradePage>
           userSettings: data.userSettings,
         ).active;
     return ListView(
+      controller: _listController,
       physics: const AlwaysScrollableScrollPhysics(
         parent: BouncingScrollPhysics(),
       ),
@@ -732,6 +763,7 @@ class _TradePageState extends State<TradePage>
     final activeMode = data.userSettings.mode ?? 'off';
     final paperActive = activeMode == 'paper' || activeMode == 'both';
     return ListView(
+      controller: _listController,
       physics: const AlwaysScrollableScrollPhysics(
         parent: BouncingScrollPhysics(),
       ),
@@ -1300,7 +1332,17 @@ class _TradeLoading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
+    // One Shimmer ancestor over the whole list — the same composition Pulse
+    // and Signals use, and cheaper as one mask than one per card.
+    //
+    // These cards were flat, static grey boxes until 2026-09-19, which is the
+    // "blank dark rectangle" the handoff (§17) names: on a trading screen a
+    // motionless placeholder reads as stuck, and the user cannot tell a slow
+    // fetch from a dead one. Shimmer already existed for exactly this reason —
+    // its own docstring says it replaced a flat skeleton users perceived as
+    // stuck — and the Trade tab simply never got wired to it.
+    return Shimmer(
+      child: ListView(
       physics: const AlwaysScrollableScrollPhysics(
         parent: BouncingScrollPhysics(),
       ),
@@ -1330,6 +1372,7 @@ class _TradeLoading extends StatelessWidget {
         _TradeSkeletonCard(height: 44), // Activity row
         SizedBox(height: LuminSpacing.xl),
       ],
+      ),
     );
   }
 }

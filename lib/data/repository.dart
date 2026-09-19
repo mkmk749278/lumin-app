@@ -925,6 +925,7 @@ class AutoTradeSettings {
     this.paperRegimePreferenceSet = false,
     this.notionalUsd,
     this.usingDefaults,
+    this.fetchFailed = false,
     this.pausedReason,
     this.pausedAt,
   });
@@ -989,6 +990,24 @@ class AutoTradeSettings {
 
   /// Only present on ``/api/settings/user/auto-trade`` responses.
   final bool? usingDefaults;
+
+  /// True only when the FETCH itself failed and this object is the app's
+  /// local fallback.
+  ///
+  /// Why this is not [usingDefaults] (found by driving the app, 2026-09-19):
+  /// the engine sets `using_defaults` on a perfectly good **200** to mean
+  /// *"this user has no overrides of their own"* — the state every new
+  /// account is in, and what the settings pages render as
+  /// *"Using engine defaults."* The Trade tab read the same flag and rendered
+  /// **"Status unknown — could not reach engine"**, so a subscriber who had
+  /// simply never configured auto-trade was told the app could not reach a
+  /// server that had just answered every other card on the screen.
+  ///
+  /// That is a caption naming a cause the page cannot observe, in the
+  /// alarming direction — it sends the reader to check a connection that
+  /// works. Two causes, two fields: the engine owns [usingDefaults], the
+  /// app owns this, and only the app's fallback sets it.
+  final bool fetchFailed;
 
   /// Auto-pause state (engine PR #479, 2026-05-24). Set by the engine
   /// after N consecutive Binance ``-2019`` rejections; cleared by the
@@ -1653,7 +1672,12 @@ Future<TradeEngineSnapshot> assembleTradeEngineSnapshot(
     repo.fetchPositions(),
     repo.fetchActivity(limit: 30),
     repo.fetchUserAutoTradeSettings().catchError(
-          (_) => const AutoTradeSettings(usingDefaults: true),
+          // fetchFailed — NOT usingDefaults, which the engine sets on a
+          // healthy 200 to mean "no overrides saved". See the field's doc.
+          (_) => const AutoTradeSettings(
+            usingDefaults: true,
+            fetchFailed: true,
+          ),
         ),
   ]);
   return TradeEngineSnapshot(
