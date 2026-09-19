@@ -609,11 +609,23 @@ class _TradePageState extends State<TradePage>
     final runtime = _runtimeStatus;
     final serverPositions = _serverPositions;
     final recentEvents = _recentDispatchEvents;
-    // usingDefaults is true when fetchUserAutoTradeSettings failed AND no
-    // disk cache exists — the engine couldn't be reached and we have no
-    // prior data.  In that case mode is null and we must NOT render both
-    // toggles as "Off" (that would falsely imply the engine is idle).
-    final settingsUnknown = data.userSettings.usingDefaults ?? false;
+    // The comment that used to sit here said `usingDefaults` is true "when
+    // fetchUserAutoTradeSettings failed AND no disk cache exists". It is not:
+    // the ENGINE sets `using_defaults` on a healthy 200 to mean "this user has
+    // saved no overrides", which is the state every new account is in and what
+    // the settings pages render as "Using engine defaults."
+    //
+    // So this banner — "Status unknown — could not reach engine" — showed to
+    // every subscriber who had simply never configured auto-trade, on a screen
+    // where every other card had just loaded from that same engine. Measured
+    // 2026-09-19 by driving the app: `GET /api/settings/user/auto-trade`
+    // returned 200 and the banner rendered anyway.
+    //
+    // `fetchFailed` is set ONLY by the app's own fallback, so it means what
+    // this banner says. Same two-causes-two-fields rule as the engine's
+    // `global_flags_readable` work: where a flag can be true because we could
+    // not ask, the copy must not name a cause we cannot observe.
+    final settingsUnknown = data.userSettings.fetchFailed;
     final activeMode = data.userSettings.mode ?? 'off';
     final liveActive = activeMode == 'live' || activeMode == 'both';
     final paperActive = activeMode == 'paper' || activeMode == 'both';
