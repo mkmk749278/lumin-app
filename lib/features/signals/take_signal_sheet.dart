@@ -28,6 +28,7 @@ import '../../data/take_error_mapper.dart';
 import '../../shared/format.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
+import 'take_recovery_action.dart';
 import 'planned_risk.dart';
 
 /// Show the Take Signal review sheet.  Returns ``true`` when an order
@@ -78,6 +79,11 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
 
   bool _placing = false;
   String? _placeResult;
+
+  /// Where the last failure can be fixed, when it can be. Carried beside the
+  /// message so the banner can OFFER the page rather than naming it and
+  /// leaving the user to navigate there from a sentence (handoff §16).
+  TakeRecovery _placeRecovery = TakeRecovery.none;
   bool _placeSuccess = false;
   bool _placeQueued = false;
 
@@ -255,6 +261,7 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
     String message;
     var success = false;
     var queued = false;
+    var recovery = TakeRecovery.none;
     try {
       final result =
           await scope.repo.takeSignalServerSide(widget.signal.id);
@@ -274,10 +281,14 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
         // Business rejection — route through the same translation the
         // Recent Activity card uses, never the raw engine detail (which
         // can embed Firebase UIDs and internal error framing).
-        message = translateTakeRejection(result).combined;
+        final t = translateTakeRejection(result);
+        message = t.combined;
+        recovery = t.recovery;
       }
     } on ApiError catch (e) {
-      message = translateTakeHttpError(e.statusCode, e.message).combined;
+      final t = translateTakeHttpError(e.statusCode, e.message);
+      message = t.combined;
+      recovery = t.recovery;
     } catch (_) {
       message = translateTakeUnexpected().combined;
     }
@@ -285,6 +296,7 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
     setState(() {
       _placing = false;
       _placeResult = message;
+      _placeRecovery = recovery;
       _placeSuccess = success;
       _placeQueued = queued;
     });
@@ -652,9 +664,28 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
         borderRadius: BorderRadius.circular(LuminRadii.sm),
         border: Border.all(color: colour.withOpacity(0.30)),
       ),
-      child: Text(
-        msg,
-        style: TextStyle(color: colour, fontSize: 12, height: 1.4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            msg,
+            style: TextStyle(color: colour, fontSize: 12, height: 1.4),
+          ),
+          // The other half of a recovery. Naming the page and leaving the
+          // user to find it is the gap the handoff (§16) calls out: the
+          // explanation was already good, the next action was missing.
+          // Renders nothing when there is nowhere useful to go.
+          if (!ok)
+            TakeRecoveryAction(
+              recovery: _placeRecovery,
+              colour: colour,
+              // Close this sheet before pushing, so the user lands on the
+              // settings page rather than on top of a stale order review
+              // they can no longer confirm — and so Back returns them to
+              // the feed rather than to a dead sheet.
+              onNavigate: () => Navigator.of(context).pop(_placeSuccess),
+            ),
+        ],
       ),
     );
   }
