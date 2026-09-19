@@ -3,6 +3,7 @@ library;
 
 import 'dart:io';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lumin/features/signals/planned_risk.dart';
 
@@ -132,11 +133,13 @@ void main() {
       expect(src, isNot(contains("'Take trade'")));
     });
 
-    test('the planned loss is on the confirmation, with its caveat', () {
-      final src = read('lib/features/signals/take_signal_sheet.dart');
+    test('the planned loss and its caveat are one widget, not two', () {
+      // The copy lives with the arithmetic (PlannedLossRow) so the figure
+      // and the sentence qualifying it cannot be separated by an edit to
+      // one of them — the caveat is not decoration, it is what stops the
+      // number being read as a floor on the loss.
+      final src = read('lib/features/signals/planned_risk.dart');
       expect(src, contains('Planned loss if stopped'));
-      // A stop is an instruction, not a guarantee. Publishing the figure
-      // without saying so is the reassuring-in-the-wrong-direction error.
       expect(src, contains('gap through the stop can cost more'));
     });
 
@@ -149,8 +152,89 @@ void main() {
       expect(
         '_plannedLossRow('.allMatches(src).length,
         greaterThanOrEqualTo(3),
-        reason: 'expected the definition plus a call in each order card',
+        reason: 'expected the wrapper plus a call in each order card',
       );
+    });
+  });
+
+  // The rendering, pumped for real.
+  //
+  // The review sheet itself cannot be pumped — it needs Binance keys,
+  // per-user settings, an AppConfigScope and an Assist entitlement — which is
+  // exactly why the row is a public widget. Testing the arithmetic and never
+  // the display is how a correct number ships behind a broken layout.
+  group('PlannedLossRow renders', () {
+    Future<void> pump(WidgetTester tester, Widget child) =>
+        tester.pumpWidget(MaterialApp(home: Scaffold(body: child)));
+
+    testWidgets('money and percentage together when the size is known',
+        (tester) async {
+      await pump(
+        tester,
+        const PlannedLossRow(entry: 100.0, stopLoss: 97.0, notionalUsd: 500),
+      );
+      expect(find.text('Planned loss if stopped'), findsOneWidget);
+      expect(find.text('-\$15.00  (3.00%)'), findsOneWidget);
+    });
+
+    testWidgets('the percentage alone when the engine has not sized it',
+        (tester) async {
+      // The server-side path before the engine reports a notional. A
+      // percentage is a property of the geometry, so it still answers.
+      await pump(
+        tester,
+        const PlannedLossRow(entry: 100.0, stopLoss: 97.0),
+      );
+      expect(find.text('3.00% of position'), findsOneWidget);
+    });
+
+    testWidgets('always carries the gap caveat', (tester) async {
+      // A stop is an instruction to the exchange, not a guarantee. The
+      // figure without this sentence is the reassuring-in-the-wrong-
+      // direction error.
+      await pump(
+        tester,
+        const PlannedLossRow(entry: 100.0, stopLoss: 97.0, notionalUsd: 500),
+      );
+      expect(
+        find.text('A gap through the stop can cost more than this.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('renders NOTHING on a breakeven-ratcheted stop',
+        (tester) async {
+      // Not "\$0.00", which would read as "this trade cannot lose".
+      await pump(
+        tester,
+        const PlannedLossRow(entry: 100.0, stopLoss: 100.0, notionalUsd: 500),
+      );
+      expect(find.text('Planned loss if stopped'), findsNothing);
+      expect(find.textContaining('0.00'), findsNothing);
+    });
+
+    testWidgets('a short reads the same as the long it mirrors',
+        (tester) async {
+      await pump(
+        tester,
+        const PlannedLossRow(entry: 100.0, stopLoss: 103.0, notionalUsd: 500),
+      );
+      expect(find.text('-\$15.00  (3.00%)'), findsOneWidget);
+    });
+
+    testWidgets('a sub-cent mover keeps a readable percentage',
+        (tester) async {
+      // Much of the delivered book is sub-\$1; the money figure is what
+      // scales, not the percentage.
+      await pump(
+        tester,
+        const PlannedLossRow(
+          entry: 0.0037607,
+          stopLoss: 0.0036479,
+          notionalUsd: 500,
+        ),
+      );
+      expect(find.textContaining('3.00%'), findsOneWidget);
     });
   });
 }

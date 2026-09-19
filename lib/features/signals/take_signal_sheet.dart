@@ -706,64 +706,19 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
     );
   }
 
-  /// The planned downside, rendered as money and as stop distance.
+  /// Thin wrapper over [PlannedLossRow] for this sheet's two order cards.
   ///
-  /// Refuses rather than guessing: a breakeven-ratcheted stop, a missing
-  /// notional or an unreadable entry each render nothing at all rather than a
-  /// `$0.00` that would read as "this trade cannot lose". The caveat under it
-  /// is not boilerplate — a stop is an instruction, not a guarantee, and a gap
-  /// through the level fills worse than the number above.
+  /// The rendering lives in a public widget so it can be pumped in a widget
+  /// test — this sheet itself cannot be, because reaching it needs Binance
+  /// keys, per-user settings, an `AppConfigScope` and an Assist-tier
+  /// entitlement. Pinning the figure's arithmetic without ever pumping the
+  /// thing that displays it is how a correct number ships behind a broken
+  /// layout.
   Widget _plannedLossRow({double? notionalUsd}) {
-    final s = widget.signal;
-    final pct = plannedLossPct(entry: s.entry, stopLoss: s.sl);
-    if (pct == null) return const SizedBox.shrink();
-    final usd = notionalUsd == null
-        ? null
-        : plannedLossUsd(
-            entry: s.entry,
-            stopLoss: s.sl,
-            notionalUsd: notionalUsd,
-          );
-    final value = usd == null
-        ? '${pct.toStringAsFixed(2)}% of position'
-        : '-\$${usd.toStringAsFixed(2)}  (${pct.toStringAsFixed(2)}%)';
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 3),
-          child: Row(
-            children: [
-              const Expanded(
-                child: Text(
-                  'Planned loss if stopped',
-                  style: TextStyle(
-                    color: LuminColors.textSecondary,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              Text(
-                value,
-                style: const TextStyle(
-                  color: LuminColors.loss,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const Text(
-          'A gap through the stop can cost more than this.',
-          style: TextStyle(
-            color: LuminColors.textMuted,
-            fontSize: 11,
-            height: 1.3,
-          ),
-        ),
-      ],
+    return PlannedLossRow(
+      entry: widget.signal.entry,
+      stopLoss: widget.signal.sl,
+      notionalUsd: notionalUsd,
     );
   }
 
