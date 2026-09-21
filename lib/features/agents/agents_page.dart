@@ -1,4 +1,4 @@
-/// Agents — 15 evaluator personas + per-agent drill-down.
+/// Agents — every evaluator the ENGINE reports, plus a per-agent drill-down.
 ///
 /// The detail bottom sheet fetches that agent's lifecycle stats and
 /// recent signals from the live engine (or mock repo offline) so users
@@ -13,9 +13,43 @@ import '../../shared/format.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
 import 'agent_data.dart';
+import '../signals/signal_language.dart';
 
-class AgentsPage extends StatelessWidget {
+class AgentsPage extends StatefulWidget {
   const AgentsPage({super.key});
+
+  @override
+  State<AgentsPage> createState() => _AgentsPageState();
+}
+
+class _AgentsPageState extends State<AgentsPage> {
+  /// The ENGINE's roster, not this app's description table.
+  ///
+  /// This page used to iterate [kAgents] — 15 hand-written entries — while the
+  /// engine ran 29 setup classes (measured 2026-09-21). The 14 with no entry
+  /// had no card at all, so a subscriber could not reach the stats of
+  /// `MOVER_TREND_PULLBACK`, which produces most of the signals they receive.
+  /// The roster was already being fetched for the detail sheet and thrown
+  /// away for anything outside the local list.
+  Future<List<AgentStat>>? _roster;
+  LuminRepository? _repo;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final repo = AppConfigScope.of(context).repo;
+    if (repo != _repo) {
+      _repo = repo;
+      _roster = repo.watchAgents().first;
+    }
+  }
+
+  Future<void> _refresh() async {
+    final repo = AppConfigScope.of(context).repo;
+    repo.invalidateAgentsCache();
+    setState(() => _roster = repo.watchAgents().first);
+    await _roster;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -30,37 +64,73 @@ class AgentsPage extends StatelessWidget {
           ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: LuminSpacing.md),
-              child: Text(
-                '${kAgents.length} AI specialists',
-                style: Theme.of(context).textTheme.titleMedium,
+      body: FutureBuilder<List<AgentStat>>(
+        future: _roster,
+        builder: (context, snap) {
+          // The engine's list when we have it; the built-in descriptions as a
+          // fallback when we do not. The fallback is NOT presented as the
+          // roster — the subtitle says it is the built-in list and that live
+          // stats could not be loaded, because claiming a count we could not
+          // verify is the error this page is being fixed for.
+          final stats = snap.data;
+          final loading = snap.connectionState == ConnectionState.waiting;
+          final agents = stats == null
+              ? kAgents
+              : [
+                  for (final s in stats)
+                    agentForSetup(s.setupClass, engineDisplayName: s.displayName),
+                ];
+          final subtitle = loading
+              ? 'Loading the engine\'s roster…'
+              : stats == null
+                  ? 'Showing Lumin\'s built-in descriptions — live stats could '
+                      'not be loaded. Pull to retry.'
+                  : 'Each agent watches markets for a specific setup family. '
+                      'Tap an agent to see its live stats and recent signals.';
+          return RefreshIndicator(
+            color: LuminColors.accent,
+            onRefresh: _refresh,
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      vertical: LuminSpacing.md,
+                    ),
+                    child: Text(
+                      loading
+                          ? 'AI specialists'
+                          : '${agents.length} AI specialists',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                  ),
+                  Padding(
+                    padding:
+                        const EdgeInsets.only(bottom: LuminSpacing.md),
+                    child: Text(
+                      subtitle,
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                  ),
+                  Expanded(
+                    child: ListView.separated(
+                      physics: const AlwaysScrollableScrollPhysics(
+                        parent: BouncingScrollPhysics(),
+                      ),
+                      itemCount: agents.length,
+                      separatorBuilder: (_, __) =>
+                          const SizedBox(height: LuminSpacing.md),
+                      itemBuilder: (_, i) => _AgentCard(agent: agents[i]),
+                    ),
+                  ),
+                ],
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.only(bottom: LuminSpacing.md),
-              child: Text(
-                'Each agent watches markets for a specific setup family. '
-                'Tap an agent to see its live stats and recent signals.',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-            ),
-            Expanded(
-              child: ListView.separated(
-                physics: const BouncingScrollPhysics(),
-                itemCount: kAgents.length,
-                separatorBuilder: (_, __) =>
-                    const SizedBox(height: LuminSpacing.md),
-                itemBuilder: (_, i) => _AgentCard(agent: kAgents[i]),
-              ),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }
@@ -70,11 +140,14 @@ class AgentsPage extends StatelessWidget {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: LuminColors.bgCard,
-        title: Text("Lumin's ${kAgents.length} AI agents"),
+        title: const Text("Lumin's AI agents"),
         content: const Text(
           'Each agent specialises in one type of market setup — '
           'breakouts, SR flips, momentum, divergence, and more. '
           "When an agent's confidence clears the threshold, the signal fires.\n\n"
+          'The list comes from the engine, so it always shows every setup '
+          'that is actually running. Some newer ones do not have a written '
+          'description yet — their live stats are still there.\n\n'
           'Per-agent toggles and custom thresholds are coming in a future '
           'subscription tier. Stats populate as soon as that agent emits a signal.',
         ),
@@ -420,6 +493,46 @@ class _StatsCard extends StatelessWidget {
                   color: LuminColors.accent,
                 ),
               ),
+              // The third slot is deliberately empty rather than carrying
+              // `generated` — see the block below.
+              const Expanded(child: SizedBox.shrink()),
+            ],
+          ),
+          // `generated` is on a DIFFERENT CLOCK and had been pooled with the
+          // five counters above under one "LAST 24h" heading.
+          //
+          // The engine's own schema says so: "Telemetry counters (attempts /
+          // generated / no_signal) RESET ON EACH SCAN-CYCLE WINDOW", while
+          // closed_today / tp_hits / sl_hits / invalidated come from
+          // _signal_history and cover 24 hours. A scan cycle is ~15 seconds,
+          // so for a setup that fires a few times a day `generated` reads 0
+          // essentially always — and under that heading it says "this agent
+          // produced nothing today", directly contradicting the Closed and
+          // Last fired cells beside it.
+          //
+          // Observed live 2026-09-21 on MOVER_TREND_PULLBACK: TP 9 / SL 16 /
+          // Closed 25 / Last fired 43m ago, and "Generated 0" in the same
+          // card. Every number was correct; the heading made one of them
+          // mean something it does not.
+          //
+          // It stays on the page because it is the live "is the gate chain
+          // producing anything right now" read, which nothing else here
+          // answers. It just gets its own clock stated.
+          const SizedBox(height: LuminSpacing.md),
+          const Divider(height: 1, color: LuminColors.cardBorder),
+          const SizedBox(height: LuminSpacing.md),
+          const Text(
+            'THIS SCAN CYCLE',
+            style: TextStyle(
+              color: LuminColors.textMuted,
+              fontSize: 10,
+              letterSpacing: 1.2,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: LuminSpacing.sm),
+          Row(
+            children: [
               Expanded(
                 child: _Stat(
                   label: 'Generated',
@@ -427,7 +540,26 @@ class _StatsCard extends StatelessWidget {
                   color: LuminColors.accent,
                 ),
               ),
+              Expanded(
+                child: _Stat(
+                  label: 'Attempts',
+                  value: '${stat.attempts}',
+                  color: LuminColors.textMuted,
+                ),
+              ),
+              const Expanded(child: SizedBox.shrink()),
             ],
+          ),
+          const SizedBox(height: LuminSpacing.sm),
+          const Text(
+            'Counted since the scanner\'s last pass, a few seconds ago — not '
+            'over the day. Zero here is the ordinary reading for a setup that '
+            'fires a handful of times a day.',
+            style: TextStyle(
+              color: LuminColors.textMuted,
+              fontSize: 11,
+              height: 1.4,
+            ),
           ),
         ],
       ),
@@ -585,7 +717,7 @@ class _AgentSignalRow extends StatelessWidget {
               ),
               const SizedBox(height: 2),
               Text(
-                '${sig.status} • ${formatAge(sig.minutesAgo)} ago',
+                '${signalStatusLabel(sig.status)} • ${formatAge(sig.minutesAgo)} ago',
                 style: TextStyle(
                   color: _statusColor(),
                   fontSize: 10,

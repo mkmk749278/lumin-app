@@ -1,5 +1,21 @@
 import 'package:flutter/material.dart';
 
+/// Presentation for one evaluator.
+///
+/// **[kAgents] is a description table, not the roster.** The engine decides
+/// which setups exist and emits `SetupClass` values this app has never heard
+/// of — measured 2026-09-21: the engine had **29** setup classes against the
+/// **15** described below, and the two missing ones that matter most
+/// (`MOVER_TREND_PULLBACK`, `MOVER_AVWAP_SCALP`) are the paths that dominate
+/// the delivered feed. The Agents page used to iterate this list, so those
+/// had no card at all and their stats were unreachable — while the page
+/// fetched the engine's full roster and threw the rest away.
+///
+/// So the page now walks the ENGINE's list and calls [agentForSetup] to dress
+/// each entry. Anything described here keeps its brand, tagline and icon;
+/// anything else is shown under the engine's own display name rather than
+/// hidden. Adding a setup here is an improvement to the copy, never a
+/// precondition for it appearing.
 class Agent {
   const Agent({required this.id, required this.name, required this.tagline, required this.specialty, required this.icon});
   final String id;
@@ -56,3 +72,39 @@ const List<Agent> kAgents = [
     specialty: 'Watches the slow EMA stack for golden / death crosses on 4h. When EMA50 crosses EMA200 with confirming volume and structure, signals a regime shift — rare but high-conviction. The 15th analyst, added 2026-05-06.',
     icon: Icons.swap_calls_outlined),
 ];
+
+/// Presentation for a setup the ENGINE reports, described or not.
+///
+/// [setupClass] is the engine's own identifier. [engineDisplayName] is what
+/// the engine calls it, used when this file has no entry — so a new evaluator
+/// arrives named rather than missing.
+///
+/// The synthesised `specialty` deliberately does not invent a description of
+/// how the setup trades. It says what is true: the engine is running it and
+/// this build carries no write-up. A plausible-sounding sentence about a
+/// strategy nobody wrote would be worse than an honest gap on a screen a
+/// subscriber may read before risking money.
+Agent agentForSetup(String setupClass, {String? engineDisplayName}) {
+  final id = setupClass.trim().toUpperCase().replaceAll(' ', '_');
+  for (final a in kAgents) {
+    if (a.id == id) return a;
+  }
+  final engineName = (engineDisplayName ?? '').trim();
+  final readable = _readableSetup(id);
+  return Agent(
+    id: id,
+    name: engineName.isNotEmpty ? engineName : readable,
+    tagline: readable,
+    specialty:
+        'This setup is live in the engine. Lumin does not carry a written '
+        'description for it yet — the stats below are the engine\'s own '
+        'record of what it has actually shipped.',
+    icon: Icons.insights_outlined,
+  );
+}
+
+String _readableSetup(String id) {
+  final cleaned = id.replaceAll('_', ' ').toLowerCase().trim();
+  if (cleaned.isEmpty) return id;
+  return cleaned[0].toUpperCase() + cleaned.substring(1);
+}

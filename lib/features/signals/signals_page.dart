@@ -25,6 +25,7 @@ import '../../shared/widgets/lumin_card.dart';
 import '../../shared/widgets/preview_badge.dart';
 import '../../shared/widgets/shimmer.dart';
 import '../../shared/widgets/upsell_banners.dart';
+import 'signal_language.dart';
 import 'signal_snap.dart';
 import 'take_signal_sheet.dart';
 
@@ -1043,14 +1044,27 @@ class _SignalCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: LuminSpacing.xs),
-          Text(
-            '${sig.agentName} • ${sig.setupName}',
-            style: const TextStyle(
-              color: LuminColors.textSecondary,
-              fontSize: 12,
-            ),
+          // Handoff §10: keep the branded name — it is Lumin's personality —
+          // and pair it with the plain sentence, so a reader who has never
+          // heard of "The Reclaimer" still knows what the setup is. The
+          // tagline comes from kAgents rather than a second list here; where
+          // there is none, the engine's own setup name shows in sentence case
+          // instead of the raw SHOUT_CASE it used to print.
+          _StrategyLine(
+            agentName: sig.agentName,
+            setupName: sig.setupName,
           ),
           const SizedBox(height: LuminSpacing.md),
+          // Two rows of two, not four across (handoff §9).
+          //
+          // The old layout gave each price a quarter of the card's width,
+          // which is where the density complaint actually came from: much of
+          // the delivered book is sub-cent, so `0.0037607` was being squeezed
+          // into ~90px beside three others of the same weight, with nothing
+          // telling the eye where to start. Splitting it pairs what the trade
+          // RISKS above what it AIMS AT, doubles the room each number gets,
+          // and costs one row of height rather than the four a full vertical
+          // stack would.
           Row(
             children: [
               Expanded(
@@ -1061,7 +1075,7 @@ class _SignalCard extends StatelessWidget {
               ),
               Expanded(
                 child: _PriceCol(
-                  label: 'SL',
+                  label: 'Stop',
                   // BE-ratchet detection: after pre-TP fires, the engine
                   // moves stop_loss to entry — sig.sl == sig.entry by
                   // design.  Without this UX hint the card showed the
@@ -1078,16 +1092,21 @@ class _SignalCard extends StatelessWidget {
                       : LuminColors.loss,
                 ),
               ),
+            ],
+          ),
+          const SizedBox(height: LuminSpacing.sm),
+          Row(
+            children: [
               Expanded(
                 child: _PriceCol(
-                  label: 'TP1',
+                  label: 'Target 1',
                   value: formatPrice(sig.tp1),
                   color: LuminColors.success,
                 ),
               ),
               Expanded(
                 child: _PriceCol(
-                  label: 'TP2',
+                  label: 'Target 2',
                   value: formatPrice(sig.tp2),
                   color: LuminColors.success,
                 ),
@@ -1116,12 +1135,16 @@ class _SignalCard extends StatelessWidget {
                   ),
                   const SizedBox(width: LuminSpacing.xs),
                   Text(
-                    sig.status,
+                    // Was `sig.status` raw: a subscriber read
+                    // "BREAKEVEN_EXIT" and "SL_HIT" off the engine's own
+                    // enum. An unmapped status still shows, sentence-cased,
+                    // so a newer engine's value is visible rather than blank.
+                    signalStatusLabel(sig.status),
                     style: TextStyle(
                       color: _statusColor(),
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.3,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.2,
                     ),
                   ),
                   const SizedBox(width: LuminSpacing.sm),
@@ -1726,6 +1749,19 @@ class _OutcomeSummaryCard extends StatelessWidget {
     final rawMfe = sig.maxFavorableExcursionPct;
     final mfe = closed ? rawMfe : (rawMfe > pnlPct ? rawMfe : pnlPct);
     final hasMfe = mfe > 0;
+    // MAE is clamped DOWN to the current loss for a live signal, the mirror
+    // of the MFE clamp above and for the same reason: the app has itself just
+    // witnessed pnlPct off the 5s poll, while the engine's recorded excursion
+    // rides the slower snapshot, so a fresh dip can be deeper than anything
+    // the snapshot has seen. A closed signal keeps the engine's record — its
+    // excursion is over and cannot be recomputed from the current price.
+    final rawMae = sig.maxAdverseExcursionPct;
+    final double? mae = closed
+        ? rawMae
+        : (pnlPct < 0
+            ? ((rawMae == null || rawMae > pnlPct) ? pnlPct : rawMae)
+            : rawMae);
+    final hasMae = mae != null && mae < 0;
     // Lean positive (owner: "highlight positive results"): green whenever the
     // trade closed in profit OR ever reached a positive peak.
     final accent =
@@ -1762,10 +1798,40 @@ class _OutcomeSummaryCard extends StatelessWidget {
               ),
               Expanded(
                 child: _stat(
-                  label: closed ? 'Max profit before SL' : 'Peak so far',
+                  // NOT "Max profit before SL" on every closed signal.
+                  //
+                  // That label was conditional on closed/open alone, so a
+                  // signal that closed at Target 1 — which never went near
+                  // its stop — was captioned with an event that did not
+                  // happen. The engine stops tracking the excursion at the
+                  // terminal transition whatever that transition was, so the
+                  // honest name for the figure is simply the peak it reached.
+                  label: closed ? 'Peak reached' : 'Peak so far',
                   value: hasMfe ? '+${mfe.toStringAsFixed(2)}%' : '—',
                   color:
                       hasMfe ? LuminColors.success : LuminColors.textMuted,
+                ),
+              ),
+              // The other half of the excursion.
+              //
+              // The engine has published `max_adverse_excursion_pct` all
+              // along and nothing in this app read it, so every outcome card
+              // showed how far a trade ran the subscriber's way and never how
+              // far it went against them first. On a money screen that is the
+              // flattering half shown alone — and the gap between them is
+              // exactly the drawdown somebody had to sit through to get the
+              // result on the left.
+              //
+              // An em-dash when the engine did not report it: absent is not
+              // "it never went against the entry".
+              Expanded(
+                child: _stat(
+                  label: closed ? 'Worst drawdown' : 'Worst so far',
+                  value: hasMae
+                      ? '-${mae.abs().toStringAsFixed(2)}%'
+                      : '—',
+                  color:
+                      hasMae ? LuminColors.loss : LuminColors.textMuted,
                 ),
               ),
             ],
@@ -1873,22 +1939,28 @@ class _PriceCol extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
+          // 11px, not the 9px this used to be. The theme's own test pins
+          // "labelSmall is the floor and it is 11, never 9 or 10" (owner,
+          // 2026-09-02) — that rule was applied to the ThemeData and not to
+          // the hardcoded styles beside it, and these labels sit on the app's
+          // core screen. Handoff §31: do not shrink important information to
+          // fit more of it on screen.
           label.toUpperCase(),
           style: const TextStyle(
             color: LuminColors.textMuted,
-            fontSize: 9,
-            letterSpacing: 1.2,
+            fontSize: 11,
+            letterSpacing: 0.8,
             fontWeight: FontWeight.w600,
           ),
         ),
-        const SizedBox(height: 2),
+        const SizedBox(height: 3),
         Text(
           value,
           style: TextStyle(
             color: color ?? LuminColors.textPrimary,
-            fontSize: 13,
-            fontWeight: FontWeight.w500,
-            letterSpacing: -0.3,
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+            letterSpacing: -0.2,
           ),
         ),
       ],
@@ -1920,8 +1992,12 @@ class _TradeDetailsCard extends StatelessWidget {
       _cell('SL', _isBreakeven(sig) ? 'BE (banked)' : formatPrice(sig.sl)),
       _cell('TP1', formatPrice(sig.tp1)),
       _cell('TP2', formatPrice(sig.tp2)),
-      _cell('Confidence', '${sig.confidence.toStringAsFixed(1)} (${sig.tier})'),
-      _cell('Status', sig.status),
+      // Two cells, not "73.9 (A)". The parenthesis reads as a qualifier of
+      // the figure; the tier is a separate stamp taken earlier in scoring and
+      // routinely disagrees with it. See [_ConfidenceBadge].
+      _cell('Confidence', sig.confidence.toStringAsFixed(1)),
+      if (sig.tier.trim().isNotEmpty) _cell('Setup grade', sig.tier),
+      _cell('Status', signalStatusLabel(sig.status)),
       if (holdMins != null)
         _cell(
           'Hold',
@@ -2020,14 +2096,43 @@ class _TradeDetailsCard extends StatelessWidget {
 /// engine supports that claim: the score ranks how well a setup matched its
 /// own criteria at the moment it fired, which is a statement about the setup
 /// and not about the outcome.
+///
+/// **The letter does not grade the number, and this widget used to say it
+/// did.** The first cut rendered "CONFIDENCE 73.9 · A" and its sheet read
+/// "scored out of 100 and graded A+ to C", which asserts one relationship
+/// where the engine has two separate stamps:
+///
+///  * `quality_tier` is written **once**, in `scanner/__init__.py`, from the
+///    component total at the moment the setup is scored (≥90 A+, ≥82 A,
+///    ≥74 B, else C);
+///  * `confidence` starts as that same total and is then rewritten **twelve
+///    more times** on the way to dispatch — chart-pattern bonus, decay,
+///    composite rescore, structural flow, price-action and distance
+///    penalties, a ×0.85 haircut, transition and confluence boosts — and
+///    the tier is never regraded against it.
+///
+/// So the pair is routinely non-monotonic, and the live feed proves it:
+/// `65.9 · A`, `81.5 · C`, `90.5 · B` were on screen together
+/// (2026-09-21). Printed as one reading, a subscriber has to conclude that
+/// one of the two is broken. They are both correct and they are about
+/// different moments — the letter is how the setup graded, the number is
+/// where it finished.
+///
+/// The repair is presentational and deliberately stops there: regrading the
+/// tier changes what the money path scores on, which is owner-sign-off
+/// territory. What the app owes is to stop implying an arithmetic that does
+/// not hold — the number keeps the caption it earns, the letter is labelled
+/// as the setup grade, and the sheet says outright that they are stamped at
+/// different points.
 class _ConfidenceBadge extends StatelessWidget {
   const _ConfidenceBadge({required this.confidence, required this.grade});
 
   final double confidence;
 
-  /// The engine's letter grade (A+ / A / B / …). Rendered beside the number
-  /// rather than instead of it — they are one reading, and a letter alone
-  /// hides how close to the boundary a signal sat.
+  /// The engine's `quality_tier` (A+ / A / B / C) — its grade of the SETUP,
+  /// not of [confidence]. Rendered under its own caption for that reason.
+  /// Blank on an engine that did not report one, in which case nothing is
+  /// shown rather than a default letter being invented.
   final String grade;
 
   @override
@@ -2058,30 +2163,31 @@ class _ConfidenceBadge extends StatelessWidget {
                 height: 1.1,
               ),
             ),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  confidence.toStringAsFixed(1),
-                  style: const TextStyle(
-                    color: LuminColors.accent,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    height: 1.2,
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  '· $grade',
-                  style: const TextStyle(
-                    color: LuminColors.accent,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    height: 1.2,
-                  ),
-                ),
-              ],
+            Text(
+              confidence.toStringAsFixed(1),
+              style: const TextStyle(
+                color: LuminColors.accent,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                height: 1.2,
+              ),
             ),
+            // The letter sits under its OWN caption, never as "73.9 · A".
+            // A middot between them reads as one figure and its grade; these
+            // are two stamps taken at different points in scoring, and the
+            // feed shows them disagreeing. An engine that reports no tier
+            // renders nothing here rather than a made-up letter.
+            if (grade.trim().isNotEmpty)
+              Text(
+                'SETUP GRADE $grade',
+                style: const TextStyle(
+                  color: LuminColors.textMuted,
+                  fontSize: 11,
+                  letterSpacing: 0.4,
+                  fontWeight: FontWeight.w600,
+                  height: 1.25,
+                ),
+              ),
           ],
         ),
       ),
@@ -2108,7 +2214,7 @@ class _ConfidenceBadge extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Confidence ${confidence.toStringAsFixed(1)} · $grade',
+              'Confidence ${confidence.toStringAsFixed(1)}',
               style: const TextStyle(
                 color: LuminColors.textPrimary,
                 fontSize: 18,
@@ -2119,13 +2225,38 @@ class _ConfidenceBadge extends StatelessWidget {
             const Text(
               'How cleanly this setup matched its own criteria when it fired '
               '— structure, momentum, volume and market regime, scored out of '
-              '100 and graded A+ to C.',
+              '100.',
               style: TextStyle(
                 color: LuminColors.textSecondary,
                 fontSize: 14,
                 height: 1.45,
               ),
             ),
+            if (grade.trim().isNotEmpty) ...[
+              const SizedBox(height: LuminSpacing.md),
+              Text(
+                'Setup grade $grade',
+                style: const TextStyle(
+                  color: LuminColors.textPrimary,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'A separate stamp, not a grade of the number above. The '
+                'engine grades the setup once, when it is first scored; the '
+                'confidence figure is then adjusted several more times before '
+                'the signal is sent, and the grade is not recalculated. So a '
+                'high score can carry a lower letter and the other way round '
+                '— they describe different moments, and neither is wrong.',
+                style: TextStyle(
+                  color: LuminColors.textSecondary,
+                  fontSize: 14,
+                  height: 1.45,
+                ),
+              ),
+            ],
             const SizedBox(height: LuminSpacing.md),
             Container(
               padding: const EdgeInsets.all(LuminSpacing.md),
@@ -2149,6 +2280,74 @@ class _ConfidenceBadge extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// The strategy line under the symbol: branded name, then the plain sentence.
+///
+/// Handoff §10 — "keep branded strategy names, they give Lumin personality,
+/// but pair them with short plain-language descriptions". The card used to
+/// print `The Reclaimer • FAILED AUCTION RECLAIM`, which is the brand plus the
+/// engine's identifier: two names for the setup and no explanation of it.
+///
+/// The tagline is looked up from [kAgents] rather than written again here.
+/// When there is none — the engine has 29 setup classes and that list
+/// describes 15 — the engine's own name renders in sentence case beside the
+/// brand, so the line degrades to something readable instead of vanishing or
+/// inventing a description.
+class _StrategyLine extends StatelessWidget {
+  const _StrategyLine({required this.agentName, required this.setupName});
+
+  final String agentName;
+  final String setupName;
+
+  @override
+  Widget build(BuildContext context) {
+    final tagline = setupTagline(setupName);
+    final secondary = tagline ?? setupDisplayName(setupName);
+    final hasBrand = agentName.trim().isNotEmpty;
+    final hasSecondary = secondary.trim().isNotEmpty;
+    if (!hasBrand && !hasSecondary) return const SizedBox.shrink();
+    // ONE rich line, not two Flexible children.
+    //
+    // The first cut split the row `flex: 1` / `flex: 2`, which divides the
+    // width by ratio rather than by need — so "The Momentum Rider" ellipsised
+    // to "The Momentum R…" beside a tagline with room to spare. Caught by
+    // rendering it, not by a test.
+    //
+    // As a single line the ellipsis falls at the true end of the combined
+    // text, which also means the BRAND is never cut before the tagline is:
+    // the identity survives, and the expendable half is what gives way.
+    return Text.rich(
+      TextSpan(
+        children: [
+          if (hasBrand)
+            TextSpan(
+              text: agentName,
+              style: const TextStyle(
+                color: LuminColors.textPrimary,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          if (hasBrand && hasSecondary)
+            const TextSpan(
+              text: '  ·  ',
+              style: TextStyle(color: LuminColors.textMuted, fontSize: 13),
+            ),
+          if (hasSecondary)
+            TextSpan(
+              text: secondary,
+              style: const TextStyle(
+                color: LuminColors.textSecondary,
+                fontSize: 13,
+              ),
+            ),
+        ],
+      ),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
     );
   }
 }

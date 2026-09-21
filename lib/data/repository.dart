@@ -4482,7 +4482,10 @@ class HttpRepository implements LuminRepository {
     final j = (await client.get('/api/pulse')) as Map<String, dynamic>;
     return MockEngineSnapshot(
       status: j['status'] as String? ?? 'Healthy',
-      regime: j['regime'] as String? ?? 'RANGING',
+      // Empty, not 'RANGING'. An absent regime is a fact we do not have;
+      // naming one lights a segment on the Pulse bar and states a market
+      // condition nothing reported. _RegimeBar renders empty as Unknown.
+      regime: j['regime'] as String? ?? '',
       regimePctTrending:
           (j['regime_pct_trending'] as num?)?.toDouble() ?? 0.0,
       todayPnlUsd: (j['today_pnl_usd'] as num?)?.toDouble() ?? 0.0,
@@ -5201,7 +5204,9 @@ class HttpRepository implements LuminRepository {
         tp2: (j['tp2'] as num?)?.toDouble() ?? 0.0,
         tp3: (j['tp3'] as num?)?.toDouble() ?? 0.0,
         confidence: (j['confidence'] as num?)?.toDouble() ?? 0.0,
-        tier: j['quality_tier'] as String? ?? 'B',
+        // No default letter: an engine that reported no tier must not
+        // have one invented for it (MockSignal.tier).
+        tier: j['quality_tier'] as String? ?? '',
         status: j['status'] as String? ?? 'ACTIVE',
         pnlPct: (j['pnl_pct'] as num?)?.toDouble() ?? 0.0,
         minutesAgo: (j['minutes_ago'] as num?)?.toInt() ?? 0,
@@ -5220,6 +5225,10 @@ class HttpRepository implements LuminRepository {
         preTpHit: j['pre_tp_hit'] as bool? ?? false,
         maxFavorableExcursionPct:
             (j['max_favorable_excursion_pct'] as num?)?.toDouble() ?? 0.0,
+        // No `?? 0.0`: an engine that did not report MAE has not said the
+        // trade never went against the entry. See MockSignal.
+        maxAdverseExcursionPct:
+            (j['max_adverse_excursion_pct'] as num?)?.toDouble(),
         bestTpPnlPct: (j['best_tp_pnl_pct'] as num?)?.toDouble() ?? 0.0,
         isOpen: j['is_open'] as bool?,
       );

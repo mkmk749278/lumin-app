@@ -73,6 +73,7 @@ class MockSignal {
     this.preTpThresholdPct = 0.0,
     this.preTpHit = false,
     this.maxFavorableExcursionPct = 0.0,
+    this.maxAdverseExcursionPct,
     this.bestTpPnlPct = 0.0,
     this.isOpen,
   });
@@ -88,7 +89,15 @@ class MockSignal {
   final double tp2;
   final double tp3;
   final double confidence;
-  final String tier; // A+ / B
+  /// The engine's `quality_tier` (A+ / A / B / C) — its grade of the
+  /// SETUP, stamped once when the setup is scored. It is **not** a grade
+  /// of [confidence]: that figure is adjusted several more times before
+  /// dispatch and the tier is never recomputed, so the two routinely
+  /// disagree. Render them apart — see `_ConfidenceBadge`.
+  ///
+  /// Empty when the engine reported none. Do not substitute a letter:
+  /// a default 'B' puts a grade on screen that nothing produced.
+  final String tier;
   final String status; // ACTIVE / TP1_HIT / TP2_HIT / TP3_HIT / SL_HIT / INVALIDATED
   final double pnlPct;
 
@@ -135,6 +144,21 @@ class MockSignal {
   /// showed *before* it hit SL / closed — the "Max profit reached before SL"
   /// the outcome summary highlights.  0.0 when offline / mock data.
   final double maxFavorableExcursionPct;
+
+  /// Deepest unrealised LOSS % from entry the signal ever reached (max
+  /// adverse excursion), from the engine's `max_adverse_excursion_pct`.
+  ///
+  /// **MFE without MAE bounds nothing.** The engine has published both halves
+  /// all along and this app read only the favourable one, so a subscriber saw
+  /// how far a trade ran their way and never how far it went against them
+  /// first — the flattering half, alone, on a money screen. The two together
+  /// are what answer "did this survive a drawdown I could have sat through",
+  /// which is the question a stop distance is actually about.
+  ///
+  /// Nullable on purpose: `null` is an engine that did not report it, and a
+  /// `0.0` substitute would claim a trade never went against the entry at
+  /// all, which is the one reading nothing supports. Rendered as an em-dash.
+  final double? maxAdverseExcursionPct;
 
   /// Locked profit % at the highest TP level hit (calculated at exact TP
   /// price).  After TP1 this is the TP1 result; after TP2 the TP2 result.
@@ -197,6 +221,7 @@ class MockSignal {
       preTpThresholdPct: preTpThresholdPct,
       preTpHit: preTpHit,
       maxFavorableExcursionPct: maxFavorableExcursionPct,
+      maxAdverseExcursionPct: maxAdverseExcursionPct,
       bestTpPnlPct: bestTpPnlPct,
       isOpen: isOpen,
     );
@@ -226,6 +251,7 @@ class MockSignal {
     'preTpThresholdPct': preTpThresholdPct,
     'preTpHit': preTpHit,
     'maxFavorableExcursionPct': maxFavorableExcursionPct,
+    'maxAdverseExcursionPct': maxAdverseExcursionPct,
     'bestTpPnlPct': bestTpPnlPct,
     'isOpen': isOpen,
   };
@@ -242,7 +268,7 @@ class MockSignal {
     tp2: (m['tp2'] as num?)?.toDouble() ?? 0.0,
     tp3: (m['tp3'] as num?)?.toDouble() ?? 0.0,
     confidence: (m['confidence'] as num?)?.toDouble() ?? 0.0,
-    tier: m['tier'] as String? ?? 'B',
+    tier: m['tier'] as String? ?? '',
     status: m['status'] as String? ?? 'ACTIVE',
     pnlPct: (m['pnlPct'] as num?)?.toDouble() ?? 0.0,
     minutesAgo: (m['minutesAgo'] as num?)?.toInt() ?? 0,
@@ -255,6 +281,7 @@ class MockSignal {
     preTpHit: m['preTpHit'] as bool? ?? false,
     maxFavorableExcursionPct:
         (m['maxFavorableExcursionPct'] as num?)?.toDouble() ?? 0.0,
+    maxAdverseExcursionPct: (m['maxAdverseExcursionPct'] as num?)?.toDouble(),
     bestTpPnlPct: (m['bestTpPnlPct'] as num?)?.toDouble() ?? 0.0,
     isOpen: m['isOpen'] as bool?,
   );

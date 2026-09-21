@@ -225,7 +225,16 @@ class _Slide1 extends StatelessWidget {
             runSpacing: LuminSpacing.sm,
             children: const [
               _StatChip(label: '75+ pairs', icon: Icons.radar_outlined),
-              _StatChip(label: '15 AI analysts', icon: Icons.smart_toy_outlined),
+              // No count. This screen runs BEFORE auth, so it has no
+              // repository and cannot read the live roster — any number
+              // here is a constant asserting a property of a moving
+              // system. '15' came from kAgents.length, which is a
+              // DESCRIPTION table; the engine was running 29 setup
+              // classes when this was measured (2026-09-21), so the
+              // first claim a prospective subscriber read understated
+              // the product by half. The Agents page, which CAN ask the
+              // engine, is where the real count belongs.
+              _StatChip(label: 'AI analysts', icon: Icons.smart_toy_outlined),
               _StatChip(label: 'Paper mode first', icon: Icons.science_outlined),
             ],
           ),
@@ -309,14 +318,19 @@ class _Slide2 extends StatelessWidget {
 
           _Step(
             number: '1',
-            title: 'Scanner watches 75 pairs',
-            body: 'Every 15 seconds, the engine scans 75 USDT futures '
-                'pairs for high-probability setups.',
+            // "75+", not "75". The core universe is 75, and the scanner
+            // also promotes movers into it for several hours at a time, so
+            // the live count sits above the floor rather than on it. A flat
+            // 75 is a constant asserting a property of a moving system --
+            // the same shape as the analyst count removed above.
+            title: 'Scanner watches 75+ pairs',
+            body: 'Every 15 seconds, the engine scans the USDT futures '
+                'board for high-probability setups.',
           ),
           const SizedBox(height: LuminSpacing.lg),
           _Step(
             number: '2',
-            title: '15 AI analysts score each signal',
+            title: 'AI analysts score each signal',
             body: 'Momentum, structure, volume profile, regime — '
                 'every angle checked before a signal fires.',
           ),

@@ -27,7 +27,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../data/app_config.dart';
-import '../../../data/repository.dart';
 import '../../../data/server_side_execution_models.dart';
 import '../../../shared/tokens.dart';
 import '../../launch/region_gate.dart';
@@ -541,13 +540,27 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
             spacing: LuminSpacing.sm,
             runSpacing: LuminSpacing.xs,
             children: [
+              // Tri-state, and the label says what the state IS.
+              //
+              // Two defects here before 2026-09-21, on the security card of a
+              // live financial app. The `?? false` collapsed the engine's
+              // deliberately-nullable flag — the model keeps three states and
+              // this render threw the third away — so "we could not check"
+              // and "we checked and it failed" drew the same amber warning.
+              // And the label was FIXED: an amber chip still read
+              // "Withdraw OFF", so the one state the warning exists to
+              // announce was the one it could not say.
               _validationChip(
-                ok: status.withdrawDisabledOk ?? false,
-                label: 'Withdraw OFF',
+                ok: status.withdrawDisabledOk,
+                okLabel: 'Withdraw off',
+                badLabel: 'Withdraw ENABLED',
+                unknownLabel: 'Withdraw — not reported',
               ),
               _validationChip(
-                ok: status.ipWhitelistOk ?? false,
-                label: 'IP access list',
+                ok: status.ipWhitelistOk,
+                okLabel: 'IP access list on',
+                badLabel: 'IP access list OFF',
+                unknownLabel: 'IP access list — not reported',
               ),
             ],
           ),
@@ -588,37 +601,62 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
     );
   }
 
-  Widget _validationChip({required bool ok, required String label}) =>
-      Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: LuminSpacing.sm,
-          vertical: LuminSpacing.xs,
-        ),
-        decoration: BoxDecoration(
-          color:
-              (ok ? LuminColors.success : LuminColors.warn).withOpacity(0.12),
-          borderRadius: BorderRadius.circular(LuminRadii.pill),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              ok ? Icons.check_circle_outline : Icons.warning_amber,
-              color: ok ? LuminColors.success : LuminColors.warn,
-              size: 12,
+  /// One key-validation chip, in three states rather than two.
+  ///
+  /// [ok] is the engine's flag: true (validated good), false (validated bad),
+  /// null (the engine did not report it — an older build, or a key blob
+  /// stored before these fields existed).
+  ///
+  /// Null renders MUTED and says "not reported" rather than green or amber.
+  /// Green would tell a subscriber their key is proven safe when nothing
+  /// proved it, which is the reassuring-in-the-wrong-direction error this repo
+  /// has a standing rule about; amber — what it used to do — sends someone to
+  /// Binance to fix a setting that may be perfectly correct.
+  ///
+  /// Worth knowing when reading this: for a CONNECTED user the engine
+  /// currently always sends a concrete bool, because its keystore reads a
+  /// missing Firestore field as `False` (`firestore_keystore.py`, `data.get(
+  /// "ip_whitelist_ok", False)`). So the same absent-vs-false conflation
+  /// exists one layer down, in engine code that is owner-sign-off territory
+  /// (connect-time validation). This tri-state is correct and mostly latent
+  /// until that is addressed — it is not a fix for the engine's default.
+  Widget _validationChip({
+    required bool? ok,
+    required String okLabel,
+    required String badLabel,
+    required String unknownLabel,
+  }) {
+    final (colour, icon, label) = switch (ok) {
+      true => (LuminColors.success, Icons.check_circle_outline, okLabel),
+      false => (LuminColors.warn, Icons.warning_amber, badLabel),
+      null => (LuminColors.textMuted, Icons.help_outline, unknownLabel),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: LuminSpacing.sm,
+        vertical: LuminSpacing.xs,
+      ),
+      decoration: BoxDecoration(
+        color: colour.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(LuminRadii.pill),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: colour, size: 13),
+          const SizedBox(width: LuminSpacing.xs),
+          Text(
+            label,
+            style: TextStyle(
+              color: colour,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
             ),
-            const SizedBox(width: LuminSpacing.xs),
-            Text(
-              label,
-              style: TextStyle(
-                color: ok ? LuminColors.success : LuminColors.warn,
-                fontSize: 10,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-        ),
-      );
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _connectForm() => Container(
         padding: const EdgeInsets.all(LuminSpacing.md),
