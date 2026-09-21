@@ -26,6 +26,7 @@ import '../trade/paper_trades_page.dart';
 import '../trial/trial_gate.dart';
 import 'alerts_tab.dart';
 import 'track_record_month_card.dart';
+import '../signals/signal_language.dart';
 
 // _PulseBundle promoted to ``PulseBundle`` in lib/data/repository.dart
 // (Phase 2b perf push) so the repository can cache the assembled bundle
@@ -385,7 +386,10 @@ class _RegimeBar extends StatelessWidget {
       case 'VOLATILE':
         return LuminColors.warn;
       case 'QUIET':
+        return LuminColors.textMuted;
       default:
+        // A regime this build has never heard of. Muted, like QUIET, but it
+        // reaches here by a different route and [_labelFor] says so.
         return LuminColors.textMuted;
     }
   }
@@ -401,8 +405,23 @@ class _RegimeBar extends StatelessWidget {
       case 'VOLATILE':
         return 'Volatile';
       case 'QUIET':
-      default:
         return 'Quiet';
+      default:
+        // NOT 'Quiet'.
+        //
+        // The five cases above are the engine's whole `MarketRegime` enum
+        // today, so this branch means one of two things: the engine added a
+        // sixth regime, or it reported none at all. Either way no segment
+        // below lights up, because none of them matches - so answering
+        // 'Quiet' puts a confident label over an unlit bar and tells a
+        // subscriber the market is calm on the strength of a value we could
+        // not read. A quiet market and an unreadable one are different facts,
+        // and the reassuring one is the dangerous direction.
+        //
+        // An empty regime says we have nothing; anything else renders the
+        // engine's own word, so a new regime arrives named rather than
+        // disguised as the quietest state we know.
+        return regime.trim().isEmpty ? 'Unknown' : regime.trim();
     }
   }
 
@@ -1216,7 +1235,7 @@ class _RecentSignalRow extends StatelessWidget {
                     ),
                     const SizedBox(width: LuminSpacing.xs),
                     Text(
-                      '• ${sig.status}',
+                      '• ${signalStatusLabel(sig.status)}',
                       style: TextStyle(
                         color: _statusColor(),
                         fontSize: 11,

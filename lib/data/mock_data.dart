@@ -88,7 +88,15 @@ class MockSignal {
   final double tp2;
   final double tp3;
   final double confidence;
-  final String tier; // A+ / B
+  /// The engine's `quality_tier` (A+ / A / B / C) — its grade of the
+  /// SETUP, stamped once when the setup is scored. It is **not** a grade
+  /// of [confidence]: that figure is adjusted several more times before
+  /// dispatch and the tier is never recomputed, so the two routinely
+  /// disagree. Render them apart — see `_ConfidenceBadge`.
+  ///
+  /// Empty when the engine reported none. Do not substitute a letter:
+  /// a default 'B' puts a grade on screen that nothing produced.
+  final String tier;
   final String status; // ACTIVE / TP1_HIT / TP2_HIT / TP3_HIT / SL_HIT / INVALIDATED
   final double pnlPct;
 
@@ -242,7 +250,7 @@ class MockSignal {
     tp2: (m['tp2'] as num?)?.toDouble() ?? 0.0,
     tp3: (m['tp3'] as num?)?.toDouble() ?? 0.0,
     confidence: (m['confidence'] as num?)?.toDouble() ?? 0.0,
-    tier: m['tier'] as String? ?? 'B',
+    tier: m['tier'] as String? ?? '',
     status: m['status'] as String? ?? 'ACTIVE',
     pnlPct: (m['pnlPct'] as num?)?.toDouble() ?? 0.0,
     minutesAgo: (m['minutesAgo'] as num?)?.toInt() ?? 0,

@@ -162,7 +162,10 @@ void main() {
       final s = (await r.fetchSignals()).single;
       expect(s.id, '');
       expect(s.direction, 'LONG');
-      expect(s.tier, 'B');
+      // Deliberately NOT 'B'. An absent quality_tier means the engine
+      // graded nothing, and defaulting it put a letter on screen that
+      // nothing produced — the badge renders blank instead.
+      expect(s.tier, '');
       expect(s.status, 'ACTIVE');
       expect(s.entry, 0.0);
       // No is_open from the engine → null, and the effective getter falls
