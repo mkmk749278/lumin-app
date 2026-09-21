@@ -1749,6 +1749,19 @@ class _OutcomeSummaryCard extends StatelessWidget {
     final rawMfe = sig.maxFavorableExcursionPct;
     final mfe = closed ? rawMfe : (rawMfe > pnlPct ? rawMfe : pnlPct);
     final hasMfe = mfe > 0;
+    // MAE is clamped DOWN to the current loss for a live signal, the mirror
+    // of the MFE clamp above and for the same reason: the app has itself just
+    // witnessed pnlPct off the 5s poll, while the engine's recorded excursion
+    // rides the slower snapshot, so a fresh dip can be deeper than anything
+    // the snapshot has seen. A closed signal keeps the engine's record — its
+    // excursion is over and cannot be recomputed from the current price.
+    final rawMae = sig.maxAdverseExcursionPct;
+    final double? mae = closed
+        ? rawMae
+        : (pnlPct < 0
+            ? ((rawMae == null || rawMae > pnlPct) ? pnlPct : rawMae)
+            : rawMae);
+    final hasMae = mae != null && mae < 0;
     // Lean positive (owner: "highlight positive results"): green whenever the
     // trade closed in profit OR ever reached a positive peak.
     final accent =
@@ -1785,10 +1798,40 @@ class _OutcomeSummaryCard extends StatelessWidget {
               ),
               Expanded(
                 child: _stat(
-                  label: closed ? 'Max profit before SL' : 'Peak so far',
+                  // NOT "Max profit before SL" on every closed signal.
+                  //
+                  // That label was conditional on closed/open alone, so a
+                  // signal that closed at Target 1 — which never went near
+                  // its stop — was captioned with an event that did not
+                  // happen. The engine stops tracking the excursion at the
+                  // terminal transition whatever that transition was, so the
+                  // honest name for the figure is simply the peak it reached.
+                  label: closed ? 'Peak reached' : 'Peak so far',
                   value: hasMfe ? '+${mfe.toStringAsFixed(2)}%' : '—',
                   color:
                       hasMfe ? LuminColors.success : LuminColors.textMuted,
+                ),
+              ),
+              // The other half of the excursion.
+              //
+              // The engine has published `max_adverse_excursion_pct` all
+              // along and nothing in this app read it, so every outcome card
+              // showed how far a trade ran the subscriber's way and never how
+              // far it went against them first. On a money screen that is the
+              // flattering half shown alone — and the gap between them is
+              // exactly the drawdown somebody had to sit through to get the
+              // result on the left.
+              //
+              // An em-dash when the engine did not report it: absent is not
+              // "it never went against the entry".
+              Expanded(
+                child: _stat(
+                  label: closed ? 'Worst drawdown' : 'Worst so far',
+                  value: hasMae
+                      ? '-${mae.abs().toStringAsFixed(2)}%'
+                      : '—',
+                  color:
+                      hasMae ? LuminColors.loss : LuminColors.textMuted,
                 ),
               ),
             ],

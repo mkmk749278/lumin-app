@@ -146,7 +146,13 @@ class _SettingsPageState extends State<SettingsPage> implements ScrollToTop {
               SettingsRow(
                 icon: Icons.psychology_outlined,
                 label: 'AI agents',
-                subtitle: 'The 15 setup specialists and their live stats',
+                // No count. This row cannot ask the engine how many
+                // setups it runs, and the 15 it used to quote was
+                // kAgents.length — the size of this build's
+                // DESCRIPTION table, against 29 live setup classes
+                // measured 2026-09-21. The destination page walks the
+                // engine's own roster and carries the real number.
+                subtitle: 'The setup specialists and their live stats',
                 onTap: () => _push(context, const AgentsPage()),
               ),
             ],

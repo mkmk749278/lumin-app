@@ -73,6 +73,7 @@ class MockSignal {
     this.preTpThresholdPct = 0.0,
     this.preTpHit = false,
     this.maxFavorableExcursionPct = 0.0,
+    this.maxAdverseExcursionPct,
     this.bestTpPnlPct = 0.0,
     this.isOpen,
   });
@@ -144,6 +145,21 @@ class MockSignal {
   /// the outcome summary highlights.  0.0 when offline / mock data.
   final double maxFavorableExcursionPct;
 
+  /// Deepest unrealised LOSS % from entry the signal ever reached (max
+  /// adverse excursion), from the engine's `max_adverse_excursion_pct`.
+  ///
+  /// **MFE without MAE bounds nothing.** The engine has published both halves
+  /// all along and this app read only the favourable one, so a subscriber saw
+  /// how far a trade ran their way and never how far it went against them
+  /// first — the flattering half, alone, on a money screen. The two together
+  /// are what answer "did this survive a drawdown I could have sat through",
+  /// which is the question a stop distance is actually about.
+  ///
+  /// Nullable on purpose: `null` is an engine that did not report it, and a
+  /// `0.0` substitute would claim a trade never went against the entry at
+  /// all, which is the one reading nothing supports. Rendered as an em-dash.
+  final double? maxAdverseExcursionPct;
+
   /// Locked profit % at the highest TP level hit (calculated at exact TP
   /// price).  After TP1 this is the TP1 result; after TP2 the TP2 result.
   /// 0.0 when no TP has been hit yet.  Displayed as the "banked" result for
@@ -205,6 +221,7 @@ class MockSignal {
       preTpThresholdPct: preTpThresholdPct,
       preTpHit: preTpHit,
       maxFavorableExcursionPct: maxFavorableExcursionPct,
+      maxAdverseExcursionPct: maxAdverseExcursionPct,
       bestTpPnlPct: bestTpPnlPct,
       isOpen: isOpen,
     );
@@ -234,6 +251,7 @@ class MockSignal {
     'preTpThresholdPct': preTpThresholdPct,
     'preTpHit': preTpHit,
     'maxFavorableExcursionPct': maxFavorableExcursionPct,
+    'maxAdverseExcursionPct': maxAdverseExcursionPct,
     'bestTpPnlPct': bestTpPnlPct,
     'isOpen': isOpen,
   };
@@ -263,6 +281,7 @@ class MockSignal {
     preTpHit: m['preTpHit'] as bool? ?? false,
     maxFavorableExcursionPct:
         (m['maxFavorableExcursionPct'] as num?)?.toDouble() ?? 0.0,
+    maxAdverseExcursionPct: (m['maxAdverseExcursionPct'] as num?)?.toDouble(),
     bestTpPnlPct: (m['bestTpPnlPct'] as num?)?.toDouble() ?? 0.0,
     isOpen: m['isOpen'] as bool?,
   );

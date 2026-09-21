@@ -5225,6 +5225,10 @@ class HttpRepository implements LuminRepository {
         preTpHit: j['pre_tp_hit'] as bool? ?? false,
         maxFavorableExcursionPct:
             (j['max_favorable_excursion_pct'] as num?)?.toDouble() ?? 0.0,
+        // No `?? 0.0`: an engine that did not report MAE has not said the
+        // trade never went against the entry. See MockSignal.
+        maxAdverseExcursionPct:
+            (j['max_adverse_excursion_pct'] as num?)?.toDouble(),
         bestTpPnlPct: (j['best_tp_pnl_pct'] as num?)?.toDouble() ?? 0.0,
         isOpen: j['is_open'] as bool?,
       );

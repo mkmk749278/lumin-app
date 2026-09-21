@@ -58,11 +58,21 @@ void main() {
     );
   });
 
-  test('kAgents is not counted anywhere outside the agents feature', () {
-    // kAgents is a description table. Anything that renders its length is
-    // reporting how much COPY this build carries, not what the engine runs.
-    for (final dir in const ['lib/features/onboarding', 'lib/features/pulse']) {
-      for (final f in Directory(dir)
+  // The two tests above cover the welcome screen. These two sweep the WHOLE
+  // of lib/, because that is where this keeps happening: the first fix
+  // handled welcome_page.dart, and the Menu's "The 15 setup specialists"
+  // was still on screen an hour later — found by rendering the app, not by
+  // the guard that had just shipped. A guard scoped to the file where a
+  // defect was noticed is silent by construction on the next file.
+  group('no surface quotes a roster size it cannot check', () {
+    // kAgents is a DESCRIPTION table. Its length is how much copy this build
+    // carries, never what the engine runs. Only the agents feature may name
+    // it, and even there only as the offline fallback's own count.
+    final offenders = <String>[];
+    final counts = <String>[];
+
+    setUpAll(() {
+      for (final f in Directory('lib')
           .listSync(recursive: true)
           .whereType<File>()
           .where((f) => f.path.endsWith('.dart'))) {
@@ -71,12 +81,30 @@ void main() {
             .split('\n')
             .where((l) => !l.trimLeft().startsWith('//'))
             .join('\n');
-        expect(
-          body.contains('kAgents.length'),
-          isFalse,
-          reason: '${f.path} renders the size of the description table.',
-        );
+        if (!f.path.startsWith('lib/features/agents/') &&
+            body.contains('kAgents.length')) {
+          offenders.add(f.path);
+        }
+        // A literal count immediately in front of a roster noun, anywhere in
+        // a user-facing string.
+        final m = RegExp(
+          r'\b\d{1,3}\s+(?:AI\s+|setup\s+)?'
+          r'(?:analysts|agents|specialists|evaluators|strategies|setups)\b',
+          caseSensitive: false,
+        ).firstMatch(body);
+        if (m != null) counts.add('${f.path}: "${m.group(0)}"');
       }
-    }
+    });
+
+    test('kAgents.length is rendered only inside the agents feature', () {
+      expect(offenders, isEmpty,
+          reason: 'These render the size of the description table: $offenders');
+    });
+
+    test('no literal roster count anywhere in lib/', () {
+      expect(counts, isEmpty,
+          reason: 'A number here goes stale on the next evaluator the engine '
+              'adds, and nothing in this repo will notice: $counts');
+    });
   });
 }

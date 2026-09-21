@@ -493,6 +493,46 @@ class _StatsCard extends StatelessWidget {
                   color: LuminColors.accent,
                 ),
               ),
+              // The third slot is deliberately empty rather than carrying
+              // `generated` — see the block below.
+              const Expanded(child: SizedBox.shrink()),
+            ],
+          ),
+          // `generated` is on a DIFFERENT CLOCK and had been pooled with the
+          // five counters above under one "LAST 24h" heading.
+          //
+          // The engine's own schema says so: "Telemetry counters (attempts /
+          // generated / no_signal) RESET ON EACH SCAN-CYCLE WINDOW", while
+          // closed_today / tp_hits / sl_hits / invalidated come from
+          // _signal_history and cover 24 hours. A scan cycle is ~15 seconds,
+          // so for a setup that fires a few times a day `generated` reads 0
+          // essentially always — and under that heading it says "this agent
+          // produced nothing today", directly contradicting the Closed and
+          // Last fired cells beside it.
+          //
+          // Observed live 2026-09-21 on MOVER_TREND_PULLBACK: TP 9 / SL 16 /
+          // Closed 25 / Last fired 43m ago, and "Generated 0" in the same
+          // card. Every number was correct; the heading made one of them
+          // mean something it does not.
+          //
+          // It stays on the page because it is the live "is the gate chain
+          // producing anything right now" read, which nothing else here
+          // answers. It just gets its own clock stated.
+          const SizedBox(height: LuminSpacing.md),
+          const Divider(height: 1, color: LuminColors.cardBorder),
+          const SizedBox(height: LuminSpacing.md),
+          const Text(
+            'THIS SCAN CYCLE',
+            style: TextStyle(
+              color: LuminColors.textMuted,
+              fontSize: 10,
+              letterSpacing: 1.2,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: LuminSpacing.sm),
+          Row(
+            children: [
               Expanded(
                 child: _Stat(
                   label: 'Generated',
@@ -500,7 +540,26 @@ class _StatsCard extends StatelessWidget {
                   color: LuminColors.accent,
                 ),
               ),
+              Expanded(
+                child: _Stat(
+                  label: 'Attempts',
+                  value: '${stat.attempts}',
+                  color: LuminColors.textMuted,
+                ),
+              ),
+              const Expanded(child: SizedBox.shrink()),
             ],
+          ),
+          const SizedBox(height: LuminSpacing.sm),
+          const Text(
+            'Counted since the scanner\'s last pass, a few seconds ago — not '
+            'over the day. Zero here is the ordinary reading for a setup that '
+            'fires a handful of times a day.',
+            style: TextStyle(
+              color: LuminColors.textMuted,
+              fontSize: 11,
+              height: 1.4,
+            ),
           ),
         ],
       ),

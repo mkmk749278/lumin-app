@@ -15,6 +15,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:lumin/features/agents/agent_data.dart';
 
 void main() {
+  _generatedClockGuard();
   group('agentForSetup', () {
     test('a described setup keeps its brand, tagline and icon', () {
       final a = agentForSetup('SR_FLIP_RETEST');
@@ -149,6 +150,58 @@ void main() {
         expect(a.name, isNot(contains('_')),
             reason: '$id renders the raw enum at the reader');
       }
+    });
+  });
+}
+
+/// `generated` is a per-scan-cycle counter and must not sit under the 24h
+/// heading.
+///
+/// The engine's own `AgentStat` docstring draws the line: "Telemetry counters
+/// (attempts / generated / no_signal) reset on each scan-cycle window", while
+/// `closed_today` / `tp_hits` / `sl_hits` / `invalidated` come from
+/// `_signal_history` and cover 24 hours. A scan cycle is ~15 seconds.
+///
+/// Pooled under "STATS — LAST 24h" the counter reads as "this agent produced
+/// nothing today". Observed live 2026-09-21 on MOVER_TREND_PULLBACK:
+/// TP 9 / SL 16 / Closed 25 / Last fired 43m ago, and "Generated 0" in the
+/// same card. Every figure was correct and the heading made one of them mean
+/// something it does not — two clocks under one caption, which is the defect
+/// both companion repos record under several names.
+///
+/// Found by rendering the page, not by a test — so this is the test.
+void _generatedClockGuard() {
+  group('the scan-cycle counter keeps its own clock', () {
+    final src =
+        File('lib/features/agents/agents_page.dart').readAsStringSync();
+    final code = src
+        .split('\n')
+        .where((l) => !l.trimLeft().startsWith('//'))
+        .join('\n');
+
+    test('Generated is rendered after its own heading, not the 24h one', () {
+      final day = code.indexOf('STATS — LAST 24h');
+      final cycle = code.indexOf('THIS SCAN CYCLE');
+      final generated = code.indexOf("label: 'Generated'");
+      expect(day, greaterThanOrEqualTo(0), reason: 'lost the 24h heading');
+      expect(cycle, greaterThan(day),
+          reason: 'the scan-cycle section must come after the 24h one');
+      expect(
+        generated,
+        greaterThan(cycle),
+        reason: 'Generated renders under the 24h heading, where a 0 reads as '
+            '"produced nothing today" beside a Closed count that says '
+            'otherwise.',
+      );
+    });
+
+    test('the section says what clock it is on', () {
+      expect(
+        code.contains('last pass, a few seconds ago'),
+        isTrue,
+        reason: 'A heading alone does not tell a subscriber that a scan '
+            'cycle is seconds long, so a zero still reads as a fault.',
+      );
     });
   });
 }
