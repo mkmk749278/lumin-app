@@ -442,7 +442,7 @@ class _RegimeBar extends StatelessWidget {
                   'Regime',
                   style: TextStyle(
                     color: LuminColors.textMuted,
-                    fontSize: 10,
+                    fontSize: 11,
                     letterSpacing: 1.2,
                     fontWeight: FontWeight.w600,
                   ),
@@ -493,7 +493,7 @@ class _RegimeBar extends StatelessWidget {
                           _labelFor(regime),
                           style: TextStyle(
                             color: active ? c : LuminColors.textMuted,
-                            fontSize: 9,
+                            fontSize: 11,
                             fontWeight:
                                 active ? FontWeight.w700 : FontWeight.w500,
                             letterSpacing: 0.3,
@@ -569,7 +569,7 @@ class _TodayPnlCard extends StatelessWidget {
                       "YOUR REALISED P&L",
                       style: TextStyle(
                         color: LuminColors.textMuted,
-                        fontSize: 10,
+                        fontSize: 11,
                         letterSpacing: 1.2,
                         fontWeight: FontWeight.w600,
                       ),
@@ -677,7 +677,7 @@ class _NotTradingYetCard extends StatelessWidget {
                     "YOUR REALISED P&L",
                     style: TextStyle(
                       color: LuminColors.textMuted,
-                      fontSize: 10,
+                      fontSize: 11,
                       letterSpacing: 1.2,
                       fontWeight: FontWeight.w600,
                     ),
@@ -735,7 +735,7 @@ class _DailyLossBudgetCard extends StatelessWidget {
                   'DAILY LOSS BUDGET',
                   style: TextStyle(
                     color: LuminColors.textMuted,
-                    fontSize: 10,
+                    fontSize: 11,
                     letterSpacing: 1.2,
                     fontWeight: FontWeight.w600,
                   ),
@@ -815,7 +815,7 @@ class _PnlChartCard extends StatelessWidget {
                     'YOUR PAPER P&L — LAST 30 DAYS',
                     style: TextStyle(
                       color: LuminColors.textMuted,
-                      fontSize: 10,
+                      fontSize: 11,
                       letterSpacing: 1.2,
                       fontWeight: FontWeight.w600,
                     ),
@@ -830,7 +830,7 @@ class _PnlChartCard extends StatelessWidget {
                   'shared',
                   style: TextStyle(
                     color: LuminColors.textMuted,
-                    fontSize: 9,
+                    fontSize: 11,
                     fontStyle: FontStyle.italic,
                   ),
                 ),
@@ -914,7 +914,7 @@ class _PnlAggregateCell extends StatelessWidget {
           subtitle,
           style: const TextStyle(
             color: LuminColors.textMuted,
-            fontSize: 10,
+            fontSize: 11,
           ),
         ),
       ],
@@ -1035,7 +1035,10 @@ class _TopPairTickerStrip extends StatelessWidget {
               ),
             ),
             SizedBox(
-              height: 56,
+              // Scales with the reader's text size: a fixed 56 clipped the
+              // pills' two lines at 1.3x (render check, 2026-09-23). Exactly
+              // 56 at the default scale.
+              height: 12 + MediaQuery.textScalerOf(context).scale(44),
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 physics: const BouncingScrollPhysics(),
@@ -1136,7 +1139,7 @@ class _RecentSignalsCard extends StatelessWidget {
                   'RECENT SIGNALS',
                   style: TextStyle(
                     color: LuminColors.textMuted,
-                    fontSize: 10,
+                    fontSize: 11,
                     letterSpacing: 1.2,
                     fontWeight: FontWeight.w600,
                   ),
@@ -1213,12 +1216,19 @@ class _RecentSignalRow extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Text(
-                      sig.symbol,
-                      style: const TextStyle(
-                        color: LuminColors.textPrimary,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
+                    // Symbol and status truncate rather than push the row
+                    // past the card edge — a long mover symbol plus a long
+                    // status overflowed by 32px on a 360dp phone at 1.3x.
+                    Flexible(
+                      child: Text(
+                        sig.symbol,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: LuminColors.textPrimary,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                     const SizedBox(width: LuminSpacing.xs),
@@ -1234,12 +1244,16 @@ class _RecentSignalRow extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: LuminSpacing.xs),
-                    Text(
-                      '• ${signalStatusLabel(sig.status)}',
-                      style: TextStyle(
-                        color: _statusColor(),
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
+                    Flexible(
+                      child: Text(
+                        '• ${signalStatusLabel(sig.status)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: _statusColor(),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
                     ),
                   ],

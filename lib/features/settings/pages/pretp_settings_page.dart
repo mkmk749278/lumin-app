@@ -21,6 +21,9 @@ import '../../../data/repository.dart';
 import '../../../shared/tokens.dart';
 import '../../../shared/widgets/lumin_card.dart';
 import '../../../shared/widgets/preview_badge.dart';
+import '../../../shared/widgets/lumin_switch.dart';
+import '../../../shared/friendly_error.dart';
+import '../../../shared/widgets/page_skeleton.dart';
 
 /// UI-side regime buckets.  The backend uses 5 labels (TRENDING_UP /
 /// TRENDING_DOWN / RANGING / VOLATILE / QUIET); the page collapses them
@@ -165,13 +168,13 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
       if (!mounted) return;
       setState(() {
         _loaded = true;
-        _loadError = e.message;
+        _loadError = friendlyLoadError(e, what: 'your pre-TP settings');
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _loaded = true;
-        _loadError = '$e';
+        _loadError = friendlyLoadError(e, what: 'your pre-TP settings');
       });
     }
   }
@@ -355,7 +358,7 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
 
   Widget _bodyFor(bool isLive) {
     if (!_loaded) {
-      return const Center(child: CircularProgressIndicator());
+      return const PageSkeleton();
     }
     if (_loadError != null) {
       return Center(
@@ -520,7 +523,7 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
                 ],
               ),
             ),
-            Switch(
+            LuminSwitch(
               value: _enabled,
               activeColor: LuminColors.accent,
               onChanged: (v) => setState(() => _enabled = v),
@@ -584,7 +587,7 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
                 ],
               ),
             ),
-            Switch(
+            LuminSwitch(
               value: _protectManualEntries,
               activeColor: LuminColors.accent,
               onChanged: _enabled
@@ -701,7 +704,7 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
                       'ADVANCED',
                       style: TextStyle(
                         color: LuminColors.textMuted,
-                        fontSize: 10,
+                        fontSize: 11,
                         letterSpacing: 1.2,
                         fontWeight: FontWeight.w600,
                       ),
@@ -769,7 +772,7 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
           'REGIME ALLOWLIST',
           style: TextStyle(
             color: LuminColors.textMuted,
-            fontSize: 10,
+            fontSize: 11,
             letterSpacing: 1.2,
             fontWeight: FontWeight.w600,
           ),
@@ -799,7 +802,7 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
               ),
             ),
           ),
-          Switch(
+          LuminSwitch(
             value: value,
             activeColor: LuminColors.accent,
             onChanged: _enabled ? onChanged : null,
@@ -817,7 +820,7 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
           'SETUP ALLOWLIST',
           style: TextStyle(
             color: LuminColors.textMuted,
-            fontSize: 10,
+            fontSize: 11,
             letterSpacing: 1.2,
             fontWeight: FontWeight.w600,
           ),
@@ -837,7 +840,7 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
                     ),
                   ),
                 ),
-                Switch(
+                LuminSwitch(
                   value: entry.value,
                   activeColor: LuminColors.accent,
                   onChanged: _enabled

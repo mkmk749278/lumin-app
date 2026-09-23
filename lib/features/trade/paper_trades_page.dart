@@ -32,6 +32,7 @@ import '../../shared/widgets/lumin_card.dart';
 import '../../shared/widgets/preview_badge.dart';
 import '../../shared/widgets/shimmer.dart';
 import 'paper_trade_detail_page.dart';
+import '../../shared/friendly_error.dart';
 
 class PaperTradesPage extends StatefulWidget {
   const PaperTradesPage({super.key});
@@ -125,7 +126,7 @@ class _PaperTradesPageState extends State<PaperTradesPage> {
         if (!mounted) return;
         setState(() {
           // Keep any rows already shown; only surface the error view cold.
-          if (_items.isEmpty) _error = e.toString();
+          if (_items.isEmpty) _error = friendlyLoadError(e, what: 'your paper trades');
           _initialLoading = false;
         });
         if (!completer.isCompleted) completer.complete();
@@ -627,7 +628,7 @@ class _TradeCard extends StatelessWidget {
                         style: TextStyle(
                           color: _CloseReasonLabel.colorOf(
                               trade.closeReason, isOpen),
-                          fontSize: 10,
+                          fontSize: 11,
                           fontWeight: FontWeight.w700,
                           letterSpacing: 0.4,
                         ),
@@ -637,7 +638,7 @@ class _TradeCard extends StatelessWidget {
                         _windowLabel(trade),
                         style: const TextStyle(
                           color: LuminColors.textMuted,
-                          fontSize: 10,
+                          fontSize: 11,
                         ),
                       ),
                     ],
@@ -694,7 +695,7 @@ class _SideBadge extends StatelessWidget {
         side.toUpperCase(),
         style: TextStyle(
           color: color,
-          fontSize: 10,
+          fontSize: 11,
           fontWeight: FontWeight.w700,
           letterSpacing: 0.5,
         ),
@@ -722,7 +723,7 @@ class _LeveragePill extends StatelessWidget {
         '${leverage.toStringAsFixed(0)}x',
         style: const TextStyle(
           color: LuminColors.textSecondary,
-          fontSize: 10,
+          fontSize: 11,
           fontWeight: FontWeight.w600,
         ),
       ),
@@ -781,7 +782,7 @@ class _StatCell extends StatelessWidget {
           label,
           style: const TextStyle(
             color: LuminColors.textMuted,
-            fontSize: 9,
+            fontSize: 11,
             letterSpacing: 0.8,
             fontWeight: FontWeight.w600,
           ),

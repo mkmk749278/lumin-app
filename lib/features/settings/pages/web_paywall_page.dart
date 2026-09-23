@@ -20,6 +20,8 @@ import '../../../data/repository.dart';
 import '../../../data/web_billing_service.dart';
 import '../../../shared/tokens.dart';
 import '../../../shared/widgets/lumin_card.dart';
+import '../../../shared/friendly_error.dart';
+import '../../../shared/widgets/page_skeleton.dart';
 
 class WebPaywallPage extends StatefulWidget {
   const WebPaywallPage({super.key});
@@ -86,7 +88,7 @@ class _WebPaywallPageState extends State<WebPaywallPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = 'Could not load plans. $e';
+        _error = friendlyLoadError(e, what: 'the plans');
         _loading = false;
       });
     }
@@ -158,7 +160,7 @@ class _WebPaywallPageState extends State<WebPaywallPage> {
 
   Widget _body() {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      return const PageSkeleton();
     }
     if (_error != null) {
       return _errorView(_error!);

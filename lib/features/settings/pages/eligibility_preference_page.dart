@@ -33,6 +33,8 @@ import '../../../data/repository.dart';
 import '../../../data/server_side_execution_models.dart';
 import '../../../shared/tokens.dart';
 import '../../../shared/widgets/lumin_card.dart';
+import '../../../shared/friendly_error.dart';
+import '../../../shared/widgets/page_skeleton.dart';
 
 /// Which eligibility dimension a picker instance edits.
 enum EligibilityDimension { path, regime }
@@ -161,7 +163,7 @@ class _EligibilityPickerPageState extends State<_EligibilityPickerPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _loadError = e.toString();
+        _loadError = friendlyLoadError(e, what: 'your eligibility settings');
         _loaded = true;
       });
     }
@@ -301,7 +303,7 @@ class _EligibilityPickerPageState extends State<_EligibilityPickerPage> {
   }
 
   Widget _body() {
-    if (!_loaded) return const Center(child: CircularProgressIndicator());
+    if (!_loaded) return const PageSkeleton();
     if (_loadError != null) {
       return Center(
         child: Padding(
@@ -387,7 +389,7 @@ class _EligibilityPickerPageState extends State<_EligibilityPickerPage> {
                     : 'WHICH REGIMES AUTO-TRADE FOR YOU',
                 style: const TextStyle(
                   color: LuminColors.textMuted,
-                  fontSize: 10,
+                  fontSize: 11,
                   letterSpacing: 1.2,
                   fontWeight: FontWeight.w700,
                 ),

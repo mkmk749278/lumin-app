@@ -15,9 +15,12 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../data/api_client.dart' show ApiError;
 import '../../data/app_config.dart';
 import '../../data/server_side_execution_models.dart';
 import '../../shared/tokens.dart';
+import '../../data/take_error_mapper.dart';
+import '../../shared/haptics.dart';
 
 /// Show the server-side manual trade builder. Returns `true` when a trade was
 /// placed (or is resting), so the caller can refresh the Trade tab.
@@ -114,6 +117,7 @@ class _ManualTradeSheetState extends State<ManualTradeSheet> {
   Future<void> _confirm() async {
     final side = _side;
     if (side == null) return;
+    LuminHaptics.commit();
     setState(() {
       _placing = true;
       _result = null;
@@ -136,12 +140,28 @@ class _ManualTradeSheetState extends State<ManualTradeSheet> {
         validForMinutes:
             _entryType == 'limit' ? (int.tryParse(_ttlCtl.text.trim()) ?? 15) : 0,
       ));
-    } catch (e) {
+    } on ApiError catch (e) {
+      // Transport failures never reach the user as an exception string
+      // ("ClientException: Connection closed…"); they get the same copy the
+      // one-tap take sheet uses for the same status.
       res = ManualTradeResult(
-        outcome: 'rejected', refId: widget.refId, rejectDetail: '$e',
+        outcome: 'rejected',
+        refId: widget.refId,
+        rejectDetail: translateTakeHttpError(e.statusCode, e.message).combined,
+      );
+    } catch (_) {
+      res = ManualTradeResult(
+        outcome: 'rejected',
+        refId: widget.refId,
+        rejectDetail: translateTakeUnexpected().combined,
       );
     }
     if (!mounted) return;
+    if (res.placed) {
+      LuminHaptics.success();
+    } else if (!res.queued) {
+      LuminHaptics.failure();
+    }
     setState(() {
       _placing = false;
       _result = res;
@@ -357,7 +377,22 @@ class _ManualTradeSheetState extends State<ManualTradeSheet> {
     } else if (r.queued) {
       msg = r.detail ?? 'Working — the result will appear in Recent Activity.';
     } else {
-      msg = r.rejectDetail ?? r.rejectClass ?? 'Trade rejected.';
+      // An engine rejection carries a class and maybe a Binance code: route
+      // it through the same translation the Trade tab uses, so one failure
+      // never reads two ways. Only a client-side failure (no class) falls
+      // back to the already-translated detail set in [_confirm].
+      if (r.rejectClass != null || r.rejectBinanceCode != null) {
+        final t = DispatchEventTranslation.forReject(
+          rejectClass: r.rejectClass,
+          rejectDetail: r.rejectDetail,
+          binanceCode: r.rejectBinanceCode,
+          binanceMsg: r.rejectBinanceMsg,
+          symbol: widget.symbol,
+        );
+        msg = t.action.isEmpty ? t.headline : '${t.headline}\n${t.action}';
+      } else {
+        msg = r.rejectDetail ?? 'Trade rejected.';
+      }
     }
     return Container(
       padding: const EdgeInsets.all(LuminSpacing.md),

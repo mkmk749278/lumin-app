@@ -177,7 +177,7 @@ class _HeaderCard extends StatelessWidget {
                       'NET PnL',
                       style: TextStyle(
                         color: LuminColors.textMuted,
-                        fontSize: 10,
+                        fontSize: 11,
                         letterSpacing: 1.2,
                         fontWeight: FontWeight.w600,
                       ),
@@ -475,7 +475,7 @@ class _PartialFillsCard extends StatelessWidget {
                   'PARTIAL FILLS',
                   style: TextStyle(
                     color: LuminColors.textMuted,
-                    fontSize: 10,
+                    fontSize: 11,
                     letterSpacing: 1.2,
                     fontWeight: FontWeight.w600,
                   ),
@@ -585,7 +585,7 @@ class _FillRow extends StatelessWidget {
           _formatTs(fill.ts),
           style: const TextStyle(
             color: LuminColors.textMuted,
-            fontSize: 10,
+            fontSize: 11,
           ),
         ),
       ],
@@ -623,7 +623,7 @@ class _SectionCard extends StatelessWidget {
                   title,
                   style: const TextStyle(
                     color: LuminColors.textMuted,
-                    fontSize: 10,
+                    fontSize: 11,
                     letterSpacing: 1.2,
                     fontWeight: FontWeight.w600,
                   ),

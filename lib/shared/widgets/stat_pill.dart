@@ -31,7 +31,7 @@ class StatPill extends StatelessWidget {
               label.toUpperCase(),
               style: const TextStyle(
                 color: LuminColors.textMuted,
-                fontSize: 10,
+                fontSize: 11,
                 letterSpacing: 1.2,
                 fontWeight: FontWeight.w600,
               ),

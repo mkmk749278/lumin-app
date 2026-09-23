@@ -27,6 +27,7 @@ import '../../../shared/platform_input.dart';
 import '../../../shared/tokens.dart';
 import '../../../shared/widgets/lumin_card.dart';
 import 'otp_entry_page.dart';
+import '../../../shared/friendly_error.dart';
 
 class PhoneSignInPage extends StatefulWidget {
   const PhoneSignInPage({super.key});
@@ -142,7 +143,7 @@ class _PhoneSignInPageState extends State<PhoneSignInPage> {
           if (!mounted) return;
           setState(() {
             _busy = false;
-            _error = e.message ?? 'Couldn\'t send code (${e.code})';
+            _error = friendlyAuthError(e.code);
           });
         },
         onAutoVerified: (_) {
@@ -248,7 +249,7 @@ class _PhoneSignInPageState extends State<PhoneSignInPage> {
                         'PHONE',
                         style: TextStyle(
                           color: LuminColors.textMuted,
-                          fontSize: 10,
+                          fontSize: 11,
                           letterSpacing: 1.2,
                           fontWeight: FontWeight.w600,
                         ),

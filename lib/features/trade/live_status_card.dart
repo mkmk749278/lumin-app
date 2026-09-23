@@ -486,7 +486,7 @@ class _LiveStatusCardState extends State<LiveStatusCard> {
                     g.hint!,
                     style: const TextStyle(
                       color: LuminColors.textMuted,
-                      fontSize: 10,
+                      fontSize: 11,
                       height: 1.3,
                     ),
                   ),

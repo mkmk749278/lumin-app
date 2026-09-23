@@ -24,6 +24,7 @@ import 'features/install/install_choice_page.dart';
 import 'features/onboarding/pages/welcome_consent_page.dart';
 import 'features/onboarding/pages/welcome_page.dart';
 import 'firebase_options.dart';
+import 'shared/boot_failure.dart';
 import 'theme.dart';
 
 Future<void> main() async {
@@ -42,27 +43,46 @@ Future<void> main() async {
       systemNavigationBarIconBrightness: Brightness.light,
     ));
   }
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
-  if (!kIsWeb) {
-    // One-shot cleanup of any pre-migration JWT entries.  Constructs a
-    // bare AuthService with a throwaway base URL — we only need the
-    // secure-storage delete; no network call happens here.  Skipped on web:
-    // no legacy installs ever existed there and flutter_secure_storage's web
-    // backend needs no cleanup.
-    await AuthService(baseUrl: '').cleanupLegacyJwtStorage();
+  installReleaseErrorWidget();
+  await _boot();
+}
+
+/// Everything that must succeed before the first frame. A throw here used
+/// to leave no app at all — `runApp` was never reached, so the user saw a
+/// blank screen with no way forward (seen on the web build under a locale
+/// the platform could not parse, 2026-09-23). It now lands on
+/// [BootFailurePage], which retries this same function.
+Future<void> _boot() async {
+  try {
+    // Guarded so Retry works: if Firebase came up and a later step threw,
+    // a second initializeApp would fail with `duplicate-app` every time.
+    if (Firebase.apps.isEmpty) {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+    }
+    if (!kIsWeb) {
+      // One-shot cleanup of any pre-migration JWT entries.  Constructs a
+      // bare AuthService with a throwaway base URL — we only need the
+      // secure-storage delete; no network call happens here.  Skipped on web:
+      // no legacy installs ever existed there and flutter_secure_storage's web
+      // backend needs no cleanup.
+      await AuthService(baseUrl: '').cleanupLegacyJwtStorage();
+    }
+    // FCM topic subscriptions + tap routing.  Never throws — a
+    // Play-Services hiccup must not block app start.
+    await NotificationService.instance.init();
+    final cfg = await AppConfig.load();
+    // The reader's own position size for the track record. Loaded before the
+    // first frame so the Pulse bundle's fetch carries it — otherwise the card
+    // paints once at the engine's default and re-prices a moment later, which
+    // reads as the number changing on its own.
+    await TrackRecordPrefs.instance.load();
+    runApp(LuminApp(initialConfig: cfg));
+  } catch (e, st) {
+    debugPrint('Lumin boot failed: $e\n$st');
+    runApp(BootFailurePage(onRetry: _boot));
   }
-  // FCM topic subscriptions + tap routing.  Never throws — a
-  // Play-Services hiccup must not block app start.
-  await NotificationService.instance.init();
-  final cfg = await AppConfig.load();
-  // The reader's own position size for the track record. Loaded before the
-  // first frame so the Pulse bundle's fetch carries it — otherwise the card
-  // paints once at the engine's default and re-prices a moment later, which
-  // reads as the number changing on its own.
-  await TrackRecordPrefs.instance.load();
-  runApp(LuminApp(initialConfig: cfg));
 }
 
 class LuminApp extends StatelessWidget {

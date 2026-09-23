@@ -12,6 +12,7 @@ import '../features/update/update_banner.dart';
 import 'distribution.dart';
 import 'foreground_refresh.dart';
 import 'scroll_to_top.dart';
+import '../shared/haptics.dart';
 
 class NavShell extends StatefulWidget {
   const NavShell({super.key});
@@ -168,6 +169,7 @@ class _NavShellState extends State<NavShell> with WidgetsBindingObserver {
   }
 
   void _onSelect(int i) {
+    LuminHaptics.selection();
     // Tapping the tab you are already on is the universal "take me back to
     // the start" control, and this shell used to swallow it: the tabs live in
     // an IndexedStack, so a feed scrolled deep stays scrolled deep, and the
@@ -208,7 +210,16 @@ class _NavShellState extends State<NavShell> with WidgetsBindingObserver {
           Expanded(
             child: IndexedStack(
               index: _index,
-              children: List.generate(5, _tabAt),
+              // Only the visible tab ticks. IndexedStack keeps every visited
+              // tab mounted, so without this a hidden Signals tab kept
+              // polling Binance every 5s and hidden shimmers kept animating
+              // (2026-09-23 audit). Pages read `TickerMode.of` to pause
+              // their own timers; the wrapper is stable per index, so each
+              // tab's GlobalKey keeps its state across switches.
+              children: List.generate(
+                5,
+                (i) => TickerMode(enabled: i == _index, child: _tabAt(i)),
+              ),
             ),
           ),
         ],

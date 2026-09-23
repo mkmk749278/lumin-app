@@ -301,7 +301,7 @@ class _SignalBadge extends StatelessWidget {
         direction.toUpperCase(),
         style: TextStyle(
           color: color,
-          fontSize: 9,
+          fontSize: 11,
           fontWeight: FontWeight.w700,
           letterSpacing: 0.5,
         ),

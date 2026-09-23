@@ -19,6 +19,9 @@ import '../../../shared/widgets/preview_badge.dart';
 import '../../launch/region_gate.dart';
 import 'eligibility_preference_page.dart';
 import 'symbol_preference_page.dart';
+import '../../../shared/widgets/lumin_switch.dart';
+import '../../../shared/friendly_error.dart';
+import '../../../shared/widgets/page_skeleton.dart';
 
 class AutoTradeSettingsPage extends StatefulWidget {
   const AutoTradeSettingsPage({super.key});
@@ -102,13 +105,13 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
       if (!mounted) return;
       setState(() {
         _loaded = true;
-        _loadError = e.message;
+        _loadError = friendlyLoadError(e, what: 'your auto-trade settings');
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _loaded = true;
-        _loadError = '$e';
+        _loadError = friendlyLoadError(e, what: 'your auto-trade settings');
       });
     }
   }
@@ -338,7 +341,7 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
 
   Widget _bodyFor(bool isLive) {
     if (!_loaded) {
-      return const Center(child: CircularProgressIndicator());
+      return const PageSkeleton();
     }
     // When a load error occurred but we have previously-loaded data
     // (_settings is not null), render the settings in a stale state so
@@ -487,7 +490,7 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
               'EXECUTION MODE',
               style: TextStyle(
                 color: LuminColors.textMuted,
-                fontSize: 10,
+                fontSize: 11,
                 letterSpacing: 1.2,
                 fontWeight: FontWeight.w600,
               ),
@@ -588,7 +591,7 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
                         : 'WHAT AUTO-TRADES FOR ME',
                     style: const TextStyle(
                       color: LuminColors.textMuted,
-                      fontSize: 10,
+                      fontSize: 11,
                       letterSpacing: 1.2,
                       fontWeight: FontWeight.w600,
                     ),
@@ -672,7 +675,7 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
                     'WHAT PAPER-TRADES FOR ME',
                     style: TextStyle(
                       color: LuminColors.textMuted,
-                      fontSize: 10,
+                      fontSize: 11,
                       letterSpacing: 1.2,
                       fontWeight: FontWeight.w600,
                     ),
@@ -893,7 +896,7 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
               'SIZING',
               style: TextStyle(
                 color: LuminColors.textMuted,
-                fontSize: 10,
+                fontSize: 11,
                 letterSpacing: 1.2,
                 fontWeight: FontWeight.w600,
               ),
@@ -1216,7 +1219,7 @@ class _ModeToggleRow extends StatelessWidget {
             ),
             statusWidget,
             const SizedBox(width: LuminSpacing.sm),
-            Switch(
+            LuminSwitch(
               value: enabled,
               onChanged: onChanged,
               activeColor: iconColor,
@@ -1323,7 +1326,7 @@ class _StatusChip extends StatelessWidget {
         label,
         style: TextStyle(
           color: color,
-          fontSize: 10,
+          fontSize: 11,
           fontWeight: FontWeight.w600,
           letterSpacing: 0.3,
         ),

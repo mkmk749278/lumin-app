@@ -189,7 +189,19 @@ class _Slide1 extends StatelessWidget {
             ),
           ),
 
-          const Spacer(),
+          // The product, shown rather than described. This slide used to
+          // leave ~55% of the screen empty between the brand mark and the
+          // headline (measured on the live site, 2026-09-23) -- the first
+          // screen ad traffic lands on. `scaleDown` lets the card shrink on
+          // short phones instead of overflowing the column.
+          const Expanded(
+            child: Center(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: ExampleSignalCard(),
+              ),
+            ),
+          ),
 
           // Copy states the MECHANISM, never an outcome (2026-08-05).  The
           // previous headline — "Signals that close in profit." — asserted a
@@ -217,7 +229,7 @@ class _Slide1 extends StatelessWidget {
               height: 1.5,
             ),
           ),
-          const SizedBox(height: LuminSpacing.xl),
+          const SizedBox(height: LuminSpacing.lg),
 
           // Proof chips
           Wrap(
@@ -239,7 +251,7 @@ class _Slide1 extends StatelessWidget {
             ],
           ),
 
-          const Spacer(),
+          const SizedBox(height: LuminSpacing.xl),
 
           SizedBox(
             width: double.infinity,
@@ -421,7 +433,11 @@ class _Slide3 extends StatelessWidget {
           _SafetyRow(
             icon: Icons.block_outlined,
             title: 'Stop-loss on every position',
-            body: 'Every open trade has a hard stop. No runaway losses.',
+            // Not "no runaway losses": a stop is an instruction to the
+            // exchange, and a fast market can gap through it. The live-order
+            // review already says so ("a gap can exceed it"); onboarding must
+            // not promise the opposite two screens earlier (2026-09-23).
+            body: 'Every open trade is placed with a stop-loss on Binance.',
           ),
           const SizedBox(height: LuminSpacing.lg),
           _SafetyRow(
@@ -615,4 +631,147 @@ class _SafetyRow extends StatelessWidget {
       ],
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// Example signal card — slide 1's product visual
+// ---------------------------------------------------------------------------
+
+/// What a Lumin signal looks like, drawn with the app's own tokens.
+///
+/// Labelled EXAMPLE and captioned as an illustration, and it carries **no
+/// outcome** — no PnL, no win rate, no "hit TP". This screen runs before
+/// sign-in and cannot read the engine, so any performance figure here would
+/// be invented, and the headline beside it promises the mechanism (entry,
+/// stop, target), not a result. The levels are round illustrative numbers.
+class ExampleSignalCard extends StatefulWidget {
+  const ExampleSignalCard({super.key});
+
+  @override
+  State<ExampleSignalCard> createState() => _ExampleSignalCardState();
+}
+
+class _ExampleSignalCardState extends State<ExampleSignalCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 650),
+  )..forward();
+
+  @override
+  void dispose() {
+    _ctl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final curve = CurvedAnimation(parent: _ctl, curve: Curves.easeOutCubic);
+    return FadeTransition(
+      opacity: curve,
+      child: SlideTransition(
+        position: Tween(begin: const Offset(0, 0.08), end: Offset.zero)
+            .animate(curve),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 320,
+              padding: const EdgeInsets.all(LuminSpacing.lg),
+              decoration: BoxDecoration(
+                color: LuminColors.bgCard,
+                borderRadius: BorderRadius.circular(LuminRadii.lg),
+                border: Border.all(color: LuminColors.cardBorder),
+                boxShadow: [
+                  BoxShadow(
+                    color: LuminColors.accent.withValues(alpha: 0.10),
+                    blurRadius: 32,
+                    offset: const Offset(0, 12),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      const Flexible(
+                        child: Text(
+                          'BTCUSDT',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: LuminColors.textPrimary,
+                            fontSize: 17,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: LuminSpacing.sm),
+                      _pill('LONG', LuminColors.success),
+                      const Spacer(),
+                      const SizedBox(width: LuminSpacing.sm),
+                      _pill('EXAMPLE', LuminColors.textMuted),
+                    ],
+                  ),
+                  const SizedBox(height: LuminSpacing.md),
+                  _level('Entry', '64,000.0', LuminColors.textPrimary),
+                  _level('Stop', '63,200.0', LuminColors.loss),
+                  _level('Target', '65,000.0', LuminColors.success),
+                ],
+              ),
+            ),
+            const SizedBox(height: LuminSpacing.sm),
+            const Text(
+              'Illustration — not a live signal',
+              style: TextStyle(color: LuminColors.textMuted, fontSize: 11),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static Widget _pill(String label, Color color) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.14),
+          borderRadius: BorderRadius.circular(LuminRadii.pill),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: color,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.6,
+          ),
+        ),
+      );
+
+  static Widget _level(String label, String value, Color color) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 5),
+        child: Row(
+          children: [
+            Text(
+              label,
+              style: const TextStyle(
+                color: LuminColors.textSecondary,
+                fontSize: 14,
+              ),
+            ),
+            const Spacer(),
+            Text(
+              value,
+              style: TextStyle(
+                color: color,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ],
+        ),
+      );
 }

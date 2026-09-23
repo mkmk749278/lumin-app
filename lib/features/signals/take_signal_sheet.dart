@@ -30,6 +30,9 @@ import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
 import 'take_recovery_action.dart';
 import 'planned_risk.dart';
+import '../../shared/haptics.dart';
+import '../../shared/friendly_error.dart';
+import '../../shared/widgets/page_skeleton.dart';
 
 /// Show the Take Signal review sheet.  Returns ``true`` when an order
 /// was placed (caller can refresh the signals list); ``null`` when
@@ -196,7 +199,7 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _loadError = '$e';
+        _loadError = friendlyLoadError(e, what: 'your trading setup');
       });
     }
   }
@@ -224,6 +227,9 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
   }
 
   Future<void> _confirm() async {
+    // Felt on the press, before the round trip — the confirmation that the
+    // tap registered on the one button in the app that spends money.
+    LuminHaptics.commit();
     if (_serverSide) {
       return _confirmServerSide();
     }
@@ -244,6 +250,7 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
       equity: _equity,
     );
     if (!mounted) return;
+    result.success ? LuminHaptics.success() : LuminHaptics.failure();
     setState(() {
       _placing = false;
       _placeResult = result.message;
@@ -293,6 +300,13 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
       message = translateTakeUnexpected().combined;
     }
     if (!mounted) return;
+    // Queued is neither: the engine has not answered yet, so no verdict is
+    // felt until Recent Activity shows one.
+    if (success) {
+      LuminHaptics.success();
+    } else if (!queued) {
+      LuminHaptics.failure();
+    }
     setState(() {
       _placing = false;
       _placeResult = message;
@@ -391,9 +405,10 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
 
   Widget _body() {
     if (_loading) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: LuminSpacing.xl),
-        child: Center(child: CircularProgressIndicator()),
+      return const PageSkeleton(
+        inline: true,
+        cards: 2,
+        padding: EdgeInsets.symmetric(vertical: LuminSpacing.md),
       );
     }
     if (_loadError != null) {
@@ -545,7 +560,7 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
             'SIGNAL',
             style: TextStyle(
               color: LuminColors.textMuted,
-              fontSize: 10,
+              fontSize: 11,
               letterSpacing: 1.2,
               fontWeight: FontWeight.w600,
             ),
@@ -571,7 +586,7 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
               'ORDER',
               style: TextStyle(
                 color: LuminColors.textMuted,
-                fontSize: 10,
+                fontSize: 11,
                 letterSpacing: 1.2,
                 fontWeight: FontWeight.w600,
               ),
@@ -615,7 +630,7 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
             'ORDER',
             style: TextStyle(
               color: LuminColors.textMuted,
-              fontSize: 10,
+              fontSize: 11,
               letterSpacing: 1.2,
               fontWeight: FontWeight.w600,
             ),

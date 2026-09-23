@@ -31,6 +31,7 @@ import '../../../data/server_side_execution_models.dart';
 import '../../../shared/tokens.dart';
 import '../../launch/region_gate.dart';
 import 'tos_acceptance_page.dart';
+import '../../../shared/widgets/page_skeleton.dart';
 
 class ServerSideExecutionPage extends StatefulWidget {
   const ServerSideExecutionPage({super.key});
@@ -317,7 +318,7 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
           // written cleanly by ``put_key_blob``) or Disconnect to
           // hard-delete it.
           if (_tosAccepted == null || _existing == null)
-            const Center(child: CircularProgressIndicator())
+            const PageSkeleton(inline: true, cards: 2, padding: EdgeInsets.zero)
           else if (_tosAccepted == false)
             _tosGateCard()
           else if (_existing!.connected && !_replacing && _success == null)

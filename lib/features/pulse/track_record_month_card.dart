@@ -147,7 +147,7 @@ class _TrackRecordMonthCardState extends State<TrackRecordMonthCard> {
                     'SIGNAL BOOK BY DAY',
                     style: TextStyle(
                       color: LuminColors.textMuted,
-                      fontSize: 10,
+                      fontSize: 11,
                       letterSpacing: 1.2,
                       fontWeight: FontWeight.w600,
                     ),
@@ -172,7 +172,7 @@ class _TrackRecordMonthCardState extends State<TrackRecordMonthCard> {
                     'RECORDED',
                     style: TextStyle(
                       color: LuminColors.success,
-                      fontSize: 9,
+                      fontSize: 11,
                       letterSpacing: 0.8,
                       fontWeight: FontWeight.w700,
                     ),
@@ -231,7 +231,7 @@ class _TrackRecordMonthCardState extends State<TrackRecordMonthCard> {
               'signal performance does not guarantee future results. Tap for '
               'every day and every signal behind these numbers.',
               style: const TextStyle(
-                  color: LuminColors.textMuted, fontSize: 10, height: 1.45),
+                  color: LuminColors.textMuted, fontSize: 11, height: 1.45),
             ),
           ],
         ),

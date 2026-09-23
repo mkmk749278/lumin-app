@@ -308,7 +308,7 @@ class _SignupPageState extends State<SignupPage> {
             'DISPLAY NAME',
             style: TextStyle(
               color: LuminColors.textMuted,
-              fontSize: 10,
+              fontSize: 11,
               letterSpacing: 1.2,
               fontWeight: FontWeight.w600,
             ),
@@ -403,7 +403,7 @@ class _SignupPageState extends State<SignupPage> {
             'INVITE CODE (OPTIONAL)',
             style: TextStyle(
               color: LuminColors.textMuted,
-              fontSize: 10,
+              fontSize: 11,
               letterSpacing: 1.2,
               fontWeight: FontWeight.w600,
             ),
@@ -451,7 +451,7 @@ class _SignupPageState extends State<SignupPage> {
             label,
             style: const TextStyle(
               color: LuminColors.textMuted,
-              fontSize: 10,
+              fontSize: 11,
               letterSpacing: 1.2,
               fontWeight: FontWeight.w600,
             ),
