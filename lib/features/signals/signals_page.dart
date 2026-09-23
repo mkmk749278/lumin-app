@@ -491,7 +491,7 @@ class _SignalsPageState extends State<SignalsPage>
           // Automate-these-signals upsell — free/Assist users only; hides
           // itself at Auto tier.  The signals feed is the strongest
           // conversion surface, so the pitch sits right above the list.
-          const UpgradeBanner(slot: 'signals'),
+          const UpgradeBanner(slot: 'signals', compact: true),
           _FilterRow(current: _filter, onChanged: _setFilter),
           if (_filter == _SignalFilter.closed) ...[
             const SizedBox(height: LuminSpacing.sm),

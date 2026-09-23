@@ -21,6 +21,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../app/distribution.dart';
 import '../../data/app_config.dart';
@@ -57,12 +58,72 @@ Future<void> openReferralPage(BuildContext context) {
 }
 
 // ---------------------------------------------------------------------------
-// Session dismiss — a banner the user closed stays closed until next launch
-// (not hostile, but re-earns the pitch on a fresh session).  Keyed per slot so
-// the Pulse copy and the Signals copy dismiss independently.
+// Dismissal — one close hides a banner KIND everywhere, for a few days.
+//
+// 2026-09-23 audit: dismissal used to be per tab and per session, so the same
+// upgrade pitch had to be closed on Pulse, Signals, Trade and Menu separately
+// and came back on every launch. A user who says "not now" once has said it
+// for the app. The pitch re-earns its place after [kUpsellSnooze], not on the
+// next cold start. Persisted in SharedPreferences (device-local UX state —
+// nothing money-adjacent), and held in a [ValueNotifier] because the nav shell
+// keeps every tab mounted: a close on Signals must hide the copy already
+// built on Trade, not wait for it to rebuild.
 // ---------------------------------------------------------------------------
 
-final Set<String> _dismissedSlots = <String>{};
+/// How long a dismissed banner stays hidden before it may show again.
+const Duration kUpsellSnooze = Duration(days: 3);
+
+const String _prefsPrefix = 'upsell.dismissed_at.';
+
+/// Banner kinds currently dismissed (`upgrade`, `invite`).
+final ValueNotifier<Set<String>> upsellDismissed =
+    ValueNotifier<Set<String>>(<String>{});
+
+bool _hydrated = false;
+
+/// Load persisted dismissals once per process. Snoozes older than
+/// [kUpsellSnooze] are ignored, so the banner returns on its own. Storage
+/// failure leaves the banners visible — the safe direction for a banner.
+Future<void> hydrateUpsellDismissals({DateTime? now}) async {
+  if (_hydrated) return;
+  _hydrated = true;
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final at = now ?? DateTime.now();
+    final live = <String>{};
+    for (final kind in const ['upgrade', 'invite']) {
+      final ms = prefs.getInt('$_prefsPrefix$kind');
+      if (ms == null) continue;
+      final since = at.difference(DateTime.fromMillisecondsSinceEpoch(ms));
+      if (since < kUpsellSnooze) live.add(kind);
+    }
+    if (live.isNotEmpty) {
+      upsellDismissed.value = {...upsellDismissed.value, ...live};
+    }
+  } catch (_) {
+    // Visible is the fallback; a banner that cannot remember a close is a
+    // mild annoyance, one that cannot show is a lost surface.
+  }
+}
+
+/// Hide [kind] on every tab now, and remember it across launches.
+Future<void> dismissUpsell(String kind, {DateTime? now}) async {
+  upsellDismissed.value = {...upsellDismissed.value, kind};
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(
+      '$_prefsPrefix$kind',
+      (now ?? DateTime.now()).millisecondsSinceEpoch,
+    );
+  } catch (_) {}
+}
+
+/// Test seam: forget in-memory state so each test starts clean.
+@visibleForTesting
+void resetUpsellDismissalsForTest() {
+  _hydrated = false;
+  upsellDismissed.value = <String>{};
+}
 
 // ---------------------------------------------------------------------------
 // Referral-stats cache — the invite banner needs engine truth, but it can be
@@ -94,6 +155,7 @@ class _BannerCard extends StatelessWidget {
     required this.cta,
     required this.onTap,
     this.onDismiss,
+    this.compact = false,
   });
 
   final IconData icon;
@@ -104,8 +166,15 @@ class _BannerCard extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback? onDismiss;
 
+  /// One line — icon, title, CTA, close — for slots pinned above a list
+  /// (Signals, Trade). The full card there took about half the viewport at
+  /// 1.3x text on a small phone (2026-09-23 audit), which is the feed the
+  /// user opened the tab to read. Scrolling surfaces keep the full card.
+  final bool compact;
+
   @override
   Widget build(BuildContext context) {
+    if (compact) return _buildCompact(context);
     return Padding(
       padding: const EdgeInsets.symmetric(
         horizontal: LuminSpacing.lg,
@@ -195,6 +264,76 @@ class _BannerCard extends StatelessWidget {
   }
 }
 
+extension on _BannerCard {
+  Widget _buildCompact(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: LuminSpacing.lg,
+        vertical: LuminSpacing.xs,
+      ),
+      child: Material(
+        color: LuminColors.bgCard,
+        borderRadius: BorderRadius.circular(LuminRadii.md),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(LuminRadii.md),
+          child: Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: LuminSpacing.md,
+              vertical: LuminSpacing.sm,
+            ),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(LuminRadii.md),
+              border: Border.all(color: accent.withOpacity(0.35)),
+            ),
+            child: Row(
+              children: [
+                Icon(icon, color: accent, size: 18),
+                const SizedBox(width: LuminSpacing.sm),
+                Expanded(
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: LuminColors.textPrimary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: LuminSpacing.sm),
+                Text(
+                  cta,
+                  style: TextStyle(
+                    color: accent,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                if (onDismiss != null)
+                  Semantics(
+                    button: true,
+                    label: 'Dismiss',
+                    child: InkResponse(
+                      onTap: onDismiss,
+                      radius: 20,
+                      child: const Padding(
+                        padding: EdgeInsets.only(left: LuminSpacing.sm),
+                        child: Icon(Icons.close_rounded,
+                            color: LuminColors.textMuted, size: 16),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Subscription upgrade banner
 // ---------------------------------------------------------------------------
@@ -209,11 +348,13 @@ class UpgradeBannerCard extends StatelessWidget {
     required this.tier,
     required this.onSeePlans,
     this.onDismiss,
+    this.compact = false,
   });
 
   final String? tier;
   final VoidCallback onSeePlans;
   final VoidCallback? onDismiss;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -231,18 +372,24 @@ class UpgradeBannerCard extends StatelessWidget {
       cta: isAssist ? 'Upgrade to Auto' : 'See plans',
       onTap: onSeePlans,
       onDismiss: onDismiss,
+      compact: compact,
     );
   }
 }
 
 /// Scope wrapper — reads the cached tier under a [AppConfigScope.tierRevision]
 /// listener so the banner vanishes the moment a purchase lands, and routes the
-/// CTA to the channel-appropriate paywall.  Dismiss is per-session.
+/// CTA to the channel-appropriate paywall. One close hides it on every tab
+/// for [kUpsellSnooze].
 class UpgradeBanner extends StatefulWidget {
-  const UpgradeBanner({super.key, this.slot = 'upgrade'});
+  const UpgradeBanner({super.key, this.slot = 'upgrade', this.compact = false});
 
-  /// Distinguishes dismiss state between surfaces (e.g. `signals`, `trade`).
+  /// Which surface this copy sits on (kept for call-site readability; the
+  /// dismissal is deliberately NOT per slot any more).
   final String slot;
+
+  /// One-line layout for slots pinned above a list.
+  final bool compact;
 
   @override
   State<UpgradeBanner> createState() => _UpgradeBannerState();
@@ -250,19 +397,28 @@ class UpgradeBanner extends StatefulWidget {
 
 class _UpgradeBannerState extends State<UpgradeBanner> {
   @override
+  void initState() {
+    super.initState();
+    hydrateUpsellDismissals();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (_dismissedSlots.contains('upgrade:${widget.slot}')) {
-      return const SizedBox.shrink();
-    }
     final scope = AppConfigScope.of(context);
-    return ValueListenableBuilder<int>(
-      valueListenable: scope.tierRevision,
-      builder: (context, _, __) => UpgradeBannerCard(
-        tier: scope.tier,
-        onSeePlans: () => openPaywall(context),
-        onDismiss: () =>
-            setState(() => _dismissedSlots.add('upgrade:${widget.slot}')),
-      ),
+    return ValueListenableBuilder<Set<String>>(
+      valueListenable: upsellDismissed,
+      builder: (context, dismissed, _) {
+        if (dismissed.contains('upgrade')) return const SizedBox.shrink();
+        return ValueListenableBuilder<int>(
+          valueListenable: scope.tierRevision,
+          builder: (context, _, __) => UpgradeBannerCard(
+            tier: scope.tier,
+            compact: widget.compact,
+            onSeePlans: () => openPaywall(context),
+            onDismiss: () => dismissUpsell('upgrade'),
+          ),
+        );
+      },
     );
   }
 }
@@ -280,11 +436,13 @@ class InviteBannerCard extends StatelessWidget {
     required this.stats,
     required this.onInvite,
     this.onDismiss,
+    this.compact = false,
   });
 
   final ReferralStats stats;
   final VoidCallback onInvite;
   final VoidCallback? onDismiss;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -303,6 +461,7 @@ class InviteBannerCard extends StatelessWidget {
       cta: rewards ? 'Invite & earn' : 'Invite',
       onTap: onInvite,
       onDismiss: onDismiss,
+      compact: compact,
     );
   }
 }
@@ -312,9 +471,10 @@ class InviteBannerCard extends StatelessWidget {
 /// the banner never flashes placeholder or misleading copy.  Dismiss is
 /// per-session.
 class InviteBanner extends StatefulWidget {
-  const InviteBanner({super.key, this.slot = 'invite'});
+  const InviteBanner({super.key, this.slot = 'invite', this.compact = false});
 
   final String slot;
+  final bool compact;
 
   @override
   State<InviteBanner> createState() => _InviteBannerState();
@@ -324,6 +484,12 @@ class _InviteBannerState extends State<InviteBanner> {
   Future<ReferralStats>? _future;
 
   @override
+  void initState() {
+    super.initState();
+    hydrateUpsellDismissals();
+  }
+
+  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     _future ??= _referralStats(AppConfigScope.of(context).repo);
@@ -331,9 +497,15 @@ class _InviteBannerState extends State<InviteBanner> {
 
   @override
   Widget build(BuildContext context) {
-    if (_dismissedSlots.contains('invite:${widget.slot}')) {
-      return const SizedBox.shrink();
-    }
+    return ValueListenableBuilder<Set<String>>(
+      valueListenable: upsellDismissed,
+      builder: (context, dismissed, _) => dismissed.contains('invite')
+          ? const SizedBox.shrink()
+          : _buildCard(context),
+    );
+  }
+
+  Widget _buildCard(BuildContext context) {
     return FutureBuilder<ReferralStats>(
       future: _future,
       builder: (context, snap) {
@@ -344,9 +516,9 @@ class _InviteBannerState extends State<InviteBanner> {
         }
         return InviteBannerCard(
           stats: snap.data!,
+          compact: widget.compact,
           onInvite: () => openReferralPage(context),
-          onDismiss: () =>
-              setState(() => _dismissedSlots.add('invite:${widget.slot}')),
+          onDismiss: () => dismissUpsell('invite'),
         );
       },
     );

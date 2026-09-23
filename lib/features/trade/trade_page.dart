@@ -551,7 +551,7 @@ class _TradePageState extends State<TradePage>
           ),
           // Upsell above the trade views — paper P&L is the strongest proof,
           // so nudge free/Assist users to run it live.  Auto tier: hidden.
-          const UpgradeBanner(slot: 'trade'),
+          const UpgradeBanner(slot: 'trade', compact: true),
           Expanded(
             child: RefreshIndicator(
               color: LuminColors.accent,
