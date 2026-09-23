@@ -56,6 +56,7 @@ class _TradeBundle {
     required this.positions,
     required this.activity,
   });
+
   /// Engine-wide auto-mode (read by all tiers).  Drives the P&L card
   /// + open positions for the Paper sub-tab.
   final AutoModeStatus autoMode;
@@ -570,15 +571,17 @@ class _TradePageState extends State<TradePage>
                   }
                   if (snap.hasError && !snap.hasData) {
                     return _TradeError(
-                        error: friendlyLoadError(snap.error!, what: 'your trades'),
+                        error:
+                            friendlyLoadError(snap.error!, what: 'your trades'),
                         onRetry: _refresh);
                   }
                   final data = snap.data!;
                   // Cache latest bundle so tab-switch handler above can
                   // read the current mode without a round-trip.
                   if (_lastBundle != data) {
-                    WidgetsBinding.instance.addPostFrameCallback(
-                        (_) { if (mounted) setState(() => _lastBundle = data); });
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (mounted) setState(() => _lastBundle = data);
+                    });
                   }
                   return _view == _TradeView.paper
                       ? _buildPaperBody(context, data)
@@ -635,8 +638,7 @@ class _TradePageState extends State<TradePage>
     // Non-traders get a stripped-down Live tab until a key is
     // connected — the status card is the actionable surface and the
     // trade cards would all be structurally empty.
-    final hasBinanceKey =
-        runtime != null && runtime.binanceKeyConnected;
+    final hasBinanceKey = runtime != null && runtime.binanceKeyConnected;
     final hasAnyTrades = (serverPositions?.positions.isNotEmpty ?? false) ||
         (serverPositions?.unmanaged.isNotEmpty ?? false) ||
         (recentEvents?.isNotEmpty ?? false) ||
@@ -663,8 +665,7 @@ class _TradePageState extends State<TradePage>
         // genuinely don't know the user's mode — show a banner rather
         // than rendering both toggles Off (which reads as "trading is
         // stopped" when it might not be).
-        if (settingsUnknown)
-          _SettingsUnknownBanner(onRetry: _refresh),
+        if (settingsUnknown) _SettingsUnknownBanner(onRetry: _refresh),
         // Live-mode toggle — same pattern as the Paper tab.  Preserves
         // paper mode when toggling live: enabling live while paper is on
         // sends 'both'; disabling live while paper is on keeps 'paper'.
@@ -713,9 +714,7 @@ class _TradePageState extends State<TradePage>
         ],
         // Per-user trade surfaces, only once a key is connected.
         if (hasBinanceKey) ...[
-          if (!hasAnyTrades &&
-              serverPositions != null &&
-              recentEvents != null)
+          if (!hasAnyTrades && serverPositions != null && recentEvents != null)
             const _NoTradesYetCard()
           else ...[
             if (serverPositions != null) ...[
@@ -778,15 +777,15 @@ class _TradePageState extends State<TradePage>
               ? 'Engine simulates fills — no real orders, zero risk.'
               : 'Off — turn on to simulate trades without real money.',
           icon: Icons.science_outlined,
-          activeColor: LuminColors.warn, // Paper = caution colour, less than live
+          activeColor:
+              LuminColors.warn, // Paper = caution colour, less than live
           isOn: paperActive,
           switching: _switchingMode,
           onChanged: (on) {
             // Preserve live mode: turning paper on while live is active
             // sends 'both'; turning paper off while live is active keeps
             // 'live' rather than falling back to 'off'.
-            final liveActive =
-                activeMode == 'live' || activeMode == 'both';
+            final liveActive = activeMode == 'live' || activeMode == 'both';
             if (on) {
               _changeMode(liveActive ? 'both' : 'paper');
             } else {
@@ -836,7 +835,6 @@ class _TradePageState extends State<TradePage>
       ],
     );
   }
-
 }
 
 /// Live | Paper sub-tab strip — sits just below the AppBar and toggles
@@ -924,17 +922,15 @@ class _SubTabButton extends StatelessWidget {
               Icon(
                 icon,
                 size: 16,
-                color: selected
-                    ? LuminColors.accent
-                    : LuminColors.textSecondary,
+                color:
+                    selected ? LuminColors.accent : LuminColors.textSecondary,
               ),
               const SizedBox(width: 6),
               Text(
                 label,
                 style: TextStyle(
-                  color: selected
-                      ? LuminColors.accent
-                      : LuminColors.textSecondary,
+                  color:
+                      selected ? LuminColors.accent : LuminColors.textSecondary,
                   fontSize: 13,
                   fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                   letterSpacing: 0.3,
@@ -1346,35 +1342,35 @@ class _TradeLoading extends StatelessWidget {
     // stuck — and the Trade tab simply never got wired to it.
     return Shimmer(
       child: ListView(
-      physics: const AlwaysScrollableScrollPhysics(
-        parent: BouncingScrollPhysics(),
-      ),
-      padding: const EdgeInsets.symmetric(
-        horizontal: LuminSpacing.md,
-        vertical: LuminSpacing.sm,
-      ),
-      children: const [
-        _TradeSkeletonCard(height: 48), // Mode pill
-        SizedBox(height: LuminSpacing.md),
-        _TradeSkeletonCard(height: 104), // Balance / PnL card
-        SizedBox(height: LuminSpacing.md),
-        _TradeSkeletonCard(height: 72), // Position row
-        SizedBox(height: LuminSpacing.sm),
-        _TradeSkeletonCard(height: 72), // Position row
-        SizedBox(height: LuminSpacing.sm),
-        _TradeSkeletonCard(height: 72), // Position row
-        SizedBox(height: LuminSpacing.md),
-        _TradeSkeletonCard(height: 56), // Activity header
-        SizedBox(height: LuminSpacing.sm),
-        _TradeSkeletonCard(height: 44), // Activity row
-        SizedBox(height: LuminSpacing.sm),
-        _TradeSkeletonCard(height: 44), // Activity row
-        SizedBox(height: LuminSpacing.sm),
-        _TradeSkeletonCard(height: 44), // Activity row
-        SizedBox(height: LuminSpacing.sm),
-        _TradeSkeletonCard(height: 44), // Activity row
-        SizedBox(height: LuminSpacing.xl),
-      ],
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics(),
+        ),
+        padding: const EdgeInsets.symmetric(
+          horizontal: LuminSpacing.md,
+          vertical: LuminSpacing.sm,
+        ),
+        children: const [
+          _TradeSkeletonCard(height: 48), // Mode pill
+          SizedBox(height: LuminSpacing.md),
+          _TradeSkeletonCard(height: 104), // Balance / PnL card
+          SizedBox(height: LuminSpacing.md),
+          _TradeSkeletonCard(height: 72), // Position row
+          SizedBox(height: LuminSpacing.sm),
+          _TradeSkeletonCard(height: 72), // Position row
+          SizedBox(height: LuminSpacing.sm),
+          _TradeSkeletonCard(height: 72), // Position row
+          SizedBox(height: LuminSpacing.md),
+          _TradeSkeletonCard(height: 56), // Activity header
+          SizedBox(height: LuminSpacing.sm),
+          _TradeSkeletonCard(height: 44), // Activity row
+          SizedBox(height: LuminSpacing.sm),
+          _TradeSkeletonCard(height: 44), // Activity row
+          SizedBox(height: LuminSpacing.sm),
+          _TradeSkeletonCard(height: 44), // Activity row
+          SizedBox(height: LuminSpacing.sm),
+          _TradeSkeletonCard(height: 44), // Activity row
+          SizedBox(height: LuminSpacing.xl),
+        ],
       ),
     );
   }
@@ -1623,7 +1619,10 @@ class _SettingsUnknownBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(
-        LuminSpacing.lg, LuminSpacing.md, LuminSpacing.lg, 0,
+        LuminSpacing.lg,
+        LuminSpacing.md,
+        LuminSpacing.lg,
+        0,
       ),
       child: Container(
         padding: const EdgeInsets.symmetric(
@@ -1698,7 +1697,6 @@ class _EmbeddedPaperTrades extends StatelessWidget {
   }
 }
 
-
 /// Live-tab open-positions card backed by ``/api/auto-trade/positions``.
 ///
 /// **Rewritten 2026-09-01** (owner, holding the Binance app beside this tab:
@@ -1760,7 +1758,10 @@ class _ServerPositionsCard extends StatelessWidget {
                 ),
                 const Spacer(),
                 Text(
-                  '${positions.length + unmanaged.length}',
+                  // A dash, not "0": an unreadable book is not an empty one.
+                  book.positionsUnreadable
+                      ? '—'
+                      : '${positions.length + unmanaged.length}',
                   style: const TextStyle(
                     color: LuminColors.textSecondary,
                     fontSize: 11,
@@ -1776,21 +1777,27 @@ class _ServerPositionsCard extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: LuminSpacing.sm),
                 child: Text(
-                  book.exchangeIsReporting
-                      ? 'Binance shows no open positions on your account '
-                          'right now.  When an eligible signal fires, Lumin '
-                          'places the order and it shows up here.\n\n'
-                          'A signal can still be running in the feed after '
-                          'your position has closed — the Signals tab shows '
-                          'what the setup is doing, this shows what your '
-                          'account is holding.'
-                      // Not the same sentence, because it is not the same
-                      // fact: we have not heard from Binance, so we must not
-                      // tell the user their account is flat.
-                      : 'Lumin has not heard from Binance about your account '
-                          'yet, so it cannot say what you are holding.  This '
-                          'clears on its own once your key is connected and '
-                          'the engine is watching it.',
+                  book.positionsUnreadable
+                      // We could not read what the engine holds, so we must
+                      // not say "none" — and cannot promise when it returns.
+                      ? 'Lumin can\'t confirm your open positions right now — '
+                          'the engine\'s record could not be read.  Your '
+                          'Binance app shows what your account holds.'
+                      : book.exchangeIsReporting
+                          ? 'Binance shows no open positions on your account '
+                              'right now.  When an eligible signal fires, Lumin '
+                              'places the order and it shows up here.\n\n'
+                              'A signal can still be running in the feed after '
+                              'your position has closed — the Signals tab shows '
+                              'what the setup is doing, this shows what your '
+                              'account is holding.'
+                          // Not the same sentence, because it is not the same
+                          // fact: we have not heard from Binance, so we must not
+                          // tell the user their account is flat.
+                          : 'Lumin has not heard from Binance about your account '
+                              'yet, so it cannot say what you are holding.  This '
+                              'clears on its own once your key is connected and '
+                              'the engine is watching it.',
                   style: const TextStyle(
                     color: LuminColors.textSecondary,
                     fontSize: 11,
@@ -1865,7 +1872,6 @@ class _ServerPositionsCard extends StatelessWidget {
     );
   }
 }
-
 
 /// A position on the user's Binance account that Lumin did not open.
 ///
@@ -1954,7 +1960,6 @@ class _UnmanagedPositionRow extends StatelessWidget {
   }
 }
 
-
 /// Liquidation price and leverage, or nothing at all.
 ///
 /// Never `Liq —`: an em-dash beside the word liquidation reads as "no
@@ -1970,20 +1975,17 @@ String _liqSuffix(double? liq, double? leverage) {
   return parts.isEmpty ? '' : ' • ${parts.join(' • ')}';
 }
 
-
 String _fmtPrice(double v) {
   if (v >= 1000) return v.toStringAsFixed(2);
   if (v >= 1) return v.toStringAsFixed(4);
   return v.toStringAsFixed(6);
 }
 
-
 String _fmtQty(double v) {
   if (v >= 1000) return v.toStringAsFixed(0);
   if (v >= 1) return v.toStringAsFixed(3);
   return v.toStringAsFixed(6);
 }
-
 
 class _ServerPositionRow extends StatefulWidget {
   const _ServerPositionRow({required this.position, this.onClosed});
@@ -1994,7 +1996,6 @@ class _ServerPositionRow extends StatefulWidget {
   @override
   State<_ServerPositionRow> createState() => _ServerPositionRowState();
 }
-
 
 class _ServerPositionRowState extends State<_ServerPositionRow> {
   bool _closing = false;
@@ -2064,8 +2065,7 @@ class _ServerPositionRowState extends State<_ServerPositionRow> {
         SnackBar(
           content: Text(result.message),
           duration: Duration(seconds: result.isClosed ? 3 : 6),
-          backgroundColor:
-              result.isClosed ? null : LuminColors.loss,
+          backgroundColor: result.isClosed ? null : LuminColors.loss,
         ),
       );
       // Refresh on a queued outcome too: the engine has not answered, so the
@@ -2307,11 +2307,9 @@ class _ServerPositionRowState extends State<_ServerPositionRow> {
     );
   }
 
-  static String _hhmm(DateTime d) =>
-      '${d.hour.toString().padLeft(2, '0')}:'
+  static String _hhmm(DateTime d) => '${d.hour.toString().padLeft(2, '0')}:'
       '${d.minute.toString().padLeft(2, '0')}';
 }
-
 
 /// Trade-tab "Recent activity for your account" card.  Renders the
 /// last N dispatch events (placed + rejected) from
@@ -2337,7 +2335,6 @@ class _ServerPositionRowState extends State<_ServerPositionRow> {
 /// header renders this number and the two silently disagreeing is how a
 /// page size came to read as a trade count.
 const int kDispatchEventPageSize = 20;
-
 
 class _RecentDispatchEventsCard extends StatelessWidget {
   const _RecentDispatchEventsCard({
@@ -2367,8 +2364,7 @@ class _RecentDispatchEventsCard extends StatelessWidget {
           e.timestamp,
           _DispatchEventRow(event: e, outcome: outcomes?[e.signalId]),
         ),
-      for (final o in phoneOrders)
-        (o.placedAt, _PhoneOrderRow(entry: o)),
+      for (final o in phoneOrders) (o.placedAt, _PhoneOrderRow(entry: o)),
     ]..sort((a, b) => b.$1.compareTo(a.$1));
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
@@ -2437,7 +2433,6 @@ class _RecentDispatchEventsCard extends StatelessWidget {
     );
   }
 }
-
 
 /// One trade you place from THIS phone (device-key path: one-tap
 /// signal takes and alert takes) — read from the local order log,
@@ -2528,7 +2523,6 @@ class _PhoneOrderRow extends StatelessWidget {
   }
 }
 
-
 /// Merged empty state — replaces the two stacked verbose empty cards
 /// (positions + activity) that made a fresh account's Live tab read
 /// like a wall of warnings (owner screenshots, 2026-07-17).
@@ -2580,7 +2574,6 @@ class _NoTradesYetCard extends StatelessWidget {
     );
   }
 }
-
 
 class _DispatchEventRow extends StatelessWidget {
   const _DispatchEventRow({required this.event, this.outcome});

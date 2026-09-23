@@ -64,20 +64,17 @@ class AutoTradeUserStatus {
 
   /// True iff this user can currently auto-trade (both flags clear).
   /// The banner is hidden when this is true.
-  bool get isFullyEnabled =>
-      autoTradeGloballyEnabled && !autoTradeUserDisabled;
+  bool get isFullyEnabled => autoTradeGloballyEnabled && !autoTradeUserDisabled;
 
   factory AutoTradeUserStatus.fromJson(Map<String, dynamic> j) =>
       AutoTradeUserStatus(
         autoTradeGloballyEnabled:
             j['auto_trade_globally_enabled'] as bool? ?? false,
-        autoTradeUserDisabled:
-            j['auto_trade_user_disabled'] as bool? ?? false,
+        autoTradeUserDisabled: j['auto_trade_user_disabled'] as bool? ?? false,
         disabledReason: j['disabled_reason'] as String? ?? '',
         disabledAt: DateTime.tryParse(j['disabled_at'] as String? ?? ''),
       );
 }
-
 
 /// Mirror of the engine's ``GET /api/binance/connect/status`` response.
 ///
@@ -113,7 +110,6 @@ class BinanceConnectStatus {
   static const notConnected = BinanceConnectStatus(connected: false);
 }
 
-
 /// Mirror of the engine's ``GET /api/binance/connect/info`` response.
 ///
 /// Non-secret onboarding info shown on the Server-side execution page
@@ -137,7 +133,6 @@ class BinanceConnectInfo {
         engineVpsIp: j['engine_vps_ip'] as String?,
       );
 }
-
 
 /// Mirror of the engine's ``GET /api/auto-trade/runtime-status`` response.
 ///
@@ -281,7 +276,6 @@ class AutoTradeRuntimeStatus {
   }
 }
 
-
 /// Outcome of ``POST /api/auto-trade/take`` — the server-side manual take
 /// (owner-approved 2026-07-17).  ``outcome`` is one of:
 ///
@@ -323,8 +317,7 @@ class TakeSignalResult {
   bool get placed => outcome == 'placed';
   bool get queued => outcome == 'queued';
 
-  factory TakeSignalResult.fromJson(Map<String, dynamic> j) =>
-      TakeSignalResult(
+  factory TakeSignalResult.fromJson(Map<String, dynamic> j) => TakeSignalResult(
         outcome: j['outcome'] as String? ?? 'rejected',
         signalId: j['signal_id'] as String? ?? '',
         symbol: j['symbol'] as String?,
@@ -338,7 +331,6 @@ class TakeSignalResult {
         detail: j['detail'] as String?,
       );
 }
-
 
 /// A trade the user built on the chart, sent to
 /// ``POST /api/manual-trade/take`` (manual trade builder, 2026-07-18).
@@ -380,7 +372,6 @@ class ManualTradeRequest {
         'valid_for_minutes': validForMinutes,
       };
 }
-
 
 /// Outcome of ``POST /api/manual-trade/take``. Mirrors [TakeSignalResult] with
 /// the manual-builder extras: [refId], [resting] (LIMIT still on the book),
@@ -438,7 +429,6 @@ class ManualTradeResult {
         detail: j['detail'] as String?,
       );
 }
-
 
 /// Mirror of one open-position document from
 /// ``GET /api/auto-trade/positions`` (engine reads Firestore under
@@ -634,8 +624,7 @@ class ServerSidePosition {
         tp1Price: (j['tp1_price'] as num?)?.toDouble() ?? 0.0,
         totalQty: (j['total_qty'] as num?)?.toDouble() ?? 0.0,
         filledQty: (j['filled_qty'] as num?)?.toDouble() ?? 0.0,
-        realizedPnlTotal:
-            (j['realized_pnl_total'] as num?)?.toDouble() ?? 0.0,
+        realizedPnlTotal: (j['realized_pnl_total'] as num?)?.toDouble() ?? 0.0,
         pretpFired: j['pretp_fired'] as bool? ?? false,
         createdAt: DateTime.tryParse(j['created_at'] as String? ?? ''),
         // `as num?` throughout: an engine that predates these fields sends
@@ -674,7 +663,6 @@ class ServerSidePosition {
     return entryPriceFilled > 0 ? entryPriceFilled : entryPriceTarget;
   }
 }
-
 
 /// A position Binance holds that the engine has no live record for.
 ///
@@ -727,7 +715,6 @@ class UnmanagedPosition {
       );
 }
 
-
 /// The whole answer to `GET /api/auto-trade/positions`.
 ///
 /// A type rather than a bare list, because two of the three things this
@@ -743,6 +730,7 @@ class ServerSidePositions {
     this.marksAgeSec,
     this.exchangeState = 'unavailable',
     this.exchangeAgeSec,
+    this.positionsState,
   });
 
   /// Positions the engine opened and manages: signal, stop, targets.
@@ -775,6 +763,22 @@ class ServerSidePositions {
 
   bool get exchangeIsReporting => exchangeState == 'reporting';
 
+  /// Whether the ENGINE's own record of this user's positions could be read
+  /// (2026-09-23).  Tri-state, and `null` is the third state:
+  ///
+  /// * `reporting` / `not_reported` — read; an empty [positions] is true.
+  /// * `unavailable` — the engine's book could not be read, so an empty
+  ///   [positions] proves nothing and the card must not say "0".
+  /// * `null` — an engine predating the field; the card keeps its old
+  ///   wording rather than downgrading every older build to "unknown".
+  ///
+  /// Why it exists: in production the api process never opened the position
+  /// store, so this endpoint answered an empty list on every request and the
+  /// card read "YOUR OPEN POSITIONS 0" whatever the account held.
+  final String? positionsState;
+
+  bool get positionsUnreadable => positionsState == 'unavailable';
+
   static const empty = ServerSidePositions();
 
   factory ServerSidePositions.fromJson(Map<String, dynamic> j) {
@@ -795,10 +799,10 @@ class ServerSidePositions {
       // let the card assert a position closed on no evidence at all.
       exchangeState: j['exchange_state'] as String? ?? 'unavailable',
       exchangeAgeSec: (j['exchange_age_sec'] as num?)?.toDouble(),
+      positionsState: j['positions_state'] as String?,
     );
   }
 }
-
 
 /// The result of `POST /api/auto-trade/close` — the user closing their own
 /// position from the app rather than opening Binance to do it.
@@ -853,7 +857,6 @@ class ClosePositionResult {
         signalStillActive: j['signal_still_active'] as bool? ?? false,
       );
 }
-
 
 /// One row from ``GET /api/auto-trade/recent-events`` — a per-user
 /// log of every order-placement attempt the engine made on this
@@ -941,9 +944,8 @@ class DispatchEvent {
         symbol: j['symbol'] as String? ?? '',
         direction: j['direction'] as String? ?? '',
         outcome: j['outcome'] as String? ?? '',
-        timestamp:
-            DateTime.tryParse(j['timestamp'] as String? ?? '') ??
-                DateTime.now().toUtc(),
+        timestamp: DateTime.tryParse(j['timestamp'] as String? ?? '') ??
+            DateTime.now().toUtc(),
         entryPrice: (j['entry_price'] as num?)?.toDouble() ?? 0.0,
         totalQty: (j['total_qty'] as num?)?.toDouble() ?? 0.0,
         rejectClass: j['reject_class'] as String?,
@@ -954,7 +956,6 @@ class DispatchEvent {
         source: j['source'] as String?,
       );
 }
-
 
 /// Translates a [DispatchEvent] rejection into a plain-English,
 /// user-actionable explanation.
@@ -1024,9 +1025,7 @@ class DispatchEventTranslation {
         ];
         return DispatchEventTranslation(
           headline: 'Closed on Binance',
-          action: bits.isEmpty
-              ? 'The position has closed.'
-              : bits.join(' · '),
+          action: bits.isEmpty ? 'The position has closed.' : bits.join(' · '),
           severity: DispatchEventSeverity.success,
         );
       }
@@ -1085,16 +1084,14 @@ class DispatchEventTranslation {
         case -2019:
           return DispatchEventTranslation(
             headline: 'Insufficient margin',
-            action:
-                'Your Binance Futures wallet does not have enough USDT to '
+            action: 'Your Binance Futures wallet does not have enough USDT to '
                 'open this size. Top up the Futures wallet on Binance.',
             severity: DispatchEventSeverity.userAction,
           );
         case -2010:
           return DispatchEventTranslation(
             headline: 'Insufficient balance',
-            action:
-                'Binance reports your account does not have enough free '
+            action: 'Binance reports your account does not have enough free '
                 'balance for this order. Check Futures wallet + open positions.',
             severity: DispatchEventSeverity.userAction,
           );
@@ -1102,8 +1099,7 @@ class DispatchEventTranslation {
         case -2015:
           return DispatchEventTranslation(
             headline: 'API key blocked',
-            action:
-                'Your Binance API key is rejecting our requests — usually '
+            action: 'Your Binance API key is rejecting our requests — usually '
                 'because the IP whitelist changed. Re-connect your key on '
                 'the Connect page.',
             severity: DispatchEventSeverity.userAction,
@@ -1112,8 +1108,7 @@ class DispatchEventTranslation {
         case -1013:
           return DispatchEventTranslation(
             headline: 'Order outside allowed price range',
-            action:
-                'Binance rejected the stop-loss or take-profit because the '
+            action: 'Binance rejected the stop-loss or take-profit because the '
                 'price moved too far from the entry. Lumin will retry on '
                 'the next signal.',
             severity: DispatchEventSeverity.transient,
@@ -1122,8 +1117,7 @@ class DispatchEventTranslation {
         case -4014:
           return DispatchEventTranslation(
             headline: 'Order precision rejected',
-            action:
-                'The order size was rounded incorrectly for this symbol. '
+            action: 'The order size was rounded incorrectly for this symbol. '
                 'This is a bug on our side — please report it if it keeps '
                 'happening.',
             severity: DispatchEventSeverity.system,
@@ -1131,8 +1125,7 @@ class DispatchEventTranslation {
         case -2021:
           return DispatchEventTranslation(
             headline: 'Stop order would trigger immediately',
-            action:
-                'The SL or TP was already past the current mark price when '
+            action: 'The SL or TP was already past the current mark price when '
                 'placed. Lumin will retry on the next signal.',
             severity: DispatchEventSeverity.transient,
           );
@@ -1153,8 +1146,7 @@ class DispatchEventTranslation {
           final sym = symbol.isNotEmpty ? symbol : 'This signal';
           return DispatchEventTranslation(
             headline: 'Not a crypto pair',
-            action:
-                '$sym is a Binance stock (TradFi) perpetual, which needs a '
+            action: '$sym is a Binance stock (TradFi) perpetual, which needs a '
                 'separate Binance agreement and isn\'t a crypto pair. Your '
                 'account is fine — Lumin auto-trades crypto only and filters '
                 'these out.',
@@ -1163,8 +1155,7 @@ class DispatchEventTranslation {
         case -4164:
           return DispatchEventTranslation(
             headline: 'Order notional too small',
-            action:
-                'Position size below Binance\'s minimum (~\$5 notional). '
+            action: 'Position size below Binance\'s minimum (~\$5 notional). '
                 'Increase your per-trade USDT allocation on the Connect page.',
             severity: DispatchEventSeverity.userAction,
           );
@@ -1193,8 +1184,7 @@ class DispatchEventTranslation {
         // Not the user's fault and nothing for them to fix.
         return DispatchEventTranslation(
           headline: 'Pair not tradeable through Lumin',
-          action:
-              '${symbol.isEmpty ? 'This pair' : symbol} isn\'t on Lumin\'s '
+          action: '${symbol.isEmpty ? 'This pair' : symbol} isn\'t on Lumin\'s '
               'tradeable pair list right now — usually because the list '
               'was updated after this signal appeared (stock perpetuals '
               'and delisted pairs are removed automatically). No action '
@@ -1214,24 +1204,21 @@ class DispatchEventTranslation {
       case 'AutoTradeDisabledError':
         return DispatchEventTranslation(
           headline: 'Auto-trade is off',
-          action:
-              'Connect your Binance API key and enable auto-trade on the '
+          action: 'Connect your Binance API key and enable auto-trade on the '
               'Connect page to start placing orders.',
           severity: DispatchEventSeverity.userAction,
         );
       case 'RateLimitExceededError':
         return DispatchEventTranslation(
           headline: 'Rate limit reached',
-          action:
-              'Too many orders in a short window — a built-in safety '
+          action: 'Too many orders in a short window — a built-in safety '
               'limit. Lumin will resume on the next signal.',
           severity: DispatchEventSeverity.transient,
         );
       case 'PositionCapExceededError':
         return DispatchEventTranslation(
           headline: 'Position cap reached',
-          action:
-              'You already have the maximum number of open positions '
+          action: 'You already have the maximum number of open positions '
               'allowed by the per-user cap.',
           severity: DispatchEventSeverity.transient,
         );
@@ -1239,8 +1226,7 @@ class DispatchEventTranslation {
       case 'GlobalKillSwitchActiveError':
         return DispatchEventTranslation(
           headline: 'Trading temporarily paused',
-          action:
-              'Trading is paused for everyone right now as a safety '
+          action: 'Trading is paused for everyone right now as a safety '
               'measure. No action needed — it resumes automatically.',
           severity: DispatchEventSeverity.system,
         );
@@ -1249,8 +1235,7 @@ class DispatchEventTranslation {
         // is auto-disabled") — never surface it.
         return DispatchEventTranslation(
           headline: 'Trading is switched off on your account',
-          action:
-              'A safety check paused trading on your account after '
+          action: 'A safety check paused trading on your account after '
               'repeated order failures. Fix the underlying issue shown in '
               'your recent activity, then email support to re-enable.',
           severity: DispatchEventSeverity.userAction,
@@ -1258,16 +1243,14 @@ class DispatchEventTranslation {
       case 'SignalClosed':
         return DispatchEventTranslation(
           headline: 'Signal already closed',
-          action:
-              'This signal finished before the order could be placed — '
+          action: 'This signal finished before the order could be placed — '
               'entering now would be a trade without its setup.',
           severity: DispatchEventSeverity.transient,
         );
       case 'TakeRequestStale':
         return DispatchEventTranslation(
           headline: 'Request took too long',
-          action:
-              'Your take arrived late and was refused for your safety — '
+          action: 'Your take arrived late and was refused for your safety — '
               'a delayed market order could fill far from the signal '
               'price. Try again.',
           severity: DispatchEventSeverity.transient,
@@ -1277,8 +1260,7 @@ class DispatchEventTranslation {
       case 'OrderPlacementError':
         return DispatchEventTranslation(
           headline: 'Order could not be placed',
-          action:
-              'Binance could not be reached with your key just now. '
+          action: 'Binance could not be reached with your key just now. '
               'Lumin will retry on the next signal; if this keeps '
               'happening, re-connect your key in Settings.',
           severity: DispatchEventSeverity.transient,
@@ -1286,16 +1268,14 @@ class DispatchEventTranslation {
       case 'NotGloballyEnabledError':
         return DispatchEventTranslation(
           headline: 'Auto-trade not yet enabled',
-          action:
-              'Server-side execution is not switched on right now. '
+          action: 'Server-side execution is not switched on right now. '
               'No action needed on your side.',
           severity: DispatchEventSeverity.system,
         );
       case 'NotionalTooSmall':
         return DispatchEventTranslation(
           headline: 'Position size too small',
-          action:
-              'Your position size is too small to open '
+          action: 'Your position size is too small to open '
               '${symbol.isEmpty ? 'this' : 'a $symbol'} order at the '
               'current price after lot-size rounding. Go to Settings → '
               'Auto-trade and increase your position size to at least '
@@ -1373,7 +1353,6 @@ enum DispatchEventSeverity {
   system, // red chip — operator-side issue or app/engine bug
 }
 
-
 class BinanceConnectError implements Exception {
   BinanceConnectError({
     required this.code,
@@ -1416,7 +1395,6 @@ class SelfReenableResult {
   /// User-facing refusal copy (cooldown), null on success.
   final String? message;
 }
-
 
 /// One row from ``GET /api/auto-trade/signal-outcomes`` — what happened
 /// to a signal **on this user's own Binance account**.
@@ -1572,7 +1550,6 @@ class SignalOutcome {
         source: j['source'] as String?,
       );
 }
-
 
 /// The response envelope for ``GET /api/auto-trade/signal-outcomes``.
 ///

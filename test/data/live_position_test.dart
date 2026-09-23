@@ -258,6 +258,29 @@ void _exchangeColumns() {
       expect(b.unmanaged, isEmpty);
     });
 
+    test('positions_state is tri-state, and null is an older engine', () {
+      // 2026-09-23: in production the api process never opened the position
+      // store, so this endpoint answered [] on every request and the card
+      // read "0 open" whatever the account held.  The engine now says when
+      // its own record could not be read.
+      final unreadable = ServerSidePositions.fromJson({
+        'positions': <dynamic>[],
+        'positions_state': 'unavailable',
+      });
+      expect(unreadable.positionsUnreadable, isTrue);
+
+      final read = ServerSidePositions.fromJson({
+        'positions': <dynamic>[],
+        'positions_state': 'not_reported',
+      });
+      expect(read.positionsUnreadable, isFalse);
+
+      // An engine predating the field must not be downgraded to "unknown".
+      final older = ServerSidePositions.fromJson({'positions': <dynamic>[]});
+      expect(older.positionsState, isNull);
+      expect(older.positionsUnreadable, isFalse);
+    });
+
     test('a malformed body degrades to empty rather than throwing', () {
       final b = ServerSidePositions.fromJson({
         'positions': 'not a list',
