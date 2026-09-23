@@ -19,6 +19,9 @@ import '../../../data/repository.dart';
 import '../../../shared/tokens.dart';
 import '../../../shared/widgets/lumin_card.dart';
 import '../../../shared/widgets/preview_badge.dart';
+import '../../../shared/widgets/lumin_switch.dart';
+import '../../../shared/friendly_error.dart';
+import '../../../shared/widgets/page_skeleton.dart';
 
 class InvalidationSettingsPage extends StatefulWidget {
   const InvalidationSettingsPage({super.key});
@@ -86,13 +89,13 @@ class _InvalidationSettingsPageState extends State<InvalidationSettingsPage> {
       if (!mounted) return;
       setState(() {
         _loaded = true;
-        _loadError = e.message;
+        _loadError = friendlyLoadError(e, what: 'your invalidation settings');
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _loaded = true;
-        _loadError = '$e';
+        _loadError = friendlyLoadError(e, what: 'your invalidation settings');
       });
     }
   }
@@ -285,7 +288,7 @@ class _InvalidationSettingsPageState extends State<InvalidationSettingsPage> {
 
   Widget _bodyFor(bool isLive) {
     if (!_loaded) {
-      return const Center(child: CircularProgressIndicator());
+      return const PageSkeleton();
     }
     if (_loadError != null) {
       return Center(
@@ -566,7 +569,7 @@ class _InvalidationSettingsPageState extends State<InvalidationSettingsPage> {
                       'ADVANCED',
                       style: TextStyle(
                         color: LuminColors.textMuted,
-                        fontSize: 10,
+                        fontSize: 11,
                         letterSpacing: 1.2,
                         fontWeight: FontWeight.w600,
                       ),
@@ -694,7 +697,7 @@ class _InvalidationSettingsPageState extends State<InvalidationSettingsPage> {
             ),
           ),
           const SizedBox(width: LuminSpacing.sm),
-          Switch(
+          LuminSwitch(
             value: value,
             activeColor: LuminColors.accent,
             onChanged: onChanged,

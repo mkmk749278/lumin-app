@@ -290,7 +290,7 @@ class AboutPage extends StatelessWidget {
         textAlign: TextAlign.center,
         style: TextStyle(
           color: LuminColors.textMuted.withOpacity(0.75),
-          fontSize: 10,
+          fontSize: 11,
           height: 1.6,
         ),
       ),

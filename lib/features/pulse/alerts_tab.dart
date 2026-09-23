@@ -369,7 +369,7 @@ class _AlertCard extends StatelessWidget {
                         alert.agoLabel(),
                         style: const TextStyle(
                           color: LuminColors.textMuted,
-                          fontSize: 10,
+                          fontSize: 11,
                         ),
                       ),
                     ],
@@ -423,7 +423,7 @@ class _TimeframeChip extends StatelessWidget {
         timeframe,
         style: const TextStyle(
           color: LuminColors.textSecondary,
-          fontSize: 9.5,
+          fontSize: 11,
           fontWeight: FontWeight.w600,
           letterSpacing: 0.4,
         ),

@@ -29,6 +29,8 @@ import '../../../shared/tokens.dart';
 import '../../../shared/widgets/lumin_card.dart';
 
 import 'eligibility_preference_page.dart' show EligibilityScope;
+import '../../../shared/friendly_error.dart';
+import '../../../shared/widgets/page_skeleton.dart';
 
 enum _Preset { all, custom, blockAll }
 
@@ -111,7 +113,7 @@ class _SymbolPreferenceBodyState extends State<_SymbolPreferenceBody> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _loadError = e.toString();
+        _loadError = friendlyLoadError(e, what: 'your symbol list');
         _loaded = true;
       });
     }
@@ -200,7 +202,7 @@ class _SymbolPreferenceBodyState extends State<_SymbolPreferenceBody> {
   }
 
   Widget _body() {
-    if (!_loaded) return const Center(child: CircularProgressIndicator());
+    if (!_loaded) return const PageSkeleton();
     if (_loadError != null) {
       return Center(
         child: Padding(
@@ -276,7 +278,7 @@ class _SymbolPreferenceBodyState extends State<_SymbolPreferenceBody> {
                       : 'WHICH PAIRS AUTO-TRADE FOR YOU',
                   style: const TextStyle(
                     color: LuminColors.textMuted,
-                    fontSize: 10,
+                    fontSize: 11,
                     letterSpacing: 1.2,
                     fontWeight: FontWeight.w700,
                   ),

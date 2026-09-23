@@ -42,6 +42,7 @@ import 'models/alert_overlay.dart';
 import 'models/candle.dart';
 import 'models/chart_overlay.dart';
 import 'sar_disclosure.dart';
+import '../../shared/friendly_error.dart';
 
 class ChartPage extends StatefulWidget {
   const ChartPage({super.key, required this.symbol, this.signal, this.alert});
@@ -283,7 +284,7 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
       if (mounted) {
         setState(() {
           _loading = false;
-          _error = 'Could not load chart: $e';
+          _error = friendlyLoadError(e, what: 'this chart');
         });
       }
     }

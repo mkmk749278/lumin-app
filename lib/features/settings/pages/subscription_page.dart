@@ -26,6 +26,7 @@ import '../../../shared/tokens.dart';
 import '../../../shared/widgets/free_tier_gate.dart';
 import '../../../shared/widgets/lumin_card.dart';
 import '../../trial/trial_offer_tile.dart';
+import '../../../shared/widgets/page_skeleton.dart';
 
 /// Play Console subscription product ids (B16 two-tier model).  Keep in
 /// lockstep with the engine's GOOGLE_PLAY_ASSIST/AUTO_PRODUCT_IDS env.
@@ -433,10 +434,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
 
   Widget _plans() {
     if (_loading) {
-      return const Padding(
-        padding: EdgeInsets.all(LuminSpacing.lg),
-        child: Center(child: CircularProgressIndicator()),
-      );
+      return const PageSkeleton(inline: true, cards: 2);
     }
     if (!_available || _products.isEmpty) {
       return Padding(
@@ -593,7 +591,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                       hasDiscount ? 'first month' : unit,
                       style: const TextStyle(
                         color: LuminColors.textMuted,
-                        fontSize: 10,
+                        fontSize: 11,
                       ),
                     ),
                   ],
@@ -635,7 +633,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
         'Play › Subscriptions.',
         style: TextStyle(
           color: LuminColors.textMuted.withOpacity(0.85),
-          fontSize: 10,
+          fontSize: 11,
           height: 1.5,
         ),
       ),
@@ -656,7 +654,7 @@ Widget _pill(String text, Color color) => Container(
         text,
         style: const TextStyle(
           color: LuminColors.bgDeep,
-          fontSize: 9,
+          fontSize: 11,
           fontWeight: FontWeight.w700,
           letterSpacing: 0.6,
         ),
@@ -707,7 +705,7 @@ class CurrentPlanCard extends StatelessWidget {
                 'CURRENT PLAN',
                 style: TextStyle(
                   color: LuminColors.success,
-                  fontSize: 10,
+                  fontSize: 11,
                   fontWeight: FontWeight.w700,
                   letterSpacing: 1.0,
                 ),
@@ -771,7 +769,7 @@ class _ColHead extends StatelessWidget {
       label,
       style: const TextStyle(
         color: LuminColors.textMuted,
-        fontSize: 9,
+        fontSize: 11,
         letterSpacing: 0.8,
         fontWeight: FontWeight.w700,
       ),

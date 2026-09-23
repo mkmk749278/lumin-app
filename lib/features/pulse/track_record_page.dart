@@ -437,7 +437,7 @@ class _TrackRecordPageState extends State<TrackRecordPage> {
                 '${s.trades - s.tradesPriced} of ${s.trades} could not be '
                 'priced and are left out of every figure above.',
                 style: const TextStyle(
-                    color: LuminColors.textMuted, fontSize: 10.5, height: 1.4),
+                    color: LuminColors.textMuted, fontSize: 11, height: 1.4),
               ),
             ],
           ],
@@ -465,7 +465,7 @@ class _TrackRecordPageState extends State<TrackRecordPage> {
                     'DAILY RESULT',
                     style: TextStyle(
                       color: LuminColors.textMuted,
-                      fontSize: 10,
+                      fontSize: 11,
                       letterSpacing: 1.2,
                       fontWeight: FontWeight.w600,
                     ),
@@ -521,7 +521,7 @@ class _TrackRecordPageState extends State<TrackRecordPage> {
               'RUNNING TOTAL',
               style: TextStyle(
                 color: LuminColors.textMuted,
-                fontSize: 10,
+                fontSize: 11,
                 letterSpacing: 1.2,
                 fontWeight: FontWeight.w600,
               ),
@@ -538,7 +538,7 @@ class _TrackRecordPageState extends State<TrackRecordPage> {
             Text(
               'since ${_shortDate(d.rangeStart)} · UTC',
               style:
-                  const TextStyle(color: LuminColors.textMuted, fontSize: 10.5),
+                  const TextStyle(color: LuminColors.textMuted, fontSize: 11),
             ),
             const SizedBox(height: LuminSpacing.md),
             _AxisChart(
@@ -574,7 +574,7 @@ class _TrackRecordPageState extends State<TrackRecordPage> {
                         : 'SIGNALS IN THIS WINDOW',
                     style: const TextStyle(
                       color: LuminColors.textMuted,
-                      fontSize: 10,
+                      fontSize: 11,
                       letterSpacing: 1.2,
                       fontWeight: FontWeight.w600,
                     ),
@@ -620,7 +620,7 @@ class _TrackRecordPageState extends State<TrackRecordPage> {
                 'Showing the newest ${_signals.items.length} of '
                 '${_signals.matched}.',
                 style: const TextStyle(
-                    color: LuminColors.textMuted, fontSize: 10.5),
+                    color: LuminColors.textMuted, fontSize: 11),
               ),
             ],
           ],
@@ -645,7 +645,7 @@ class _TrackRecordPageState extends State<TrackRecordPage> {
         'Past signal performance does not guarantee future results.',
         style: const TextStyle(
           color: LuminColors.textMuted,
-          fontSize: 10.5,
+          fontSize: 11,
           height: 1.5,
         ),
       ),
@@ -730,7 +730,7 @@ class _DayReadout extends StatelessWidget {
                 'still running',
                 style: TextStyle(
                   color: LuminColors.warn,
-                  fontSize: 10,
+                  fontSize: 11,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -778,13 +778,13 @@ class _BarsView extends StatelessWidget {
             children: [
               Text(_shortDate(record.rangeStart),
                   style: const TextStyle(
-                      color: LuminColors.textMuted, fontSize: 10)),
+                      color: LuminColors.textMuted, fontSize: 11)),
               Text(
                   record.items.isEmpty
                       ? ''
                       : _shortDate(record.items.last.date),
                   style: const TextStyle(
-                      color: LuminColors.textMuted, fontSize: 10)),
+                      color: LuminColors.textMuted, fontSize: 11)),
             ],
           ),
         ],
@@ -906,7 +906,7 @@ class _AxisLabels extends StatelessWidget {
             child: Text(
               _short(v),
               style:
-                  const TextStyle(color: LuminColors.textMuted, fontSize: 9),
+                  const TextStyle(color: LuminColors.textMuted, fontSize: 11),
             ),
           ),
       ],
@@ -1093,7 +1093,7 @@ class _SignalRow extends StatelessWidget {
                         color: signal.isLong
                             ? LuminColors.success
                             : LuminColors.loss,
-                        fontSize: 10,
+                        fontSize: 11,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -1106,7 +1106,7 @@ class _SignalRow extends StatelessWidget {
                   ].join(' · '),
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                      color: LuminColors.textMuted, fontSize: 10.5),
+                      color: LuminColors.textMuted, fontSize: 11),
                 ),
               ],
             ),
@@ -1125,7 +1125,7 @@ class _SignalRow extends StatelessWidget {
                 // not only in the total.
                 signal.pnlPct == null ? '' : formatPct(signal.pnlPct!),
                 style: const TextStyle(
-                    color: LuminColors.textMuted, fontSize: 10),
+                    color: LuminColors.textMuted, fontSize: 11),
               ),
             ],
           ),
@@ -1162,7 +1162,7 @@ class _RecordedChip extends StatelessWidget {
           'RECORDED',
           style: TextStyle(
             color: LuminColors.success,
-            fontSize: 9,
+            fontSize: 11,
             letterSpacing: 0.8,
             fontWeight: FontWeight.w700,
           ),
@@ -1296,7 +1296,7 @@ class _MiniStat extends StatelessWidget {
               label,
               style: const TextStyle(
                 color: LuminColors.textMuted,
-                fontSize: 9,
+                fontSize: 11,
                 letterSpacing: 0.9,
                 fontWeight: FontWeight.w600,
               ),
@@ -1314,7 +1314,7 @@ class _MiniStat extends StatelessWidget {
               Text(
                 sub!,
                 style: const TextStyle(
-                    color: LuminColors.textMuted, fontSize: 10),
+                    color: LuminColors.textMuted, fontSize: 11),
               ),
           ],
         ),

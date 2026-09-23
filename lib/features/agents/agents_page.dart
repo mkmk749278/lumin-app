@@ -14,6 +14,7 @@ import '../../shared/tokens.dart';
 import '../../shared/widgets/lumin_card.dart';
 import 'agent_data.dart';
 import '../signals/signal_language.dart';
+import '../../shared/friendly_error.dart';
 
 class AgentsPage extends StatefulWidget {
   const AgentsPage({super.key});
@@ -350,7 +351,7 @@ class _AgentDetailSheetState extends State<_AgentDetailSheet> {
                   }
                   if (snap.hasError) {
                     return _ErrorBlock(
-                      error: snap.error.toString(),
+                      error: friendlyLoadError(snap.error!, what: 'the analysts'),
                       onRetry: _refresh,
                     );
                   }
@@ -412,7 +413,7 @@ class _Hero extends StatelessWidget {
                   style: const TextStyle(
                     color: LuminColors.textMuted,
                     fontFamily: 'monospace',
-                    fontSize: 10,
+                    fontSize: 11,
                     letterSpacing: 0.8,
                   ),
                 ),
@@ -445,7 +446,7 @@ class _StatsCard extends StatelessWidget {
             'STATS — LAST 24h',
             style: TextStyle(
               color: LuminColors.textMuted,
-              fontSize: 10,
+              fontSize: 11,
               letterSpacing: 1.2,
               fontWeight: FontWeight.w600,
             ),
@@ -525,7 +526,7 @@ class _StatsCard extends StatelessWidget {
             'THIS SCAN CYCLE',
             style: TextStyle(
               color: LuminColors.textMuted,
-              fontSize: 10,
+              fontSize: 11,
               letterSpacing: 1.2,
               fontWeight: FontWeight.w600,
             ),
@@ -586,7 +587,7 @@ class _Stat extends StatelessWidget {
           label.toUpperCase(),
           style: const TextStyle(
             color: LuminColors.textMuted,
-            fontSize: 9,
+            fontSize: 11,
             letterSpacing: 1.0,
             fontWeight: FontWeight.w600,
           ),
@@ -619,7 +620,7 @@ class _RecentSignalsBlock extends StatelessWidget {
           'RECENT SIGNALS',
           style: TextStyle(
             color: LuminColors.textMuted,
-            fontSize: 10,
+            fontSize: 11,
             letterSpacing: 1.2,
             fontWeight: FontWeight.w600,
           ),
@@ -708,7 +709,7 @@ class _AgentSignalRow extends StatelessWidget {
                     style: TextStyle(
                       color:
                           isLong ? LuminColors.success : LuminColors.loss,
-                      fontSize: 10,
+                      fontSize: 11,
                       fontWeight: FontWeight.w600,
                       letterSpacing: 0.5,
                     ),
@@ -720,7 +721,7 @@ class _AgentSignalRow extends StatelessWidget {
                 '${signalStatusLabel(sig.status)} • ${formatAge(sig.minutesAgo)} ago',
                 style: TextStyle(
                   color: _statusColor(),
-                  fontSize: 10,
+                  fontSize: 11,
                   letterSpacing: 0.3,
                 ),
               ),

@@ -175,7 +175,7 @@ class _NotionalSheetState extends State<_NotionalSheet> {
               'only re-prices the record you are reading. Leave it blank to '
               'use the default.',
               style: TextStyle(
-                  color: LuminColors.textMuted, fontSize: 10.5, height: 1.45),
+                  color: LuminColors.textMuted, fontSize: 11, height: 1.45),
             ),
             const SizedBox(height: LuminSpacing.lg),
             Row(

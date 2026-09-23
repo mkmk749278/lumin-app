@@ -60,6 +60,7 @@ import '../../../shared/platform_input.dart';
 import '../../../shared/tokens.dart';
 import '../../../shared/widgets/lumin_card.dart';
 import 'signup_page.dart';
+import '../../../shared/friendly_error.dart';
 
 /// Which provider delivered the OTP — drives the channel-specific
 /// hint copy and dictates which `confirm*` method to call on submit.
@@ -358,14 +359,14 @@ class _OtpEntryPageState extends State<OtpEntryPage> {
           setState(() => _error = 'That code didn\'t match — double-check '
               'and try again.');
         case OtpFailureAction.showMessage:
-          setState(() => _error = e.message ?? 'Verify failed (${e.code})');
+          setState(() => _error = friendlyAuthError(e.code, action: 'verify the code'));
       }
     } on AuthError catch (e) {
       if (!mounted) return;
       setState(() => _error = e.message);
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = 'Verify failed: $e');
+      setState(() => _error = "Couldn't verify the code. Please try again.");
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -429,7 +430,7 @@ class _OtpEntryPageState extends State<OtpEntryPage> {
           },
           onVerificationFailed: (FirebaseAuthException e) {
             if (mounted) {
-              setState(() => _error = e.message ?? 'Couldn\'t resend (${e.code})');
+              setState(() => _error = friendlyAuthError(e.code, action: 'resend the code'));
             }
             if (!completer.isCompleted) completer.complete();
           },
@@ -514,7 +515,7 @@ class _OtpEntryPageState extends State<OtpEntryPage> {
                         'CODE',
                         style: TextStyle(
                           color: LuminColors.textMuted,
-                          fontSize: 10,
+                          fontSize: 11,
                           letterSpacing: 1.2,
                           fontWeight: FontWeight.w600,
                         ),

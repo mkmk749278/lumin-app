@@ -19,6 +19,7 @@ import '../../../data/repository.dart';
 import '../../../shared/format.dart';
 import '../../../shared/tokens.dart';
 import '../../../shared/widgets/lumin_card.dart';
+import '../../../shared/widgets/page_skeleton.dart';
 
 class ReferralPage extends StatefulWidget {
   const ReferralPage({super.key});
@@ -92,10 +93,7 @@ class _ReferralPageState extends State<ReferralPage> {
           children: [
             const SizedBox(height: LuminSpacing.md),
             if (_loading) ...[
-              const SizedBox(height: LuminSpacing.xl),
-              const Center(
-                child: CircularProgressIndicator(color: LuminColors.accent),
-              ),
+              const PageSkeleton(inline: true, cards: 3, padding: EdgeInsets.zero),
             ] else if (_loadError != null) ...[
               _errorCard(_loadError!),
             ] else if (stats != null) ...[
@@ -224,7 +222,7 @@ class _ReferralPageState extends State<ReferralPage> {
               'YOUR CODE',
               style: TextStyle(
                 color: LuminColors.textMuted,
-                fontSize: 10,
+                fontSize: 11,
                 letterSpacing: 1.2,
                 fontWeight: FontWeight.w600,
               ),
@@ -361,7 +359,7 @@ class _ReferralPageState extends State<ReferralPage> {
               'COMMISSION EARNED',
               style: TextStyle(
                 color: LuminColors.textMuted,
-                fontSize: 10,
+                fontSize: 11,
                 letterSpacing: 1.2,
                 fontWeight: FontWeight.w600,
               ),

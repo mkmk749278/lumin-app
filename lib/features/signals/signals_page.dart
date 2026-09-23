@@ -28,6 +28,9 @@ import '../../shared/widgets/upsell_banners.dart';
 import 'signal_language.dart';
 import 'signal_snap.dart';
 import 'take_signal_sheet.dart';
+import '../../shared/friendly_error.dart';
+import '../../shared/haptics.dart';
+import '../../shared/widgets/arrival_entrance.dart';
 
 /// Fetch mark prices for a batch of symbols from Binance's public
 /// premiumIndex endpoint.  Fires requests concurrently; any individual
@@ -146,6 +149,7 @@ class SignalsPage extends StatefulWidget {
 }
 
 class _SignalsPageState extends State<SignalsPage>
+    with WidgetsBindingObserver
     implements ForegroundRefreshable, ScrollToTop {
   /// Drives the feed list so a tap on the already-active Signals tab returns
   /// it to the newest signal. Attached to the POPULATED list only — the
@@ -208,8 +212,19 @@ class _SignalsPageState extends State<SignalsPage>
   final http.Client _markPriceClient = http.Client();
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final visible = TickerMode.of(context);
+    if (visible != _tabVisible) {
+      _tabVisible = visible;
+      _applyPollingGate();
+    }
     final repo = AppConfigScope.of(context).repo;
     if (repo != _lastRepo) {
       _lastRepo = repo;
@@ -223,6 +238,7 @@ class _SignalsPageState extends State<SignalsPage>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _listController.dispose();
     _sub?.cancel();
     _priceTimer?.cancel();
@@ -250,9 +266,44 @@ class _SignalsPageState extends State<SignalsPage>
   /// existing timer first, then fires immediately and every 5 s.
   /// No-op when in mock/preview mode or when no ACTIVE signals are
   /// visible — avoids redundant Binance requests.
+  /// Whether live-price polling may run at all: this tab is the visible one
+  /// ([TickerMode], set per tab by NavShell) and the app is in the
+  /// foreground. Until 2026-09-23 the 5s Binance poll ran regardless — on
+  /// a hidden tab and with the phone locked — costing battery and data for
+  /// prices nobody could see.
+  /// Signal ids this page has already rendered, and the ones that arrived
+  /// since the first load and have not yet played their entrance. A new
+  /// signal is the product's key moment and used to appear with no motion
+  /// at all (2026-09-23 audit).
+  final Set<String> _seenIds = {};
+  final Set<String> _freshIds = {};
+  bool _seededIds = false;
+
+  bool _tabVisible = true;
+  bool _appForeground = true;
+  bool get _pollingAllowed => _tabVisible && _appForeground;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final fg = state == AppLifecycleState.resumed;
+    if (fg == _appForeground) return;
+    _appForeground = fg;
+    _applyPollingGate();
+  }
+
+  void _applyPollingGate() {
+    if (_pollingAllowed) {
+      if (_priceTimer == null) _restartPricePolling();
+    } else {
+      _priceTimer?.cancel();
+      _priceTimer = null;
+    }
+  }
+
   void _restartPricePolling() {
     _priceTimer?.cancel();
     _priceTimer = null;
+    if (!_pollingAllowed) return;
     // Only poll for live data — mock mode uses static fixture prices.
     if (!(_lastRepo?.isLive ?? false)) return;
     final syms = _activeSymbols();
@@ -296,6 +347,14 @@ class _SignalsPageState extends State<SignalsPage>
     _sub = stream.listen(
       (items) {
         if (!mounted) return;
+        // Ids already shown never animate; the first load seeds the set so
+        // opening the tab does not replay an entrance for the whole feed.
+        final arrivals = _seededIds
+            ? items.map((s) => s.id).where((id) => !_seenIds.contains(id))
+            : const <String>[];
+        _freshIds.addAll(arrivals);
+        _seenIds.addAll(items.map((s) => s.id));
+        _seededIds = true;
         setState(() {
           _dataByFilter[filter] = items;
           _errorByFilter.remove(filter);
@@ -378,6 +437,7 @@ class _SignalsPageState extends State<SignalsPage>
 
   void _setFilter(_SignalFilter f) {
     if (f == _filter) return;
+    LuminHaptics.selection();
     _priceTimer?.cancel();
     _priceTimer = null;
     setState(() {
@@ -466,7 +526,7 @@ class _SignalsPageState extends State<SignalsPage>
     if (data == null && error != null) {
       return _SignalsError(
         key: const ValueKey('signals-error'),
-        error: error.toString(),
+        error: friendlyLoadError(error, what: 'signals'),
         onRetry: _refresh,
       );
     }
@@ -504,13 +564,24 @@ class _SignalsPageState extends State<SignalsPage>
       padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
       itemCount: items.length,
       separatorBuilder: (_, __) => const SizedBox(height: LuminSpacing.md),
-      itemBuilder: (_, i) => _SignalCard(
-        sig: items[i],
-        priceNotifier: _priceNotifiers[items[i].symbol],
-        outcome: _outcomes?[items[i].id],
-        outcomesLoaded: _outcomes != null,
-        outcomesTruncated: _outcomes?.truncated ?? false,
-      ),
+      itemBuilder: (_, i) {
+        final card = _SignalCard(
+          sig: items[i],
+          priceNotifier: _priceNotifiers[items[i].symbol],
+          outcome: _outcomes?[items[i].id],
+          outcomesLoaded: _outcomes != null,
+          outcomesTruncated: _outcomes?.truncated ?? false,
+        );
+        final id = items[i].id;
+        if (!_freshIds.contains(id)) return card;
+        return ArrivalEntrance(
+          key: ValueKey('arrival-$id'),
+          // Played once: dropped from the set when done, so scrolling the
+          // card away and back does not replay it.
+          onDone: () => _freshIds.remove(id),
+          child: card,
+        );
+      },
     );
   }
 }
@@ -976,62 +1047,76 @@ class _SignalCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Text(
-                sig.symbol,
-                style: const TextStyle(
-                  color: LuminColors.textPrimary,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
+              Expanded(
+                child: Row(
+                  children: [
+                    // The only piece of this row that may shrink: it gets all
+                    // spare width first and truncates last, so the pills and
+                    // the confidence label never push the card past its edge
+                    // (0.4px overflow at 1.3x text on 360dp, 2026-09-23).
+                    Flexible(
+                      child: Text(
+                        sig.symbol,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: LuminColors.textPrimary,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: LuminSpacing.sm),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: LuminSpacing.sm,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: (isLong ? LuminColors.success : LuminColors.loss)
+                            .withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(LuminRadii.sm),
+                      ),
+                      child: Text(
+                        sig.direction,
+                        style: TextStyle(
+                          color: isLong ? LuminColors.success : LuminColors.loss,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ),
+                    if (sig.preTpHit) ...[
+                      const SizedBox(width: LuminSpacing.sm),
+                      // Pre-TP banked badge — signals to the subscriber that
+                      // partial profit was already taken and the residual is
+                      // riding under a breakeven stop.  Explains the
+                      // "SL: BE" rendering in the price row below.
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: LuminSpacing.sm,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: LuminColors.success.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(LuminRadii.sm),
+                        ),
+                        child: const Text(
+                          '✓ BANKED',
+                          style: TextStyle(
+                            color: LuminColors.success,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
               const SizedBox(width: LuminSpacing.sm),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: LuminSpacing.sm,
-                  vertical: 2,
-                ),
-                decoration: BoxDecoration(
-                  color: (isLong ? LuminColors.success : LuminColors.loss)
-                      .withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(LuminRadii.sm),
-                ),
-                child: Text(
-                  sig.direction,
-                  style: TextStyle(
-                    color: isLong ? LuminColors.success : LuminColors.loss,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ),
-              if (sig.preTpHit) ...[
-                const SizedBox(width: LuminSpacing.sm),
-                // Pre-TP banked badge — signals to the subscriber that
-                // partial profit was already taken and the residual is
-                // riding under a breakeven stop.  Explains the
-                // "SL: BE" rendering in the price row below.
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: LuminSpacing.sm,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: LuminColors.success.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(LuminRadii.sm),
-                  ),
-                  child: const Text(
-                    '✓ BANKED',
-                    style: TextStyle(
-                      color: LuminColors.success,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                ),
-              ],
-              const Spacer(),
               // Handoff §11: this read "82.9 A" and left the reader to guess
               // what the number was, what the letter was, and whether either
               // meant the trade was likely to win. It says what it is now,
@@ -1616,7 +1701,7 @@ class _SignalDetailSheetState extends State<_SignalDetailSheet> {
               'AUTO-TRADE ${widget.sig.symbol}',
               style: const TextStyle(
                 color: LuminColors.textMuted,
-                fontSize: 10,
+                fontSize: 11,
                 letterSpacing: 1.2,
                 fontWeight: FontWeight.w700,
               ),
@@ -1780,7 +1865,7 @@ class _OutcomeSummaryCard extends StatelessWidget {
             closed ? 'OUTCOME' : 'LIVE',
             style: TextStyle(
               color: accent,
-              fontSize: 10,
+              fontSize: 11,
               letterSpacing: 1.4,
               fontWeight: FontWeight.w700,
             ),
@@ -2042,7 +2127,7 @@ class _TradeDetailsCard extends StatelessWidget {
               'TRADE DETAILS',
               style: TextStyle(
                 color: LuminColors.textMuted,
-                fontSize: 10,
+                fontSize: 11,
                 letterSpacing: 1.4,
                 fontWeight: FontWeight.w700,
               ),

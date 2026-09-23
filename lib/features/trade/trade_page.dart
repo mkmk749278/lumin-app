@@ -46,6 +46,8 @@ import '../../shared/widgets/upsell_banners.dart';
 import 'live_status_card.dart';
 import 'live_status_resolver.dart';
 import 'paper_trades_page.dart';
+import '../../shared/widgets/lumin_switch.dart';
+import '../../shared/friendly_error.dart';
 
 class _TradeBundle {
   const _TradeBundle({
@@ -568,7 +570,8 @@ class _TradePageState extends State<TradePage>
                   }
                   if (snap.hasError && !snap.hasData) {
                     return _TradeError(
-                        error: snap.error.toString(), onRetry: _refresh);
+                        error: friendlyLoadError(snap.error!, what: 'your trades'),
+                        onRetry: _refresh);
                   }
                   final data = snap.data!;
                   // Cache latest bundle so tab-switch handler above can
@@ -818,7 +821,7 @@ class _TradePageState extends State<TradePage>
             'PAPER HISTORY',
             style: TextStyle(
               color: LuminColors.textMuted,
-              fontSize: 10,
+              fontSize: 11,
               letterSpacing: 1.2,
               fontWeight: FontWeight.w600,
             ),
@@ -1011,7 +1014,7 @@ class _ModePnlCard extends StatelessWidget {
                   label,
                   style: const TextStyle(
                     color: LuminColors.textMuted,
-                    fontSize: 10,
+                    fontSize: 11,
                     letterSpacing: 1.2,
                     fontWeight: FontWeight.w600,
                   ),
@@ -1210,7 +1213,7 @@ class _OpenPositionsCard extends StatelessWidget {
                   'OPEN POSITIONS',
                   style: TextStyle(
                     color: LuminColors.textMuted,
-                    fontSize: 10,
+                    fontSize: 11,
                     letterSpacing: 1.2,
                     fontWeight: FontWeight.w600,
                   ),
@@ -1283,7 +1286,7 @@ class _PositionRow extends StatelessWidget {
                 p.direction,
                 style: TextStyle(
                   color: isLong ? LuminColors.success : LuminColors.loss,
-                  fontSize: 10,
+                  fontSize: 11,
                   fontWeight: FontWeight.w600,
                   letterSpacing: 0.5,
                 ),
@@ -1540,7 +1543,7 @@ class _BinaryModeToggle extends StatelessWidget {
                 ),
               )
             else
-              Switch(
+              LuminSwitch(
                 value: isOn,
                 activeColor: activeColor,
                 onChanged: onChanged,
@@ -1750,7 +1753,7 @@ class _ServerPositionsCard extends StatelessWidget {
                   'YOUR OPEN POSITIONS',
                   style: TextStyle(
                     color: LuminColors.textMuted,
-                    fontSize: 10,
+                    fontSize: 11,
                     letterSpacing: 1.2,
                     fontWeight: FontWeight.w700,
                   ),
@@ -1804,7 +1807,7 @@ class _ServerPositionsCard extends StatelessWidget {
                   'NOT OPENED BY LUMIN',
                   style: TextStyle(
                     color: LuminColors.warn,
-                    fontSize: 10,
+                    fontSize: 11,
                     letterSpacing: 1.2,
                     fontWeight: FontWeight.w700,
                   ),
@@ -1841,7 +1844,7 @@ class _ServerPositionsCard extends StatelessWidget {
         'Showing what Lumin set up — Binance has not reported in',
         style: TextStyle(
           color: LuminColors.warn,
-          fontSize: 10,
+          fontSize: 11,
           fontWeight: FontWeight.w600,
         ),
       );
@@ -1856,7 +1859,7 @@ class _ServerPositionsCard extends StatelessWidget {
               : "From Binance's own position data, ${age.round()}s ago",
       style: TextStyle(
         color: stale ? LuminColors.warn : LuminColors.textMuted,
-        fontSize: 10,
+        fontSize: 11,
         fontWeight: FontWeight.w600,
       ),
     );
@@ -1903,7 +1906,7 @@ class _UnmanagedPositionRow extends StatelessWidget {
                   position.side,
                   style: TextStyle(
                     color: dirColor,
-                    fontSize: 10,
+                    fontSize: 11,
                     fontWeight: FontWeight.w800,
                     letterSpacing: 0.5,
                   ),
@@ -2131,7 +2134,7 @@ class _ServerPositionRowState extends State<_ServerPositionRow> {
                   position.side,
                   style: TextStyle(
                     color: dirColor,
-                    fontSize: 10,
+                    fontSize: 11,
                     fontWeight: FontWeight.w800,
                     letterSpacing: 0.5,
                   ),
@@ -2157,7 +2160,7 @@ class _ServerPositionRowState extends State<_ServerPositionRow> {
                       position.state,
                       style: const TextStyle(
                         color: LuminColors.textMuted,
-                        fontSize: 10,
+                        fontSize: 11,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -2167,7 +2170,7 @@ class _ServerPositionRowState extends State<_ServerPositionRow> {
                         '· Pre-TP banked',
                         style: TextStyle(
                           color: LuminColors.accent,
-                          fontSize: 10,
+                          fontSize: 11,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -2197,7 +2200,7 @@ class _ServerPositionRowState extends State<_ServerPositionRow> {
                       '\$${pnlUsd.abs() >= 1 ? pnlUsd.toStringAsFixed(2) : pnlUsd.toStringAsFixed(4)}',
                       style: TextStyle(
                         color: pnlColor,
-                        fontSize: 10,
+                        fontSize: 11,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -2386,7 +2389,7 @@ class _RecentDispatchEventsCard extends StatelessWidget {
                   'YOUR TRADES',
                   style: TextStyle(
                     color: LuminColors.textMuted,
-                    fontSize: 10,
+                    fontSize: 11,
                     letterSpacing: 1.2,
                     fontWeight: FontWeight.w700,
                   ),
@@ -2464,7 +2467,7 @@ class _PhoneOrderRow extends StatelessWidget {
               'PHONE',
               style: TextStyle(
                 color: LuminColors.accent,
-                fontSize: 9,
+                fontSize: 11,
                 fontWeight: FontWeight.w800,
                 letterSpacing: 0.5,
               ),
@@ -2490,7 +2493,7 @@ class _PhoneOrderRow extends StatelessWidget {
                       isBuy ? 'LONG' : 'SHORT',
                       style: TextStyle(
                         color: dirColor,
-                        fontSize: 10,
+                        fontSize: 11,
                         fontWeight: FontWeight.w700,
                         letterSpacing: 0.4,
                       ),
@@ -2500,7 +2503,7 @@ class _PhoneOrderRow extends StatelessWidget {
                       _DispatchEventRow._formatRelativeTime(entry.placedAt),
                       style: const TextStyle(
                         color: LuminColors.textMuted,
-                        fontSize: 10,
+                        fontSize: 11,
                       ),
                     ),
                   ],
@@ -2553,7 +2556,7 @@ class _NoTradesYetCard extends StatelessWidget {
                   'NO TRADES YET',
                   style: TextStyle(
                     color: LuminColors.textMuted,
-                    fontSize: 10,
+                    fontSize: 11,
                     letterSpacing: 1.2,
                     fontWeight: FontWeight.w700,
                   ),
@@ -2607,7 +2610,7 @@ class _DispatchEventRow extends StatelessWidget {
               _chipLabel(tx.severity),
               style: TextStyle(
                 color: chipColor,
-                fontSize: 9,
+                fontSize: 11,
                 fontWeight: FontWeight.w800,
                 letterSpacing: 0.5,
               ),
@@ -2635,7 +2638,7 @@ class _DispatchEventRow extends StatelessWidget {
                         color: event.direction == 'LONG'
                             ? LuminColors.success
                             : LuminColors.loss,
-                        fontSize: 10,
+                        fontSize: 11,
                         fontWeight: FontWeight.w700,
                         letterSpacing: 0.4,
                       ),
@@ -2647,7 +2650,7 @@ class _DispatchEventRow extends StatelessWidget {
                         event.source == 'manual_take' ? 'One-tap' : 'Auto',
                         style: const TextStyle(
                           color: LuminColors.textMuted,
-                          fontSize: 10,
+                          fontSize: 11,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -2657,7 +2660,7 @@ class _DispatchEventRow extends StatelessWidget {
                       _formatRelativeTime(event.timestamp),
                       style: const TextStyle(
                         color: LuminColors.textMuted,
-                        fontSize: 10,
+                        fontSize: 11,
                       ),
                     ),
                   ],

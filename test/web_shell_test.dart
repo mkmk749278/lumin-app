@@ -28,6 +28,24 @@ void main() {
       expect(html, contains('touch-action: manipulation'));
     });
 
+    // The web build takes 3-4s to boot; before 2026-09-23 that was a blank
+    // navy page, and a startup failure left it blank forever.
+    test('shows a branded splash until Flutter paints its first frame', () {
+      expect(html, contains('id="lumin-splash"'));
+      // Removed on the engine's own first-frame event, not on a timer — a
+      // timer would either cut the splash early or leave it over the app.
+      expect(html, contains("addEventListener('flutter-first-frame'"));
+    });
+
+    test('offers a reload if no frame ever arrives', () {
+      expect(html, contains('class="stuck"'));
+      expect(html, contains('location.reload()'));
+    });
+
+    test('the splash respects reduced motion', () {
+      expect(html, contains('prefers-reduced-motion'));
+    });
+
     test('keeps the iOS home-screen (standalone) meta tags', () {
       expect(html, contains('apple-mobile-web-app-capable'));
       expect(html, contains('viewport-fit=cover'));

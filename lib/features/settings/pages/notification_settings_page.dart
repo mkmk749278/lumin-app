@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 import '../../../data/notification_service.dart';
 import '../../../shared/tokens.dart';
 import '../../../shared/widgets/lumin_card.dart';
+import '../../../shared/widgets/lumin_switch.dart';
 
 class NotificationSettingsPage extends StatefulWidget {
   const NotificationSettingsPage({super.key});
@@ -223,7 +224,7 @@ class _ToggleRow extends StatelessWidget {
                   color: LuminColors.accent,
                 ),
               )
-            : Switch(
+            : LuminSwitch(
                 value: value!,
                 activeColor: LuminColors.accent,
                 onChanged: onChanged,

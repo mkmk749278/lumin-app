@@ -108,8 +108,12 @@ class PlayBillingService {
   void start() {
     _sub ??= _iap.purchaseStream.listen(
       _onPurchases,
-      onError: (Object e) =>
-          _emit(PlayBillingStatus.error, message: e.toString()),
+      // The plugin's error is a PlatformException dump; the user needs to
+      // know the purchase did not go through, not its stack.
+      onError: (Object _) => _emit(PlayBillingStatus.error,
+          message: "Google Play couldn't complete the purchase. You "
+              'have not been charged for anything that failed — please '
+              'try again.'),
     );
   }
 

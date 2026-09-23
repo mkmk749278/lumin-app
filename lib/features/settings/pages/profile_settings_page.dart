@@ -13,6 +13,7 @@ import '../../../shared/tokens.dart';
 import '../../../shared/widgets/free_tier_gate.dart';
 import '../../../shared/widgets/lumin_card.dart';
 import 'subscription_page.dart';
+import '../../../shared/widgets/page_skeleton.dart';
 
 class ProfileSettingsPage extends StatefulWidget {
   const ProfileSettingsPage({super.key});
@@ -209,7 +210,7 @@ class _ProfileSettingsPageState extends State<ProfileSettingsPage> {
 
   Widget _body() {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      return const PageSkeleton();
     }
     if (_loadError != null) {
       return Center(
@@ -304,7 +305,7 @@ class _ProfileSettingsPageState extends State<ProfileSettingsPage> {
                     'PHONE',
                     style: TextStyle(
                       color: LuminColors.textMuted,
-                      fontSize: 10,
+                      fontSize: 11,
                       letterSpacing: 1.2,
                       fontWeight: FontWeight.w600,
                     ),
@@ -369,7 +370,7 @@ class _ProfileSettingsPageState extends State<ProfileSettingsPage> {
                       'SUBSCRIPTION',
                       style: TextStyle(
                         color: LuminColors.textMuted,
-                        fontSize: 10,
+                        fontSize: 11,
                         letterSpacing: 1.2,
                         fontWeight: FontWeight.w600,
                       ),
@@ -416,7 +417,7 @@ class _ProfileSettingsPageState extends State<ProfileSettingsPage> {
               'DISPLAY NAME',
               style: TextStyle(
                 color: LuminColors.textMuted,
-                fontSize: 10,
+                fontSize: 11,
                 letterSpacing: 1.2,
                 fontWeight: FontWeight.w600,
               ),
@@ -476,7 +477,7 @@ class _ProfileSettingsPageState extends State<ProfileSettingsPage> {
               label,
               style: const TextStyle(
                 color: LuminColors.textMuted,
-                fontSize: 10,
+                fontSize: 11,
                 letterSpacing: 1.2,
                 fontWeight: FontWeight.w600,
               ),

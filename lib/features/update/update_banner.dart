@@ -22,6 +22,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../../data/update_service.dart';
 import '../../shared/tokens.dart';
+import '../../shared/friendly_error.dart';
 
 /// Stateful so we can show download progress + error states inline.
 /// One service instance per banner is fine — banner lives for the whole
@@ -108,7 +109,7 @@ class _UpdateBannerState extends State<UpdateBanner> {
       if (!mounted) return;
       setState(() {
         _state = _BannerState.failed;
-        _error = 'Download failed: $e';
+        _error = friendlyLoadError(e, what: 'the update');
       });
       return;
     } finally {

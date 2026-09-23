@@ -135,7 +135,7 @@ class TrialWelcomeCard extends StatelessWidget {
                 'WELCOME GIFT',
                 style: TextStyle(
                   color: LuminColors.success,
-                  fontSize: 10.5,
+                  fontSize: 11,
                   fontWeight: FontWeight.w800,
                   letterSpacing: 1.1,
                 ),

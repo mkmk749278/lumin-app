@@ -42,7 +42,8 @@ class _TosAcceptancePageState extends State<TosAcceptancePage> {
       Navigator.of(context).pop(true);
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = 'Could not record acceptance: $e');
+      setState(() => _error = "Couldn't save your acceptance. Check your "
+          'connection and try again.');
     } finally {
       if (mounted) setState(() => _saving = false);
     }

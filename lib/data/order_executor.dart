@@ -272,8 +272,13 @@ class OrderExecutor {
       );
     } on BinanceError catch (e) {
       return _fail('${e.message} (code ${e.code ?? "?"})');
-    } catch (e) {
-      return _fail('$e');
+    } catch (_) {
+      // Not a Binance refusal (those carry Binance's own sentence above) --
+      // a transport or parsing failure, whose exception text means nothing
+      // to the person whose order this was.
+      return _fail("Couldn't reach Binance to place this order. Check your "
+          'connection, then check Binance for any open position before '
+          'trying again.');
     } finally {
       client.dispose();
     }

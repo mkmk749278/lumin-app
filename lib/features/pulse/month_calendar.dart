@@ -148,7 +148,7 @@ class MonthCalendar extends StatelessWidget {
                     d,
                     style: const TextStyle(
                       color: LuminColors.textMuted,
-                      fontSize: 9,
+                      fontSize: 11,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -181,7 +181,7 @@ class MonthCalendar extends StatelessWidget {
         const SizedBox(height: 6),
         const Text(
           '— nothing closed that day',
-          style: TextStyle(color: LuminColors.textMuted, fontSize: 9.5),
+          style: TextStyle(color: LuminColors.textMuted, fontSize: 11),
         ),
       ],
     );
@@ -247,7 +247,7 @@ class MonthCalendar extends StatelessWidget {
           child: Text(
             '$dayNumber',
             style: const TextStyle(
-                color: LuminColors.textMuted, fontSize: 10),
+                color: LuminColors.textMuted, fontSize: 11),
           ),
         ),
       );
@@ -277,36 +277,45 @@ class MonthCalendar extends StatelessWidget {
                 : LuminColors.cardBorder,
           ),
         ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              '$dayNumber',
-              style: TextStyle(
-                color: entry == null
-                    ? LuminColors.textMuted
-                    : LuminColors.textPrimary,
-                fontSize: compact ? 9.5 : 10,
-                fontWeight: FontWeight.w600,
+        // Cells are ~39dp wide on a 360dp phone, so the content scales down
+        // rather than overflowing: a five-figure day or a user's large-text
+        // setting would otherwise clip the number the cell exists to show
+        // (the render check found a 2px overflow at 1.3x text, 2026-09-23).
+        padding: const EdgeInsets.symmetric(horizontal: 2),
+        alignment: Alignment.center,
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '$dayNumber',
+                style: TextStyle(
+                  color: entry == null
+                      ? LuminColors.textMuted
+                      : LuminColors.textPrimary,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-            ),
-            Text(
-              // While a step is in flight the cells hold no claim at all —
-              // neither this month's numbers nor last month's.
-              stale
-                  ? '·'
-                  : net == null
-                      ? '—'
-                      : (net >= 0 ? '+' : '-') + net.abs().toStringAsFixed(1),
-              style: TextStyle(
-                color: (net == null || stale)
-                    ? LuminColors.textMuted
-                    : (net >= 0 ? LuminColors.success : LuminColors.loss),
-                fontSize: compact ? 8.5 : 9,
-                fontWeight: FontWeight.w600,
+              Text(
+                // While a step is in flight the cells hold no claim at all —
+                // neither this month's numbers nor last month's.
+                stale
+                    ? '·'
+                    : net == null
+                        ? '—'
+                        : (net >= 0 ? '+' : '-') + net.abs().toStringAsFixed(1),
+                style: TextStyle(
+                  color: (net == null || stale)
+                      ? LuminColors.textMuted
+                      : (net >= 0 ? LuminColors.success : LuminColors.loss),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

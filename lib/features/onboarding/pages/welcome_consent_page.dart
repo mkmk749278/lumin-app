@@ -50,6 +50,8 @@ class _WelcomeConsentPageState extends State<WelcomeConsentPage> {
 
   bool get _canContinue => _age && _risk && _notAdvice && !_busy;
 
+  int get _remaining => [_age, _risk, _notAdvice].where((v) => !v).length;
+
   Future<void> _continue() async {
     if (!_canContinue) return;
     setState(() => _busy = true);
@@ -117,6 +119,30 @@ class _WelcomeConsentPageState extends State<WelcomeConsentPage> {
                   ),
                 ),
               ),
+              // A disabled button with no reason reads as broken. Say what is
+              // still needed, in the count the user can act on.
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 200),
+                child: _remaining == 0
+                    ? const SizedBox(height: LuminSpacing.md)
+                    : Padding(
+                        key: ValueKey(_remaining),
+                        padding: const EdgeInsets.only(bottom: LuminSpacing.sm),
+                        child: Center(
+                          child: Text(
+                            _remaining == 3
+                                ? 'Tick all 3 boxes to continue'
+                                : _remaining == 1
+                                    ? 'Tick 1 more box to continue'
+                                    : 'Tick $_remaining more boxes to continue',
+                            style: const TextStyle(
+                              color: LuminColors.textSecondary,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                      ),
+              ),
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
@@ -162,35 +188,53 @@ class _WelcomeConsentPageState extends State<WelcomeConsentPage> {
     required ValueChanged<bool?> onChanged,
     required String text,
   }) {
+    // Each confirmation reads as a card that fills in when ticked. The
+    // checkbox used to override the theme's border with `cardBorder` — a
+    // 10%-alpha cyan on navy — so the first three controls a new user must
+    // find were close to invisible (2026-09-23 audit, measured on the live
+    // site). The theme's `checkboxTheme` border is what renders now.
     return Padding(
       padding: const EdgeInsets.only(bottom: LuminSpacing.md),
-      child: InkWell(
-        onTap: () => onChanged(!value),
-        borderRadius: BorderRadius.circular(LuminRadii.md),
-        child: Padding(
-          padding: const EdgeInsets.all(LuminSpacing.md),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Checkbox(
-                value: value,
-                onChanged: onChanged,
-                activeColor: LuminColors.accent,
-                checkColor: LuminColors.bgDeep,
-                side: const BorderSide(color: LuminColors.cardBorder),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () => onChanged(!value),
+          borderRadius: BorderRadius.circular(LuminRadii.md),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            padding: const EdgeInsets.all(LuminSpacing.md),
+            decoration: BoxDecoration(
+              color: value
+                  ? LuminColors.accent.withValues(alpha: 0.08)
+                  : LuminColors.bgCard,
+              borderRadius: BorderRadius.circular(LuminRadii.md),
+              border: Border.all(
+                color: value
+                    ? LuminColors.accent.withValues(alpha: 0.6)
+                    : LuminColors.cardBorder,
               ),
-              const SizedBox(width: LuminSpacing.sm),
-              Expanded(
-                child: Text(
-                  text,
-                  style: const TextStyle(
-                    color: LuminColors.textPrimary,
-                    fontSize: 14,
-                    height: 1.4,
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Checkbox(value: value, onChanged: onChanged),
+                const SizedBox(width: LuminSpacing.sm),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Text(
+                      text,
+                      style: const TextStyle(
+                        color: LuminColors.textPrimary,
+                        fontSize: 14,
+                        height: 1.4,
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
