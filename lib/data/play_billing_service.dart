@@ -22,6 +22,7 @@ import 'package:in_app_purchase_android/in_app_purchase_android.dart';
 
 import 'auth_service.dart';
 import 'repository.dart';
+import '../shared/friendly_error.dart';
 
 /// The Play offer id a [ProductDetails] entry represents, or null for a
 /// plain base-plan entry.  On Android the billing plugin returns ONE
@@ -190,7 +191,7 @@ class PlayBillingService {
         );
       }
     } catch (e) {
-      _emit(PlayBillingStatus.error, message: 'Verification failed: $e');
+      _emit(PlayBillingStatus.error, message: friendlyActionError(e, action: 'verify your purchase'));
     } finally {
       // Always finish so Play stops re-delivering this purchase.  Even if
       // verification hit a transient error, the engine's RTDN will

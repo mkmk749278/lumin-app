@@ -32,6 +32,7 @@ import '../../../shared/tokens.dart';
 import '../../launch/region_gate.dart';
 import 'tos_acceptance_page.dart';
 import '../../../shared/widgets/page_skeleton.dart';
+import '../../../shared/friendly_error.dart';
 
 class ServerSideExecutionPage extends StatefulWidget {
   const ServerSideExecutionPage({super.key});
@@ -189,7 +190,7 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Disconnect failed: $e'),
+          content: Text(friendlyActionError(e, action: 'disconnect your key')),
           backgroundColor: LuminColors.loss,
         ),
       );
@@ -249,7 +250,7 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
       if (!mounted) return;
       setState(() => _error = BinanceConnectError(
             code: 'UNKNOWN',
-            detail: 'Unexpected error: $e',
+            detail: friendlyActionError(e, action: 'connect your key'),
           ));
     } finally {
       if (mounted) setState(() => _submitting = false);

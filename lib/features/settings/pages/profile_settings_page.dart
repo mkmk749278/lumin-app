@@ -14,6 +14,7 @@ import '../../../shared/widgets/free_tier_gate.dart';
 import '../../../shared/widgets/lumin_card.dart';
 import 'subscription_page.dart';
 import '../../../shared/widgets/page_skeleton.dart';
+import '../../../shared/friendly_error.dart';
 
 class ProfileSettingsPage extends StatefulWidget {
   const ProfileSettingsPage({super.key});
@@ -174,7 +175,7 @@ class _ProfileSettingsPageState extends State<ProfileSettingsPage> {
       setState(() => _saving = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Save failed: $e'),
+          content: Text(friendlyActionError(e, action: 'save your profile')),
           duration: const Duration(seconds: 4),
         ),
       );

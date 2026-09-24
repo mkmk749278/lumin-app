@@ -230,7 +230,7 @@ class _EligibilityPickerPageState extends State<_EligibilityPickerPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Save failed: ${e.message}'),
+          content: Text(friendlyActionError(e, action: 'save these settings')),
           backgroundColor: LuminColors.loss,
         ),
       );
@@ -238,7 +238,7 @@ class _EligibilityPickerPageState extends State<_EligibilityPickerPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Save failed: $e'),
+          content: Text(friendlyActionError(e, action: 'save these settings')),
           backgroundColor: LuminColors.loss,
         ),
       );

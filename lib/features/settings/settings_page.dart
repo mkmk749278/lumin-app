@@ -40,6 +40,7 @@ import 'pages/trading_settings_page.dart';
 import 'pages/web_paywall_page.dart';
 import 'settings_rows.dart';
 import '../../app/distribution.dart';
+import '../../shared/friendly_error.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -327,7 +328,7 @@ class _SettingsPageState extends State<SettingsPage> implements ScrollToTop {
       Navigator.of(context).pop();  // dismiss the spinner
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Could not delete account: $e'),
+          content: Text(friendlyActionError(e, action: 'delete your account')),
           duration: const Duration(seconds: 6),
         ),
       );

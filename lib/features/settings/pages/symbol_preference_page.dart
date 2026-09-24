@@ -157,7 +157,7 @@ class _SymbolPreferenceBodyState extends State<_SymbolPreferenceBody> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Save failed: ${e.message}'),
+          content: Text(friendlyActionError(e, action: 'save your symbol choices')),
           backgroundColor: LuminColors.loss,
         ),
       );
@@ -165,7 +165,7 @@ class _SymbolPreferenceBodyState extends State<_SymbolPreferenceBody> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Save failed: $e'),
+          content: Text(friendlyActionError(e, action: 'save your symbol choices')),
           backgroundColor: LuminColors.loss,
         ),
       );

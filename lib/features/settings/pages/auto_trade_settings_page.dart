@@ -146,7 +146,7 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Mode save failed: $e'),
+          content: Text(friendlyActionError(e, action: 'change the mode')),
           duration: const Duration(seconds: 4),
         ),
       );
@@ -182,7 +182,7 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Save failed: ${e.message}'),
+          content: Text(friendlyActionError(e, action: 'save these settings')),
           duration: const Duration(seconds: 4),
         ),
       );
@@ -190,7 +190,7 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Save failed: $e'),
+          content: Text(friendlyActionError(e, action: 'save these settings')),
           duration: const Duration(seconds: 4),
         ),
       );
@@ -227,7 +227,7 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Resume failed: $e'),
+          content: Text(friendlyActionError(e, action: 'resume auto-trade')),
           backgroundColor: LuminColors.loss,
           duration: const Duration(seconds: 4),
         ),
@@ -837,7 +837,7 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Reset failed: $e'),
+          content: Text(friendlyActionError(e, action: 'reset these settings')),
           backgroundColor: LuminColors.loss,
         ),
       );
@@ -876,7 +876,7 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Reset failed: $e'),
+          content: Text(friendlyActionError(e, action: 'reset these settings')),
           backgroundColor: LuminColors.loss,
         ),
       );

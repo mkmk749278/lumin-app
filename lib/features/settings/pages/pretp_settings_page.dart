@@ -222,7 +222,7 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Save failed: ${e.message}'),
+          content: Text(friendlyActionError(e, action: 'save these settings')),
           duration: const Duration(seconds: 4),
         ),
       );
@@ -230,7 +230,7 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Save failed: $e'),
+          content: Text(friendlyActionError(e, action: 'save these settings')),
           duration: const Duration(seconds: 4),
         ),
       );
@@ -307,7 +307,7 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Reset failed: $e'),
+          content: Text(friendlyActionError(e, action: 'reset these settings')),
           duration: const Duration(seconds: 4),
         ),
       );

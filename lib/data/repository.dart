@@ -18,6 +18,7 @@ import 'server_side_execution_models.dart';
 import 'swr_cache.dart';
 import 'track_record_prefs.dart';
 import 'timestamps.dart';
+import '../shared/friendly_error.dart';
 
 class AutoModeStatus {
   const AutoModeStatus({
@@ -5331,7 +5332,7 @@ class HttpRepository implements LuminRepository {
                 'this is not something you can resolve from the app.',
         'user_lookup_failed' =>
             'Could not look up your account. Please retry shortly.',
-        _ => 'Account deletion failed: ${e.message}',
+        _ => friendlyActionError(e, action: 'delete your account'),
       };
       throw DeleteAccountException(tag.isEmpty ? 'unknown' : tag, friendly);
     }
