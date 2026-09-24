@@ -1487,6 +1487,14 @@ class _TakeSignalAction extends StatelessWidget {
 /// public mark-price endpoint every 5 s while open (ACTIVE signals
 /// only) so the "Current" row reflects live market price rather than
 /// the SWR-cached snapshot.
+///
+/// Gated and scoped (2026-09-24 audit).  The poll ran whatever the app was
+/// doing — with the phone locked and the sheet left open it kept fetching
+/// for a screen nobody could see — and every tick called `setState` on the
+/// whole sheet, rebuilding the candle snap and the management controls to
+/// move one price.  The poll now stops whenever the app leaves the
+/// foreground (and fetches at once on return), and the price lives in a
+/// [ValueNotifier] that only the two cards which read it listen to.
 class _SignalDetailSheet extends StatefulWidget {
   const _SignalDetailSheet({required this.sig, this.initialLivePrice});
   final MockSignal sig;
@@ -1496,8 +1504,9 @@ class _SignalDetailSheet extends StatefulWidget {
   State<_SignalDetailSheet> createState() => _SignalDetailSheetState();
 }
 
-class _SignalDetailSheetState extends State<_SignalDetailSheet> {
-  late double _livePrice;
+class _SignalDetailSheetState extends State<_SignalDetailSheet>
+    with WidgetsBindingObserver {
+  late final ValueNotifier<double> _livePrice;
   Timer? _timer;
   final http.Client _markPriceClient = http.Client();
 
@@ -1509,13 +1518,32 @@ class _SignalDetailSheetState extends State<_SignalDetailSheet> {
   @override
   void initState() {
     super.initState();
-    _livePrice = widget.initialLivePrice ??
-        (widget.sig.currentPrice > 0 ? widget.sig.currentPrice : 0.0);
-    if (widget.sig.status == 'ACTIVE') {
-      _timer = Timer.periodic(const Duration(seconds: 5), (_) => _fetch());
-      // Fetch immediately so we show a fresh price on sheet open without
-      // waiting the full 5 s interval.
-      _fetch();
+    _livePrice = ValueNotifier<double>(widget.initialLivePrice ??
+        (widget.sig.currentPrice > 0 ? widget.sig.currentPrice : 0.0));
+    WidgetsBinding.instance.addObserver(this);
+    _startPolling();
+  }
+
+  /// Starts the 5 s poll (ACTIVE signals only) and fetches at once, so a
+  /// fresh price shows on open — and on return from the background —
+  /// without waiting a full interval.  No-op while already running.
+  void _startPolling() {
+    if (widget.sig.status != 'ACTIVE' || _timer != null) return;
+    _timer = Timer.periodic(const Duration(seconds: 5), (_) => _fetch());
+    _fetch();
+  }
+
+  void _stopPolling() {
+    _timer?.cancel();
+    _timer = null;
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _startPolling();
+    } else {
+      _stopPolling();
     }
   }
 
@@ -1566,7 +1594,7 @@ class _SignalDetailSheetState extends State<_SignalDetailSheet> {
       setState(() => _mgmtSaving = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Could not save: $e'),
+          content: Text(friendlyActionError(e, action: 'change how this trade is managed')),
           backgroundColor: LuminColors.loss,
         ),
       );
@@ -1575,8 +1603,10 @@ class _SignalDetailSheetState extends State<_SignalDetailSheet> {
 
   @override
   void dispose() {
-    _timer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    _stopPolling();
     _markPriceClient.close();
+    _livePrice.dispose();
     super.dispose();
   }
 
@@ -1585,7 +1615,8 @@ class _SignalDetailSheetState extends State<_SignalDetailSheet> {
       final prices = await _fetchMarkPrices([widget.sig.symbol], _markPriceClient);
       final price = prices[widget.sig.symbol];
       if (!mounted || price == null || price <= 0) return;
-      setState(() => _livePrice = price);
+      // Only the listeners rebuild, and only when the price moved.
+      _livePrice.value = price;
     } catch (_) {}
   }
 
@@ -1599,11 +1630,11 @@ class _SignalDetailSheetState extends State<_SignalDetailSheet> {
     );
   }
 
-  double get _pnlPct {
-    if (widget.sig.status == 'ACTIVE' && _livePrice > 0 && widget.sig.entry > 0) {
+  double _pnlPctAt(double livePrice) {
+    if (widget.sig.status == 'ACTIVE' && livePrice > 0 && widget.sig.entry > 0) {
       return widget.sig.direction == 'LONG'
-          ? (_livePrice - widget.sig.entry) / widget.sig.entry * 100
-          : (widget.sig.entry - _livePrice) / widget.sig.entry * 100;
+          ? (livePrice - widget.sig.entry) / widget.sig.entry * 100
+          : (widget.sig.entry - livePrice) / widget.sig.entry * 100;
     }
     return widget.sig.pnlPct;
   }
@@ -1658,7 +1689,11 @@ class _SignalDetailSheetState extends State<_SignalDetailSheet> {
           // highlight the positive result and the MAX PROFIT the trade
           // reached before SL.  Default exit is TP1-full + fixed SL, so this
           // replaces the old pre-TP/BE card as the headline.
-          _OutcomeSummaryCard(sig: sig, pnlPct: _pnlPct),
+          ValueListenableBuilder<double>(
+            valueListenable: _livePrice,
+            builder: (_, live, __) =>
+                _OutcomeSummaryCard(sig: sig, pnlPct: _pnlPctAt(live)),
+          ),
           const SizedBox(height: LuminSpacing.md),
           // Pre-TP card only when banking actually fired (opt-in users) — the
           // engine default no longer banks, so don't imply it did.
@@ -1676,7 +1711,11 @@ class _SignalDetailSheetState extends State<_SignalDetailSheet> {
           _TakeSignalAction(sig: sig, enabled: sig.status == 'ACTIVE'),
           const SizedBox(height: LuminSpacing.lg),
           // Entry / SL / TP / meta in one bordered two-column box.
-          _TradeDetailsCard(sig: sig, livePrice: _livePrice),
+          ValueListenableBuilder<double>(
+            valueListenable: _livePrice,
+            builder: (_, live, __) =>
+                _TradeDetailsCard(sig: sig, livePrice: live),
+          ),
         ],
         ),
       ),
@@ -1824,7 +1863,7 @@ class _OutcomeSummaryCard extends StatelessWidget {
     final pnlPositive = pnlPct >= 0;
     // "Peak so far" is the max favorable excursion — by definition it can never
     // sit *below* the current gain. Live PnL is computed app-side from the fresh
-    // 5s price poll (see _pnlPct), while the engine's recorded MFE rides in on
+    // 5s price poll (see _pnlPctAt), while the engine's recorded MFE rides in on
     // the slower snapshot and, in isolated mode, from a different price sample —
     // so rendering the raw engine field can show a peak beneath the current gain
     // (owner-reported: Live +1.42% next to Peak +0.05%). For a live signal the
