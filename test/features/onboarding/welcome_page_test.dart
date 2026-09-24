@@ -93,4 +93,28 @@ void main() {
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getBool('onboarding.welcomeSeen'), isTrue);
   });
+
+  // 2026-09-24: every slide overflowed a small phone (85px at 360x640,
+  // 164px at 320x568) — the CTA under the overflow stripe — and the
+  // stop-loss row then grew from one sentence to three.  Both slides must
+  // lay out cleanly at the small end, with the CTA still reachable.
+  for (final size in const [Size(360, 640), Size(320, 568)]) {
+    testWidgets('the safety slide fits a ${size.width.toInt()}x'
+        '${size.height.toInt()} screen', (tester) async {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await pumpWelcome(tester);
+      expect(tester.takeException(), isNull, reason: 'slide 1 overflowed');
+      await tester.tap(find.text('Skip'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('can be larger than planned'), findsOneWidget);
+      expect(tester.takeException(), isNull, reason: 'slide 3 overflowed');
+      // The CTA must still be reachable: scrolled into view if it has to be.
+      await tester.ensureVisible(find.text('Get Started'));
+      await tester.pumpAndSettle();
+      expect(find.text('Get Started').hitTestable(), findsOneWidget);
+    });
+  }
 }
+

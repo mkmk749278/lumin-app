@@ -151,6 +151,40 @@ class _WelcomePageState extends State<WelcomePage> {
   }
 }
 
+/// The shared frame every slide lays out in.
+///
+/// Added 2026-09-24.  Each slide is a Column spread with Spacers (and slide
+/// 1's card sits in an Expanded), which fills a tall phone exactly and
+/// OVERFLOWS a short one: measured 85px at 360x640 and 164px at 320x568 —
+/// the bottom of the column, i.e. the CTA, under the yellow-black stripe.
+/// This makes the slide scroll only when its content is taller than the
+/// screen: on a phone where it fits, `minHeight` pins the column to the
+/// viewport and every Spacer behaves exactly as before.
+class _SlideFrame extends StatelessWidget {
+  const _SlideFrame({required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        physics: const ClampingScrollPhysics(),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: constraints.maxHeight),
+          child: IntrinsicHeight(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                LuminSpacing.xl, LuminSpacing.xxl, LuminSpacing.xl, 80,
+              ),
+              child: child,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Slide 1 — Hook
 // ---------------------------------------------------------------------------
@@ -161,10 +195,7 @@ class _Slide1 extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        LuminSpacing.xl, LuminSpacing.xxl, LuminSpacing.xl, 80,
-      ),
+    return _SlideFrame(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -287,10 +318,7 @@ class _Slide2 extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        LuminSpacing.xl, LuminSpacing.xxl, LuminSpacing.xl, 80,
-      ),
+    return _SlideFrame(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -390,10 +418,7 @@ class _Slide3 extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        LuminSpacing.xl, LuminSpacing.xxl, LuminSpacing.xl, 80,
-      ),
+    return _SlideFrame(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -432,12 +457,21 @@ class _Slide3 extends StatelessWidget {
           const SizedBox(height: LuminSpacing.lg),
           _SafetyRow(
             icon: Icons.block_outlined,
-            title: 'Stop-loss on every position',
+            title: 'A stop-loss on every signal trade',
             // Not "no runaway losses": a stop is an instruction to the
             // exchange, and a fast market can gap through it. The live-order
             // review already says so ("a gap can exceed it"); onboarding must
             // not promise the opposite two screens earlier (2026-09-23).
-            body: 'Every open trade is placed with a stop-loss on Binance.',
+            //
+            // 2026-09-24 audit: "every open trade" was still absolute where
+            // the product is not — a trade the user places themselves may be
+            // entry-only (the engine's `user_owned` protection mode leaves the
+            // stop optional), and the gap risk the comment above names was
+            // never said to the reader.  Say both, in the reader's words.
+            body: 'Every trade Lumin opens from a signal carries a stop-loss '
+                'on Binance. A fast market can move past a stop, so a loss '
+                'can be larger than planned. Trades you place without a stop '
+                'are yours to protect.',
           ),
           const SizedBox(height: LuminSpacing.lg),
           _SafetyRow(
