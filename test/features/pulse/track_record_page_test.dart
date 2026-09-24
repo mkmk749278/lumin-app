@@ -153,6 +153,13 @@ Future<void> _pump(WidgetTester tester, {_Repo? repo}) async {
   await tester.pumpAndSettle();
 }
 
+/// Opens the ⓘ in the app bar. The assumptions live in its sheet since
+/// 2026-09-24, so the assertions about them read the sheet.
+Future<void> _openInfo(WidgetTester tester) async {
+  await tester.tap(find.byIcon(Icons.info_outline).first);
+  await tester.pumpAndSettle();
+}
+
 String _text(WidgetTester tester) => tester
     .widgetList<Text>(find.byType(Text))
     .map((t) => t.data ?? '')
@@ -420,9 +427,24 @@ void main() {
       expect(find.text('RECORDED'), findsOneWidget);
     });
 
+    testWidgets('the brief is behind the ⓘ, not on the page', (t) async {
+      // Owner, 2026-09-24: "don't keep all that brief there, keep i icon …
+      // keep everything simple". One caption stays in view: a screen of
+      // performance figures does not lose its past-performance line to a tap
+      // the reader may never make.
+      await _pump(t);
+      expect(_text(t), isNot(contains('not a back-test')));
+      expect(_text(t),
+          contains('past performance does not guarantee future results'));
+      // The ⓘ is labelled for screen readers by the sheet's own title.
+      expect(find.byTooltip('About this track record'), findsOneWidget);
+      expect(find.byIcon(Icons.info_outline), findsOneWidget);
+    });
+
     testWidgets('the size, the fee and the — convention are all stated',
         (t) async {
       await _pump(t);
+      await _openInfo(t);
       final text = _text(t);
       expect(text, contains('100 usdt'));
       expect(text, contains('0.07% round-trip'));

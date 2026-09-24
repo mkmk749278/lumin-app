@@ -26,6 +26,7 @@ import '../../data/repository.dart';
 import '../../data/track_record_prefs.dart';
 import '../../shared/format.dart';
 import '../../shared/tokens.dart';
+import '../../shared/widgets/info_button.dart';
 import '../../shared/widgets/lumin_card.dart';
 import 'month_calendar.dart';
 import 'track_record_page.dart';
@@ -153,6 +154,15 @@ class _TrackRecordMonthCardState extends State<TrackRecordMonthCard> {
                     ),
                   ),
                 ),
+                // The assumptions, word for word, one tap away (owner,
+                // 2026-09-24: "keep i icon … keep everything simple"). An
+                // IconButton claims its own tap, so it never also opens the
+                // full record underneath it.
+                InfoButton(
+                  title: 'About this track record',
+                  paragraphs: trackRecordInfo(_shown),
+                  size: 16,
+                ),
                 // "RECORDED" is the load-bearing word, inherited from the card
                 // removed on 2026-08-12. It separates this book from every
                 // back-test and what-if surface we run internally, and from
@@ -215,23 +225,13 @@ class _TrackRecordMonthCardState extends State<TrackRecordMonthCard> {
               compact: true,
             ),
             const SizedBox(height: LuminSpacing.sm),
-            // The assumptions, inherited whole from the card removed on
-            // 2026-08-12. Every one of them is a condition on reading the grid
-            // above: the size each cell assumes, the fee already charged, that
-            // these are our delivered signals and not the reader's own fills,
-            // and that none of it predicts the next month. A grid of dollar
-            // figures whose size the reader cannot see is an assumption
-            // wearing a measurement's clothes, on every one of its cells.
-            Text(
-              'Each day: every signal we delivered that closed, recorded as it '
-              'happened — not a back-test. Taken at ${_usdt(_shown.amountUsdt)} '
-              'each, the same size every time, with a ${_fee(_shown.feePct)}% '
-              'round-trip fee charged. UTC. Your own results will differ: what '
-              'you receive depends on your settings and your fills. Past '
-              'signal performance does not guarantee future results. Tap for '
-              'every day and every signal behind these numbers.',
-              style: const TextStyle(
-                  color: LuminColors.textMuted, fontSize: 11, height: 1.45),
+            // The assumptions moved behind the ⓘ in the header, word for
+            // word (see [trackRecordInfo]). This line stays in view: a grid of
+            // dollar figures must not lose its past-performance caption to a
+            // tap the reader may never make.
+            const Text(
+              'Past performance does not guarantee future results.',
+              style: TextStyle(color: LuminColors.textMuted, fontSize: 11),
             ),
           ],
         ),
@@ -247,10 +247,4 @@ class _TrackRecordMonthCardState extends State<TrackRecordMonthCard> {
   /// the same engine-supplied size and fee and is the honest stand-in until
   /// the month lands.
   TrackRecord get _shown => _data.month == _month ? _data : widget.window;
-
-  static String _fee(double f) =>
-      f == f.roundToDouble() ? f.toStringAsFixed(0) : f.toString();
-
-  static String _usdt(double a) =>
-      '${a == a.roundToDouble() ? a.toStringAsFixed(0) : a.toStringAsFixed(2)} USDT';
 }
