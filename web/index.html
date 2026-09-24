@@ -32,6 +32,54 @@
   <title>Lumin</title>
   <link rel="manifest" href="manifest.json">
 
+  <script>
+    /* Browser-locale sanitiser (2026-09-24).
+     *
+     * A browser reporting a POSIX-style tag -- `en-US@posix`, and the
+     * `en_US.UTF-8` / `@euro` family some Linux builds pass through -- makes
+     * Flutter's web bootstrap throw `RangeError: Incorrect locale
+     * information provided` from the browser's own Intl API, BEFORE runApp
+     * and outside any Dart try.  The page then showed the splash, said
+     * "taking longer than usual" after 20s, and Reload reproduced the crash
+     * forever: a user on such a browser could never open the app (measured
+     * on the live site, 2026-09-24 audit).
+     *
+     * This runs before flutter_bootstrap.js and rewrites navigator.languages
+     * / navigator.language to the valid BCP-47 tags they contain, dropping
+     * any the browser itself cannot canonicalise.  It only overrides when
+     * something was actually invalid, so an ordinary browser is untouched,
+     * and it can never block boot -- any failure here leaves the navigator
+     * exactly as it was. */
+    (function () {
+      function clean(tag) {
+        if (typeof tag !== 'string' || !tag) return null;
+        var t = tag.split('@')[0].split('.')[0].replace(/_/g, '-');
+        try { return Intl.getCanonicalLocales(t)[0] || null; } catch (e) { return null; }
+      }
+      try {
+        var nav = window.navigator;
+        var raw = (nav.languages && nav.languages.length)
+          ? Array.prototype.slice.call(nav.languages) : [nav.language];
+        var out = [];
+        for (var i = 0; i < raw.length; i++) {
+          var c = clean(raw[i]);
+          if (c && out.indexOf(c) < 0) out.push(c);
+        }
+        var changed = out.length !== raw.length;
+        for (var j = 0; !changed && j < out.length; j++) changed = out[j] !== raw[j];
+        if (!changed) return;
+        if (!out.length) out = ['en-US'];
+        Object.defineProperty(nav, 'languages', {
+          configurable: true, get: function () { return out.slice(); }
+        });
+        Object.defineProperty(nav, 'language', {
+          configurable: true, get: function () { return out[0]; }
+        });
+        window.__luminLocaleSanitised = { from: raw, to: out };
+      } catch (e) { /* leave the navigator as it was */ }
+    })();
+  </script>
+
   <style>
     /* Match the app's deep-navy background while the engine loads so the
        splash never flashes white (LuminColors.bgDeep). */

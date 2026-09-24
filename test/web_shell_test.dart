@@ -46,6 +46,22 @@ void main() {
       expect(html, contains('prefers-reduced-motion'));
     });
 
+    // 2026-09-24: a browser reporting `en-US@posix` (or `en_US.UTF-8`)
+    // made Flutter's web bootstrap throw a RangeError before runApp, so the
+    // app never opened on it — Reload reproduced the crash forever.
+    test('sanitises the browser locale before Flutter boots', () {
+      final sanitiser = html.indexOf('Browser-locale sanitiser');
+      final bootstrap = html.indexOf('flutter_bootstrap.js');
+      expect(sanitiser, greaterThan(-1));
+      expect(bootstrap, greaterThan(sanitiser),
+          reason: 'it must run before the bootstrap reads navigator.languages');
+      expect(html, contains("split('@')"));
+      expect(html, contains('Intl.getCanonicalLocales'));
+      // Only overrides when something was invalid; an ordinary browser is
+      // left exactly as it was.
+      expect(html, contains('if (!changed) return;'));
+    });
+
     test('keeps the iOS home-screen (standalone) meta tags', () {
       expect(html, contains('apple-mobile-web-app-capable'));
       expect(html, contains('viewport-fit=cover'));
