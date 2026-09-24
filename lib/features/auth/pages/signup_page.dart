@@ -24,6 +24,7 @@ import '../../../data/repository.dart';
 import '../../../shared/platform_input.dart';
 import '../../../shared/tokens.dart';
 import '../../../shared/widgets/lumin_card.dart';
+import '../../../shared/friendly_error.dart';
 
 class SignupPage extends StatefulWidget {
   const SignupPage({
@@ -184,7 +185,7 @@ class _SignupPageState extends State<SignupPage> {
       );
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = 'Couldn\'t save profile: $e');
+      setState(() => _error = friendlyActionError(e, action: 'save your profile'));
     } finally {
       if (mounted) setState(() => _busy = false);
     }

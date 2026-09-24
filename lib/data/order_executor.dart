@@ -453,7 +453,13 @@ class OrderExecutor {
     } on BinanceError catch (e) {
       return _fail('Pre-TP: ${e.message} (code ${e.code ?? "?"})');
     } catch (e) {
-      return _fail('Pre-TP: $e');
+      // Not a Binance refusal, so the outcome is unknown: the partial close
+      // may or may not have reached the exchange.  Say so, and send the
+      // reader to the one place that knows (2026-09-24 — was a raw `$e`).
+      return _fail(
+        "Pre-TP: couldn't confirm the result with Binance. Check your open "
+        'position and orders on Binance before trying again.',
+      );
     } finally {
       client.dispose();
     }

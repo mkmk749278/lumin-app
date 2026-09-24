@@ -118,7 +118,7 @@ class _WebPaywallPageState extends State<WebPaywallPage> {
         _awaitingPayment = false;
         _pending = null;
       });
-      _snack('Checkout failed: $e');
+      _snack(friendlyActionError(e, action: 'start checkout'));
     }
   }
 

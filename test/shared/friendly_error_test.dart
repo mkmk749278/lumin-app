@@ -90,4 +90,64 @@ void main() {
     expect(offenders, isEmpty,
         reason: 'Route errors through friendlyLoadError / friendlyAuthError.');
   });
+
+  group('friendlyActionError', () {
+    const action = 'save your settings';
+
+    test('never shows an exception type name', () {
+      final samples = <Object>[
+        http.ClientException('Connection closed before full header'),
+        const SocketException('Failed host lookup'),
+        TimeoutException('x'),
+        StateError('bad state'),
+        FormatException('Unexpected character'),
+        ApiError(0, 'network'),
+        ApiError(500, 'Traceback (most recent call last)'),
+        ApiError(418, 'phase=entry code=BINANCE_HTTP_ERROR'),
+      ];
+      for (final e in samples) {
+        final s = friendlyActionError(e, action: action);
+        expect(s, isNot(contains('Exception')), reason: '$e -> $s');
+        expect(s, isNot(contains('Error')), reason: '$e -> $s');
+        expect(s, isNot(contains('Traceback')), reason: '$e -> $s');
+        expect(s, isNot(contains('phase=')), reason: '$e -> $s');
+      }
+    });
+
+    test('a lost reply is "could not confirm", never "failed"', () {
+      // The action may have landed: saying it failed invites a second
+      // attempt at something already done.
+      for (final e in <Object>[
+        TimeoutException('x'),
+        http.ClientException('x'),
+        const SocketException('x'),
+        ApiError(0, 'x'),
+        ApiError(408, 'x'),
+      ]) {
+        final s = friendlyActionError(e, action: action);
+        expect(s, contains("couldn't confirm"), reason: '$e -> $s');
+        expect(s, contains(action), reason: '$e -> $s');
+        expect(s.toLowerCase(), isNot(contains('failed')), reason: '$e -> $s');
+      }
+    });
+
+    test('names the session, plan and rate-limit cases', () {
+      expect(friendlyActionError(ApiError(401, 'x'), action: action),
+          contains('session has expired'));
+      expect(friendlyActionError(ApiError(403, 'x'), action: action),
+          contains('plan'));
+      expect(friendlyActionError(ApiError(429, 'x'), action: action),
+          contains('Too many requests'));
+    });
+
+    test('a server error says whose side it was on', () {
+      expect(friendlyActionError(ApiError(503, 'x'), action: action),
+          contains("Lumin's servers couldn't $action"));
+    });
+
+    test('an unknown error still reads as plain copy', () {
+      expect(friendlyActionError(StateError('x'), action: action),
+          "Couldn't $action. Please try again.");
+    });
+  });
 }

@@ -450,7 +450,7 @@ class _OtpEntryPageState extends State<OtpEntryPage> {
       setState(() => _error = e.message);
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = 'Couldn\'t resend: $e');
+      setState(() => _error = friendlyActionError(e, action: 'resend the code'));
     } finally {
       if (mounted) setState(() => _busy = false);
     }

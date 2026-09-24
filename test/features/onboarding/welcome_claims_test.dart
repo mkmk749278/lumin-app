@@ -41,6 +41,18 @@ void main() {
     );
   });
 
+  test('the stop-loss claim discloses gap risk and names its scope', () {
+    // 2026-09-24 audit: "Every open trade is placed with a stop-loss" was
+    // absolute where the product is not — a user's own trade may be
+    // entry-only — and never said a fast market can move past a stop.
+    expect(code, isNot(contains('Every open trade is placed')));
+    expect(code, contains('from a signal carries a stop-loss'));
+    expect(code, contains('can be larger than planned'));
+    expect(code, contains('yours to protect'));
+    expect(RegExp(r'runaway loss', caseSensitive: false).hasMatch(code),
+        isFalse);
+  });
+
   test('the pair claim is a floor, not an exact figure', () {
     // The scanner promotes movers into its universe for hours at a time, so
     // the live count sits above the core 75 rather than on it. Any bare

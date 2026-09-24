@@ -161,7 +161,7 @@ class _PaperTradesPageState extends State<PaperTradesPage> {
       setState(() => _loadingMore = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Load more failed: $e'),
+          content: Text(friendlyLoadError(e, what: 'more trades')),
           duration: const Duration(seconds: 3),
           backgroundColor: LuminColors.loss,
         ),
@@ -255,7 +255,7 @@ class _PaperTradesPageState extends State<PaperTradesPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Clear failed: $e'),
+          content: Text(friendlyActionError(e, action: 'clear your paper trades')),
           duration: const Duration(seconds: 4),
           backgroundColor: LuminColors.loss,
         ),
@@ -347,7 +347,7 @@ class _PaperTradesPageState extends State<PaperTradesPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Close all failed: $e'),
+          content: Text(friendlyActionError(e, action: 'close all paper trades')),
           duration: const Duration(seconds: 4),
           backgroundColor: LuminColors.loss,
         ),

@@ -20,6 +20,8 @@ library;
 
 import 'dart:async';
 
+import 'package:firebase_core/firebase_core.dart' show FirebaseException;
+
 import '../data/api_client.dart' show ApiError;
 import '../data/server_side_execution_models.dart'
     show DispatchEventTranslation;
@@ -107,3 +109,64 @@ String friendlyAuthError(String code, {String action = 'send the code'}) {
   }
   return "Couldn't $action. Please try again. ($code)";
 }
+
+/// Consumer copy for a failed ACTION — a save, reset, delete, resend,
+/// disconnect or checkout.
+///
+/// Added 2026-09-24. [friendlyLoadError] covered screens that LOAD; the
+/// 2026-09-24 audit still counted 28 action sites rendering `'$e'` and 12
+/// rendering the engine's raw `ApiError.message` — phone sign-in, OTP resend,
+/// profile, account deletion, Play-billing verification and the crypto
+/// checkout among them.
+///
+/// It differs from the load copy in the one way that matters on an action:
+/// a load that failed changed nothing, but an action whose REPLY was lost
+/// may still have landed.  So a timeout or a dropped connection says we
+/// could not *confirm* it and asks the reader to check — never that it
+/// failed, which the app cannot see ("never name a cause we cannot see").
+/// [action] is a lower-case verb phrase, e.g. `'save your settings'`.
+String friendlyActionError(Object error, {required String action}) {
+  if (error is FirebaseException && error.plugin == 'firebase_auth') {
+    return friendlyAuthError(error.code, action: action);
+  }
+  if (error is ApiError) {
+    switch (error.statusCode) {
+      case 0:
+      case 408:
+        return _unconfirmed(action);
+      case 401:
+        return 'Your session has expired. Sign in again, then retry.';
+      case 403:
+        return 'Your plan does not include this yet.';
+      case 404:
+        return 'This is not available right now. Update the app if an '
+            'update is offered, then try again.';
+      case 429:
+        return 'Too many requests in a short time. Wait a moment and '
+            'try again.';
+    }
+    if (error.statusCode >= 500) {
+      return "Lumin's servers couldn't $action just now. Please try again "
+          'in a moment.';
+    }
+    // A validation refusal ("leverage must be 20 or less") is the one thing
+    // worth passing through — only if it survives the trade-row sanitiser.
+    final safe = DispatchEventTranslation.sanitizeEngineDetail(error.message);
+    return safe ?? "Couldn't $action. Please try again.";
+  }
+  if (error is TimeoutException) return _unconfirmed(action);
+  final type = error.runtimeType.toString();
+  if (type.contains('SocketException') ||
+      type.contains('ClientException') ||
+      type.contains('HandshakeException') ||
+      type.contains('HttpException')) {
+    return _unconfirmed(action);
+  }
+  return "Couldn't $action. Please try again.";
+}
+
+String _unconfirmed(String action) =>
+    "We couldn't confirm whether Lumin was able to $action — no reply "
+    'arrived in time. Check your connection, then reopen this screen to see '
+    'the current state before trying again.';
+

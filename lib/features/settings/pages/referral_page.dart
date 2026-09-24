@@ -20,6 +20,7 @@ import '../../../shared/format.dart';
 import '../../../shared/tokens.dart';
 import '../../../shared/widgets/lumin_card.dart';
 import '../../../shared/widgets/page_skeleton.dart';
+import '../../../shared/friendly_error.dart';
 
 class ReferralPage extends StatefulWidget {
   const ReferralPage({super.key});
@@ -54,7 +55,7 @@ class _ReferralPageState extends State<ReferralPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _loadError = 'Couldn\'t load your invite code: $e';
+        _loadError = friendlyLoadError(e, what: 'your invite code');
         _loading = false;
       });
     }

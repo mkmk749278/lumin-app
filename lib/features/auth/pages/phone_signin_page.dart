@@ -166,7 +166,7 @@ class _PhoneSignInPageState extends State<PhoneSignInPage> {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _error = 'Couldn\'t send code: $e';
+        _error = friendlyActionError(e, action: 'send the code');
       });
     }
   }
@@ -199,7 +199,7 @@ class _PhoneSignInPageState extends State<PhoneSignInPage> {
       setState(() => _error = e.message);
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = 'Couldn\'t send code: $e');
+      setState(() => _error = friendlyActionError(e, action: 'send the code'));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
