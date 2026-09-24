@@ -52,6 +52,7 @@ import '../../data/app_config.dart';
 import '../../data/repository.dart';
 import '../../shared/format.dart';
 import '../../shared/tokens.dart';
+import '../../shared/widgets/info_button.dart';
 import '../../shared/widgets/lumin_card.dart';
 import '../../data/track_record_prefs.dart';
 import 'month_calendar.dart';
@@ -282,9 +283,18 @@ class _TrackRecordPageState extends State<TrackRecordPage> {
             fontWeight: FontWeight.w700,
           ),
         ),
-        actions: const [
-          Padding(
-            padding: EdgeInsets.only(right: LuminSpacing.lg),
+        actions: [
+          // The assumptions behind every figure on this screen live behind
+          // the ⓘ, word for word (owner, 2026-09-24: "keep i icon … keep
+          // everything simple"). RECORDED stays in view: it is a label, not a
+          // brief, and it is what separates this book from a back-test.
+          if (d.hasBook)
+            InfoButton(
+              title: 'About this track record',
+              paragraphs: trackRecordInfo(d),
+            ),
+          const Padding(
+            padding: EdgeInsets.only(right: LuminSpacing.lg, left: 4),
             child: Center(child: _RecordedChip()),
           ),
         ],
@@ -302,7 +312,7 @@ class _TrackRecordPageState extends State<TrackRecordPage> {
                 const SizedBox(height: LuminSpacing.md),
                 _signalsSection(d),
                 const SizedBox(height: LuminSpacing.md),
-                _assumptions(d),
+                _footer(),
                 const SizedBox(height: LuminSpacing.xl),
               ],
             ),
@@ -629,31 +639,49 @@ class _TrackRecordPageState extends State<TrackRecordPage> {
     );
   }
 
-  Widget _assumptions(TrackRecord d) {
-    final fee = d.feePct == d.feePct.roundToDouble()
-        ? d.feePct.toStringAsFixed(0)
-        : d.feePct.toString();
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
-      child: Text(
-        'Every signal here was delivered and tracked in real time — recorded as '
-        'each trade happened, not a back-test. Each is counted at '
-        '${_usdt(d.amountUsdt)}, the same size every time and no compounding, '
-        'with a $fee% round-trip fee charged. A day showing — is a day on which '
-        'nothing closed, not a flat day. All dates are UTC. Your own results '
-        'will differ: what you receive depends on your settings and your fills. '
-        'Past signal performance does not guarantee future results.',
-        style: const TextStyle(
-          color: LuminColors.textMuted,
-          fontSize: 11,
-          height: 1.5,
+  /// The one line that stays in view. The rest of the assumptions are behind
+  /// the ⓘ; this is the caption a screen of performance figures must not
+  /// lose, so it is on the page rather than one tap away.
+  Widget _footer() => const Padding(
+        padding: EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
+        child: Text(
+          'Past performance does not guarantee future results.',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: LuminColors.textMuted, fontSize: 11),
         ),
-      ),
-    );
-  }
+      );
 
   static String _usdt(double a) =>
       '${a == a.roundToDouble() ? a.toStringAsFixed(0) : a.toStringAsFixed(2)} USDT';
+}
+
+// ---------------------------------------------------------------------------
+// The assumptions — one writer for both surfaces
+// ---------------------------------------------------------------------------
+
+/// What every figure on the track record assumes, in the words the ⓘ shows.
+///
+/// Shared by this page and the Pulse card so the two can never describe the
+/// same book differently. The size and the fee are the ENGINE's (echoed on the
+/// record), never constants here.
+List<String> trackRecordInfo(TrackRecord d) {
+  final fee = d.feePct == d.feePct.roundToDouble()
+      ? d.feePct.toStringAsFixed(0)
+      : d.feePct.toString();
+  final a = d.amountUsdt;
+  final size =
+      '${a == a.roundToDouble() ? a.toStringAsFixed(0) : a.toStringAsFixed(2)} USDT';
+  return [
+    'Recorded, not a back-test: every signal here was delivered and tracked '
+        'in real time, as each trade happened.',
+    'Each signal is counted at $size, the same size every time and no '
+        'compounding, with a $fee% round-trip fee charged.',
+    'A day showing — is a day on which nothing closed, not a flat day. '
+        'All dates are UTC.',
+    'Your own results will differ: what you receive depends on your settings '
+        'and your fills.',
+    'Past signal performance does not guarantee future results.',
+  ];
 }
 
 // ---------------------------------------------------------------------------

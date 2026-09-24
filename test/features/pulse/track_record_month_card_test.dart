@@ -15,6 +15,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:lumin/data/repository.dart';
 import 'package:lumin/features/pulse/month_calendar.dart';
 import 'package:lumin/features/pulse/track_record_month_card.dart';
+import 'package:lumin/features/pulse/track_record_page.dart';
 
 /// The clock every pump in this file runs on.
 ///
@@ -138,6 +139,14 @@ Future<void> _pump(
   await tester.pumpAndSettle();
 }
 
+/// Opens the ⓘ. The assumptions live in its sheet since 2026-09-24 (owner:
+/// "keep i icon … keep everything simple"), so every assertion about them
+/// reads the sheet — which is what keeps them pinned word for word.
+Future<void> _openInfo(WidgetTester tester) async {
+  await tester.tap(find.byIcon(Icons.info_outline).first);
+  await tester.pumpAndSettle();
+}
+
 String _text(WidgetTester tester) => tester
     .widgetList<Text>(find.byType(Text))
     .map((t) => t.data ?? '')
@@ -223,12 +232,14 @@ void main() {
       // Every cell is a dollar figure. A grid whose size the reader cannot see
       // is an assumption wearing a measurement's clothes, thirty times over.
       await _pump(t);
+      await _openInfo(t);
       expect(_text(t), contains('100 usdt'));
       expect(_text(t), contains('utc'));
     });
 
     testWidgets('and it renders the size the ENGINE reported', (t) async {
       await _pump(t);
+      await _openInfo(t);
       expect(_text(t), contains('at 100 usdt'));
       expect(_text(t), isNot(contains('at 250 usdt')));
     });
@@ -251,6 +262,7 @@ void main() {
       // must be able to tell at a glance which one they are looking at.
       await _pump(t);
       expect(find.text('RECORDED'), findsOneWidget);
+      await _openInfo(t);
       expect(_text(t), contains('not a back-test'));
     });
 
@@ -260,6 +272,7 @@ void main() {
       // figure that reads as the reader's own account is the flattering
       // misreading — so the correction is on screen, not inferred.
       await _pump(t);
+      await _openInfo(t);
       expect(_text(t), contains('your own results will differ'));
       expect(_text(t), contains('your settings and your fills'));
     });
@@ -267,6 +280,10 @@ void main() {
     testWidgets('past performance carries no promise about the next month',
         (t) async {
       await _pump(t);
+      // The caption stays in view; the fuller sentence is in the sheet.
+      expect(_text(t),
+          contains('past performance does not guarantee future results'));
+      await _openInfo(t);
       expect(
         _text(t),
         contains('past signal performance does not guarantee future results'),
@@ -277,16 +294,35 @@ void main() {
       // A net figure with an unnamed fee is a gross figure the reader will
       // read as net. The rate is the engine's, never a constant here.
       await _pump(t);
+      await _openInfo(t);
       expect(_text(t), contains('0.07% round-trip fee charged'));
     });
 
-    testWidgets('the tap it promises is a tap it has', (t) async {
-      // The footer says "tap for every day and every signal". A promise with
-      // no control behind it is how a reader learns the card does nothing —
-      // this card is now the ONLY route from Pulse into the full record.
+    testWidgets('the card itself stays the route into the full record',
+        (t) async {
+      // The footer that used to say "tap for every day and every signal" is
+      // gone with the rest of the brief; the chevron is what says it now.
       await _pump(t);
-      expect(_text(t), contains('tap for every day and every signal'));
       expect(find.byIcon(Icons.chevron_right), findsWidgets);
+    });
+
+    testWidgets('the brief is off the card until the ⓘ is tapped', (t) async {
+      // Owner, 2026-09-24: "don't keep all that brief there, keep i icon".
+      await _pump(t);
+      expect(_text(t), isNot(contains('not a back-test')));
+      expect(find.byIcon(Icons.info_outline), findsOneWidget);
+      await _openInfo(t);
+      expect(_text(t), contains('not a back-test'));
+    });
+
+    testWidgets('tapping the ⓘ opens the sheet, not the full record',
+        (t) async {
+      // The whole card is tappable. An ⓘ that also navigated would open the
+      // page underneath the sheet the reader asked for.
+      await _pump(t);
+      await _openInfo(t);
+      expect(find.text('About this track record'), findsOneWidget);
+      expect(find.byType(TrackRecordPage), findsNothing);
     });
   });
 
