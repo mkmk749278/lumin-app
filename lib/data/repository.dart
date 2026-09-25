@@ -15,7 +15,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../shared/tokens.dart';
 import 'api_client.dart';
 import 'live_feed_access.dart';
+import 'pair_context.dart';
 export 'live_feed_access.dart';
+export 'pair_context.dart';
 import 'market_alert.dart';
 import 'mock_data.dart';
 import 'server_side_execution_models.dart';
@@ -1958,6 +1960,11 @@ abstract class LuminRepository {
     // Default no-op.  HttpRepository overrides.
   }
 
+  /// The engine's read of one pair for the chart screen — levels, value
+  /// area, 4h structure, the long/short checklist (live-plan only) and
+  /// Lumin's closed signals on the pair (``/api/pairs/{symbol}/context``).
+  Future<PairContext> fetchPairContext(String symbol);
+
   /// Market alerts feed (Pulse → Alerts tab) — informational detector
   /// events from ``/api/alerts``, newest first.
   Future<List<MarketAlert>> fetchAlerts({int limit = 100});
@@ -2529,6 +2536,10 @@ class MockRepository implements LuminRepository {
         limit: limit,
         setupClass: setupClass,
       ));
+
+  @override
+  Future<PairContext> fetchPairContext(String symbol) async =>
+      PairContext(symbol: symbol, state: PairContextState.notReported);
 
   @override
   Future<List<MarketAlert>> fetchAlerts({int limit = 100}) async =>
@@ -4180,6 +4191,15 @@ class HttpRepository implements LuminRepository {
   }
 
   static String _alertsKey(int limit) => 'alerts:$limit';
+
+  @override
+  Future<PairContext> fetchPairContext(String symbol) async {
+    final j = await client.get('/api/pairs/${Uri.encodeComponent(symbol)}/context');
+    if (j is! Map<String, dynamic>) {
+      return PairContext(symbol: symbol, state: PairContextState.notReported);
+    }
+    return PairContext.fromJson(j);
+  }
 
   @override
   Future<List<MarketAlert>> fetchAlerts({int limit = 100}) async {

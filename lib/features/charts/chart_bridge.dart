@@ -14,6 +14,7 @@ import 'package:flutter/foundation.dart';
 import 'models/alert_overlay.dart';
 import 'models/candle.dart';
 import 'models/chart_overlay.dart';
+import 'models/context_overlay.dart';
 
 /// How an [IndicatorLine] is drawn.
 ///
@@ -117,6 +118,12 @@ abstract class ChartBridge {
       _call('setAlertOverlay', o.toJson());
 
   Future<void> clearOverlay() => invoke('clearOverlay', null);
+
+  /// Lumin's read of the pair: level bands, POC, past-signal markers. Its
+  /// own layer — independent of the signal and alert overlays.
+  Future<void> setContextOverlay(ContextChartOverlay o) => _call('setContextOverlay', o.toJson());
+
+  Future<void> clearContextOverlay() => invoke('clearContextOverlay', null);
 
   Future<void> setTheme({required bool dark}) => _call('setTheme', {'dark': dark});
 

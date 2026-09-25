@@ -46,6 +46,8 @@ import 'indicators.dart';
 import 'models/alert_overlay.dart';
 import 'models/candle.dart';
 import 'models/chart_overlay.dart';
+import 'models/context_overlay.dart';
+import 'pair_read_sheet.dart';
 import 'sar_disclosure.dart';
 import '../../shared/friendly_error.dart';
 
@@ -127,6 +129,12 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
   /// Funding / OI / long-short / taker flow under the chart — refreshed on
   /// the ticker's 60s clock (the futures/data buckets are hourly anyway).
   final BinanceDerivatives _dx = BinanceDerivatives();
+
+  /// Lumin's read of this pair (levels, value area, 4h structure, past
+  /// signals) — engine `/api/pairs/{symbol}/context`, refreshed on the same
+  /// 60s clock (the engine republishes it once a minute).
+  PairContext? _ctx;
+  bool _showLumin = true;
   DerivativesSnapshot? _deriv;
   bool _favourite = false;
 
@@ -137,6 +145,7 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
 
   Future<void> _refreshTicker() async {
     unawaited(_refreshDerivatives());
+    unawaited(_refreshContext());
     try {
       final t = await _md.symbolTicker24h(widget.symbol);
       if (mounted) setState(() => _ticker = t);
@@ -150,6 +159,45 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
     // Keep the last good strip when a refresh comes back empty (a blip
     // should not flash every tile to "—").
     if (mounted && (!d.isEmpty || _deriv == null)) setState(() => _deriv = d);
+  }
+
+  Future<void> _refreshContext() async {
+    // Never reads an inherited widget here: this also runs from initState's
+    // first ticker refresh, before dependencies exist. The first real fetch
+    // comes from didChangeDependencies once the repo is known.
+    final repo = _repo;
+    if (repo == null) return;
+    try {
+      final c = await repo.fetchPairContext(widget.symbol);
+      if (!mounted) return;
+      setState(() => _ctx = c);
+      await _pushContext();
+    } catch (_) {
+      /* keep the last read; the sheet says when it was taken */
+    }
+  }
+
+  /// Draw (or clear) Lumin's layer. Markers snap to the current timeframe's
+  /// bars, so this runs again after every candle load.
+  Future<void> _pushContext() async {
+    final bridge = _bridge;
+    if (bridge == null || _candles.isEmpty) return;
+    final c = _ctx;
+    if (!_showLumin || c == null || c.state != PairContextState.covered && c.pastSignals.isEmpty) {
+      await bridge.clearContextOverlay();
+      return;
+    }
+    await bridge.setContextOverlay(ContextChartOverlay.from(
+      c,
+      tfSeconds: _tfSeconds[_tf] ?? 900,
+      oldestBar: _candles.first.time,
+      newestBar: _candles.last.time,
+    ));
+  }
+
+  Future<void> _toggleLumin() async {
+    setState(() => _showLumin = !_showLumin);
+    await _pushContext();
   }
 
   Future<void> _toggleFavourite() async {
@@ -199,7 +247,10 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _repo ??= AppConfigScope.maybeOf(context)?.repo;
+    if (_repo == null) {
+      _repo = AppConfigScope.maybeOf(context)?.repo;
+      if (_repo != null) unawaited(_refreshContext());
+    }
   }
 
   @override
@@ -306,6 +357,7 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
       await _pushIndicators();
       await _pushOverlay(force: true);
       await _pushAlertOverlay();
+      await _pushContext();
       _startPoll();
       _startOverlayTimer();
       if (mounted) setState(() => _loading = false);
@@ -529,6 +581,7 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
         preserveView: true,
       );
       await _pushIndicators();
+      await _pushContext();
     } catch (_) {
       /* transient — the next left-edge pan retries */
     } finally {
@@ -727,6 +780,10 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
                     ],
                   ),
                 ),
+                const SizedBox(width: LuminSpacing.sm),
+                _LuminReadButton(
+                  onTap: () => showPairReadSheet(context, symbol: widget.symbol, read: _ctx),
+                ),
               ],
             ),
           ),
@@ -777,6 +834,8 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.fromLTRB(LuminSpacing.lg, 6, LuminSpacing.lg, 2),
               children: [
+                if (_ctx != null && (_ctx!.state == PairContextState.covered || _ctx!.pastSignals.isNotEmpty))
+                  _IndicatorChip(label: 'Lumin levels', on: _showLumin, onTap: _toggleLumin, accent: true),
                 _IndicatorChip(label: 'EMA 21/50', on: _showEma, onTap: () => _toggleIndicator(() => _showEma = !_showEma)),
                 _IndicatorChip(label: 'MA 7/25/99', on: _showMaStack, onTap: () => _toggleIndicator(() => _showMaStack = !_showMaStack)),
                 _IndicatorChip(label: 'RSI', on: _showRsi, onTap: () => _toggleIndicator(() => _showRsi = !_showRsi)),
@@ -959,6 +1018,38 @@ class _IndicatorChip extends StatelessWidget {
                   fontWeight: FontWeight.w700,
                   fontSize: 12,
                 )),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+/// Opens the "Lumin read" sheet — the engine's description of this pair.
+class _LuminReadButton extends StatelessWidget {
+  const _LuminReadButton({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: LuminColors.accent.withValues(alpha: 0.14),
+      borderRadius: BorderRadius.circular(LuminRadii.pill),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(LuminRadii.pill),
+        onTap: onTap,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 48),
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(LuminRadii.pill),
+            border: Border.all(color: LuminColors.accent.withValues(alpha: 0.6)),
+          ),
+          child: const Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.insights_rounded, size: 18, color: LuminColors.accent),
+            SizedBox(width: 6),
+            Text('Lumin read',
+                style: TextStyle(color: LuminColors.accent, fontWeight: FontWeight.w800, fontSize: 13)),
           ]),
         ),
       ),
