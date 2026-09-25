@@ -17,6 +17,7 @@ import '../../../data/api_client.dart';
 import '../../../data/app_config.dart';
 import '../../../data/repository.dart';
 import '../../../shared/tokens.dart';
+import '../../../shared/widgets/info_button.dart';
 import '../../../shared/widgets/lumin_card.dart';
 import '../../../shared/widgets/preview_badge.dart';
 import '../../../shared/widgets/lumin_switch.dart';
@@ -337,8 +338,6 @@ class _InvalidationSettingsPageState extends State<InvalidationSettingsPage> {
       children: [
         if (!isLive) const PreviewBadge(),
         _scopeBanner(),
-        _doctrineCard(),
-        const SizedBox(height: LuminSpacing.md),
         _modeCard('loose', 'Loose',
             'Only the SL itself closes a signal. No early-exit on '
             'regime flip, EMA crossover, or momentum loss. Use when you '
@@ -361,109 +360,37 @@ class _InvalidationSettingsPageState extends State<InvalidationSettingsPage> {
   Widget _scopeBanner() {
     final usingDefaults = _usingDefaults;
     final accent = usingDefaults ? LuminColors.textMuted : LuminColors.accent;
-    final label = usingDefaults
-        ? 'Using engine defaults.'
-        : 'Custom — your overrides.';
+    // One line of state; the explanation sits behind the ⓘ (owner,
+    // 2026-09-25: "make it fold into i icon only").
+    final label = usingDefaults ? "Using Lumin's defaults" : 'Custom — your settings';
     return Padding(
       padding: const EdgeInsets.fromLTRB(
-        LuminSpacing.lg,
-        LuminSpacing.sm,
-        LuminSpacing.lg,
-        LuminSpacing.md,
+        LuminSpacing.lg, LuminSpacing.sm, LuminSpacing.lg, LuminSpacing.md,
       ),
       child: Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: LuminSpacing.md,
-          vertical: LuminSpacing.sm,
-        ),
+        padding: const EdgeInsets.only(left: LuminSpacing.md),
         decoration: BoxDecoration(
-          color: accent.withOpacity(0.08),
+          color: accent.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(LuminRadii.sm),
-          border: Border.all(color: accent.withOpacity(0.30)),
+          border: Border.all(color: accent.withValues(alpha: 0.30)),
         ),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(
-              usingDefaults ? Icons.info_outline : Icons.tune,
-              color: accent,
-              size: 16,
-            ),
+            Icon(usingDefaults ? Icons.check_circle_outline : Icons.tune, color: accent, size: 16),
             const SizedBox(width: LuminSpacing.sm),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    label,
-                    style: TextStyle(
-                      color: accent,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  const Text(
-                    'Saved to your profile. Engine-side invalidation runs on '
-                    "the owner's auto-trade today (uses the engine default "
-                    'mode); per-user execution lands when your Binance keys '
-                    'are wired (Phase 4).',
-                    style: TextStyle(
-                      color: LuminColors.textSecondary,
-                      fontSize: 11,
-                      height: 1.4,
-                    ),
-                  ),
-                ],
+              child: Text(
+                label,
+                style: TextStyle(color: accent, fontSize: 13, fontWeight: FontWeight.w600),
               ),
             ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// Top-of-page primer explaining the capital-preservation doctrine —
-  /// frames "tight" as the recommended-for-most-users option since
-  /// post-2026-05-17 doctrine prioritises capital preservation over
-  /// chasing the full TP1 ladder.
-  Widget _doctrineCard() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
-      child: LuminCard(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: const [
-            Row(
-              children: [
-                Icon(
-                  Icons.shield_outlined,
-                  color: LuminColors.accent,
-                  size: 18,
-                ),
-                SizedBox(width: LuminSpacing.md),
-                Text(
-                  'Capital preservation',
-                  style: TextStyle(
-                    color: LuminColors.textPrimary,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
+            const InfoButton(
+              title: 'About invalidation',
+              paragraphs: [
+                'These settings are saved to your account and apply to trades Lumin places on your connected exchange.',
+                'Invalidation closes a signal early when its setup breaks, before it can ride all the way to the stop-loss. A full stop-loss at 10x leverage costs about 7.9% of margin; closing early at a small loss or breakeven keeps capital for the next setup.',
+                'Pick the mode that matches how protective you want Lumin to be.',
               ],
-            ),
-            SizedBox(height: LuminSpacing.sm),
-            Text(
-              'Invalidation closes a signal early when the thesis breaks — '
-              'before it can ride all the way to full SL. Doctrine: a full '
-              'SL costs ~7.9% on margin at 10x; an early kill at small loss '
-              'or breakeven preserves capital for the next setup. Pick a '
-              'mode that matches how protective you want the engine to be.',
-              style: TextStyle(
-                color: LuminColors.textSecondary,
-                fontSize: 12,
-                height: 1.4,
-              ),
             ),
           ],
         ),
@@ -529,7 +456,7 @@ class _InvalidationSettingsPageState extends State<InvalidationSettingsPage> {
                       description,
                       style: const TextStyle(
                         color: LuminColors.textSecondary,
-                        fontSize: 11,
+                        fontSize: 12,
                         height: 1.4,
                       ),
                     ),
@@ -592,7 +519,7 @@ class _InvalidationSettingsPageState extends State<InvalidationSettingsPage> {
                 'Saved values persist across mode switches.',
                 style: TextStyle(
                   color: LuminColors.textSecondary,
-                  fontSize: 11,
+                  fontSize: 12,
                   height: 1.4,
                 ),
               ),
@@ -668,7 +595,7 @@ class _InvalidationSettingsPageState extends State<InvalidationSettingsPage> {
     ValueChanged<bool> onChanged,
   ) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: LuminSpacing.xs),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -689,7 +616,7 @@ class _InvalidationSettingsPageState extends State<InvalidationSettingsPage> {
                   description,
                   style: const TextStyle(
                     color: LuminColors.textSecondary,
-                    fontSize: 11,
+                    fontSize: 12,
                     height: 1.3,
                   ),
                 ),
@@ -748,7 +675,7 @@ class _InvalidationSettingsPageState extends State<InvalidationSettingsPage> {
                 helper,
                 style: const TextStyle(
                   color: LuminColors.textSecondary,
-                  fontSize: 11,
+                  fontSize: 12,
                   height: 1.3,
                 ),
               ),

@@ -398,7 +398,7 @@ class _AlertCard extends StatelessWidget {
                     alert.message,
                     style: const TextStyle(
                       color: LuminColors.textSecondary,
-                      fontSize: 11,
+                      fontSize: 12,
                       height: 1.35,
                     ),
                   ),

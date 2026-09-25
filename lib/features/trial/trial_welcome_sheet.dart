@@ -122,7 +122,7 @@ class TrialWelcomeCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(
                 horizontal: LuminSpacing.sm,
-                vertical: 4,
+                vertical: LuminSpacing.xs,
               ),
               decoration: BoxDecoration(
                 color: LuminColors.success.withOpacity(0.12),

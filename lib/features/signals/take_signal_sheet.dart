@@ -383,7 +383,7 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
           ),
         ),
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.sm, vertical: 3),
           decoration: BoxDecoration(
             color: (isLong ? LuminColors.success : LuminColors.loss)
                 .withOpacity(0.15),
@@ -612,7 +612,7 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
                 'Settings → Auto-trade.',
                 style: TextStyle(
                   color: LuminColors.textSecondary,
-                  fontSize: 11,
+                  fontSize: 12,
                   height: 1.4,
                 ),
               ),

@@ -127,4 +127,36 @@ void main() {
       expect(src, isNot(contains('Curves.bounceOut')));
     });
   });
+
+  test('re-tapping Pulse from Alerts returns to the Dashboard', () {
+    // Owner, 2026-09-25: on Alerts, tapping Pulse two or three times never
+    // came back — scrollToTop only scrolled the Alerts list. Home is the
+    // Dashboard, so the first re-tap switches back to it.
+    final src = _lib('features/pulse/pulse_page.dart').readAsStringSync();
+    final body = src.substring(src.indexOf('void scrollToTop()'));
+    final impl = body.substring(0, body.indexOf('\n  }') + 4);
+    expect(impl, contains('_tabController.animateTo(0)'));
+    expect(impl, isNot(contains('_alertsKey.currentState?.scrollToTop()')));
+  });
+
+  group('the auth gate never tears down the open app', () {
+    // Owner, 2026-09-25: back from a settings page landed on Pulse. The gate
+    // passed `authStateChanges` — a getter returning a NEW Firebase stream on
+    // every read — straight into its StreamBuilder, so each rebuild of the
+    // gate resubscribed, reported `waiting` for a frame, rendered the splash,
+    // and rebuilt NavShell on its default tab underneath the open route.
+    final src = _lib('main.dart').readAsStringSync();
+
+    test('the stream is created once, not per build', () {
+      expect(src, isNot(contains('stream: scope.auth!.authStateChanges')));
+      expect(src, contains('stream: _authStreamFor(scope.auth!)'));
+    });
+
+    test('a resubscribe that still carries a user never shows the splash', () {
+      expect(
+        src,
+        contains('snap.connectionState == ConnectionState.waiting && snap.data == null'),
+      );
+    });
+  });
 }

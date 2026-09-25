@@ -485,7 +485,7 @@ class _EligibilityPickerPageState extends State<_EligibilityPickerPage> {
                     subtitle,
                     style: const TextStyle(
                       color: LuminColors.textSecondary,
-                      fontSize: 11,
+                      fontSize: 12,
                       height: 1.4,
                     ),
                   ),

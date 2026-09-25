@@ -138,7 +138,7 @@ class PairReadView extends StatelessWidget {
             child: Row(children: [
               const Expanded(child: Divider(color: LuminColors.accentMuted)),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
+                padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.sm),
                 child: Text('Price ${formatMarketPrice(r.price!)}',
                     style: const TextStyle(color: LuminColors.accent, fontSize: 12, fontWeight: FontWeight.w700)),
               ),
@@ -211,7 +211,7 @@ class _LevelRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = support ? LuminColors.success : LuminColors.loss;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: LuminSpacing.xs),
       child: Row(children: [
         Container(width: 4, height: 28, decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(2))),
         const SizedBox(width: 10),

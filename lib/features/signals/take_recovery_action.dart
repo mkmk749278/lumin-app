@@ -83,7 +83,7 @@ class TakeRecoveryAction extends StatelessWidget {
             foregroundColor: colour,
             padding: const EdgeInsets.symmetric(
               horizontal: LuminSpacing.sm,
-              vertical: 4,
+              vertical: LuminSpacing.xs,
             ),
             minimumSize: const Size(0, 36),
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,

@@ -222,7 +222,7 @@ class _WelcomeConsentPageState extends State<WelcomeConsentPage> {
                 const SizedBox(width: LuminSpacing.sm),
                 Expanded(
                   child: Padding(
-                    padding: const EdgeInsets.only(top: 12),
+                    padding: const EdgeInsets.only(top: LuminSpacing.md),
                     child: Text(
                       text,
                       style: const TextStyle(

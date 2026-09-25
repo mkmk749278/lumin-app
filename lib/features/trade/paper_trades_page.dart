@@ -998,7 +998,7 @@ class _ErrorView extends StatelessWidget {
           textAlign: TextAlign.center,
           style: const TextStyle(
             color: LuminColors.textSecondary,
-            fontSize: 11,
+            fontSize: 12,
             height: 1.4,
           ),
         ),

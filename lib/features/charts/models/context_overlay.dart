@@ -48,6 +48,7 @@ class ContextChartOverlay {
         'high': lv.price + half,
         'color': sup ? 'rgba(34,227,155,0.10)' : 'rgba(255,77,109,0.10)',
         'borderColor': sup ? 'rgba(34,227,155,0.55)' : 'rgba(255,77,109,0.55)',
+        'labelColor': sup ? _green : _red,
         'label': '${sup ? 'Support' : 'Resistance'} · ${lv.touches} touch${lv.touches == 1 ? '' : 'es'}',
       });
     }

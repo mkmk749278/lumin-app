@@ -143,11 +143,12 @@ class _PulsePageState extends State<PulsePage>
 
   @override
   void scrollToTop() {
-    // Whichever top tab is in front — scrolling the Dashboard while the user
-    // is reading Alerts would move a list they cannot see and leave the one
-    // they can exactly where it was.
-    if (_tabController.index == 1) {
-      _alertsKey.currentState?.scrollToTop();
+    // Re-tapping Pulse is "take me home", and home is the Dashboard. It used
+    // to only scroll the Alerts list, so a user on Alerts could tap Pulse
+    // three times and never get back (owner-reported 2026-09-25). First tap
+    // from Alerts returns to the Dashboard; the next scrolls it to the top.
+    if (_tabController.index != 0) {
+      _tabController.animateTo(0);
       return;
     }
     if (!_dashboardController.hasClients) return;
@@ -477,7 +478,7 @@ class _RegimeBar extends StatelessWidget {
                 return Expanded(
                   child: Padding(
                     padding: EdgeInsets.only(
-                      right: i == _segments.length - 1 ? 0 : 4,
+                      right: i == _segments.length - 1 ? 0 : LuminSpacing.xs,
                     ),
                     child: Column(
                       children: [
@@ -706,7 +707,7 @@ class _NotTradingYetCard extends StatelessWidget {
                     'auto-trading signals on your own account.',
                     style: TextStyle(
                       color: LuminColors.textSecondary,
-                      fontSize: 11,
+                      fontSize: 12,
                       height: 1.4,
                     ),
                   ),
@@ -1032,7 +1033,7 @@ class _TopPairTickerStrip extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Padding(
-              padding: EdgeInsets.only(left: 4, bottom: LuminSpacing.sm),
+              padding: EdgeInsets.only(left: LuminSpacing.xs, bottom: LuminSpacing.sm),
               child: Text(
                 'Top pairs',
                 style: TextStyle(
@@ -1350,7 +1351,7 @@ class _PulseSkeletonCard extends StatelessWidget {
       height: height,
       decoration: BoxDecoration(
         color: LuminColors.bgCard,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(LuminRadii.md),
         border: Border.all(color: LuminColors.cardBorder),
       ),
     );

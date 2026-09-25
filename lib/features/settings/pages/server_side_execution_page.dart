@@ -344,7 +344,7 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
         padding: const EdgeInsets.all(LuminSpacing.md),
         decoration: BoxDecoration(
           color: LuminColors.bgCard,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(LuminRadii.sm),
           border: Border.all(color: LuminColors.warn, width: 1),
         ),
         child: Column(
@@ -369,9 +369,9 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
             const Text(
               'Before connecting Binance for server-side trading, '
               'please read and accept the terms of service.  They '
-              'cover the non-custodial nature of the service, the '
-              'no-warranty posture, and the blast-radius limits '
-              'that bound damage in any worst-case scenario.',
+              'explain that Lumin never holds your funds, that the '
+              'service comes with no warranty, and the safety limits '
+              'placed on every order.',
               style: TextStyle(
                 color: LuminColors.textPrimary,
                 fontSize: 12,
@@ -397,7 +397,7 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
       padding: const EdgeInsets.all(LuminSpacing.md),
       decoration: BoxDecoration(
         color: LuminColors.bgCard,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(LuminRadii.sm),
         border: Border.all(color: LuminColors.warn, width: 1),
       ),
       child: Column(
@@ -486,7 +486,7 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
             'server — an extra layer of protection for your account.',
             style: TextStyle(
               color: LuminColors.textSecondary,
-              fontSize: 11,
+              fontSize: 12,
               height: 1.4,
             ),
           ),
@@ -505,7 +505,7 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
       padding: const EdgeInsets.all(LuminSpacing.md),
       decoration: BoxDecoration(
         color: LuminColors.bgCard,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(LuminRadii.sm),
         border: Border.all(color: LuminColors.success, width: 1),
       ),
       child: Column(
@@ -664,7 +664,7 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
         padding: const EdgeInsets.all(LuminSpacing.md),
         decoration: BoxDecoration(
           color: LuminColors.bgCard,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(LuminRadii.sm),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -722,7 +722,7 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
         padding: const EdgeInsets.all(LuminSpacing.md),
         decoration: BoxDecoration(
           color: LuminColors.bgCard,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(LuminRadii.sm),
           border: Border.all(color: LuminColors.loss, width: 1),
         ),
         child: Column(
@@ -798,7 +798,7 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
         padding: const EdgeInsets.all(LuminSpacing.md),
         decoration: BoxDecoration(
           color: LuminColors.bgCard,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(LuminRadii.sm),
           border: Border.all(color: LuminColors.success, width: 1),
         ),
         child: Column(
@@ -824,8 +824,8 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
             ),
             const SizedBox(height: LuminSpacing.sm),
             Text(
-              'Key ${success.keyPublicIdFirst8}… stored encrypted '
-              'engine-side.  Validation passed:',
+              'Key ${success.keyPublicIdFirst8}… stored encrypted on '
+              "Lumin's servers. Checks passed:",
               style: const TextStyle(
                 color: LuminColors.textPrimary,
                 fontSize: 12,

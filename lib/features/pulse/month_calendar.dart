@@ -256,10 +256,13 @@ class MonthCalendar extends StatelessWidget {
     final entry = byDate[iso];
     final net = entry?.netUsd;
     final isSel = iso == selected;
+    // A day that rounds to 0.0 is flat, not a loss: "-0.0" in red read as
+    // a losing day (UX review 2026-09-25).
+    final flat = net != null && net.abs() < 0.05;
     final tint = (net == null || stale)
         ? Colors.transparent
-        : (net >= 0 ? LuminColors.success : LuminColors.loss)
-            .withOpacity(isSel ? 0.30 : 0.14);
+        : (flat ? LuminColors.textMuted : (net >= 0 ? LuminColors.success : LuminColors.loss))
+            .withValues(alpha: isSel ? 0.30 : 0.14);
 
     return GestureDetector(
       onTap: (entry == null || onSelectDay == null || stale)
@@ -305,10 +308,12 @@ class MonthCalendar extends StatelessWidget {
                     ? '·'
                     : net == null
                         ? '—'
-                        : (net >= 0 ? '+' : '-') + net.abs().toStringAsFixed(1),
+                        : flat
+                            ? '0.0'
+                            : (net >= 0 ? '+' : '-') + net.abs().toStringAsFixed(1),
                 style: TextStyle(
-                  color: (net == null || stale)
-                      ? LuminColors.textMuted
+                  color: (net == null || stale || flat)
+                      ? LuminColors.textSecondary
                       : (net >= 0 ? LuminColors.success : LuminColors.loss),
                   fontSize: 11,
                   fontWeight: FontWeight.w600,
@@ -341,7 +346,7 @@ class _StepButton extends StatelessWidget {
         child: GestureDetector(
           onTap: enabled ? onTap : null,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.sm, vertical: LuminSpacing.xs),
             child: Icon(
               icon,
               size: 18,

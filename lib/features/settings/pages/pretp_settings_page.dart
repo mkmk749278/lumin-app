@@ -19,6 +19,7 @@ import '../../../data/api_client.dart';
 import '../../../data/app_config.dart';
 import '../../../data/repository.dart';
 import '../../../shared/tokens.dart';
+import '../../../shared/widgets/info_button.dart';
 import '../../../shared/widgets/lumin_card.dart';
 import '../../../shared/widgets/preview_badge.dart';
 import '../../../shared/widgets/lumin_switch.dart';
@@ -427,61 +428,36 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
   Widget _scopeBanner() {
     final usingDefaults = _usingDefaults;
     final accent = usingDefaults ? LuminColors.textMuted : LuminColors.accent;
-    final label = usingDefaults
-        ? 'Using engine defaults.'
-        : 'Custom — your overrides.';
+    // One line of state; the explanation sits behind the ⓘ (owner,
+    // 2026-09-25: "make it fold into i icon only").
+    final label = usingDefaults ? "Using Lumin's defaults" : 'Custom — your settings';
     return Padding(
       padding: const EdgeInsets.fromLTRB(
-        LuminSpacing.lg,
-        LuminSpacing.sm,
-        LuminSpacing.lg,
-        LuminSpacing.md,
+        LuminSpacing.lg, LuminSpacing.sm, LuminSpacing.lg, LuminSpacing.md,
       ),
       child: Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: LuminSpacing.md,
-          vertical: LuminSpacing.sm,
-        ),
+        padding: const EdgeInsets.only(left: LuminSpacing.md),
         decoration: BoxDecoration(
-          color: accent.withOpacity(0.08),
+          color: accent.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(LuminRadii.sm),
-          border: Border.all(color: accent.withOpacity(0.30)),
+          border: Border.all(color: accent.withValues(alpha: 0.30)),
         ),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(
-              usingDefaults ? Icons.info_outline : Icons.tune,
-              color: accent,
-              size: 16,
-            ),
+            Icon(usingDefaults ? Icons.check_circle_outline : Icons.tune, color: accent, size: 16),
             const SizedBox(width: LuminSpacing.sm),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    label,
-                    style: TextStyle(
-                      color: accent,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  const Text(
-                    'Saved to your profile. With your Binance keys connected, '
-                    'the engine rests a reduce-only pre-TP LIMIT at your '
-                    'threshold for your grab fraction on every signal — no '
-                    'slippage, fires even if the app is closed.',
-                    style: TextStyle(
-                      color: LuminColors.textSecondary,
-                      fontSize: 11,
-                      height: 1.4,
-                    ),
-                  ),
-                ],
+              child: Text(
+                label,
+                style: TextStyle(color: accent, fontSize: 13, fontWeight: FontWeight.w600),
               ),
+            ),
+            const InfoButton(
+              title: 'About pre-TP grab',
+              paragraphs: [
+                'These settings are saved to your account.',
+                'With your Binance keys connected, Lumin places a limit order at your threshold for your grab fraction on every signal it trades for you. A limit order has no slippage, and it works even when the app is closed.',
+              ],
             ),
           ],
         ),
@@ -516,7 +492,7 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
                         : 'Disabled — SL stays at original position until TP/SL hit',
                     style: const TextStyle(
                       color: LuminColors.textSecondary,
-                      fontSize: 11,
+                      fontSize: 12,
                       height: 1.3,
                     ),
                   ),
@@ -580,7 +556,7 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
                             'no pre-TP partial close.',
                     style: const TextStyle(
                       color: LuminColors.textSecondary,
-                      fontSize: 11,
+                      fontSize: 12,
                       height: 1.3,
                     ),
                   ),
@@ -633,12 +609,12 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
                 bottom: LuminSpacing.md,
               ),
               child: Text(
-                'A reduce-only LIMIT rests +${_thresholdPct.toStringAsFixed(2)}% '
-                'from entry (no slippage). Lower = bank sooner, higher = let '
-                'the move breathe before taking profit.',
+                'Profit is taken at +${_thresholdPct.toStringAsFixed(2)}% from '
+                'entry with a limit order (no slippage). Lower banks sooner; '
+                'higher gives the move room before taking profit.',
                 style: const TextStyle(
                   color: LuminColors.textSecondary,
-                  fontSize: 11,
+                  fontSize: 12,
                   height: 1.4,
                 ),
               ),
@@ -671,7 +647,7 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
                 'with SL at entry (breakeven).',
                 style: const TextStyle(
                   color: LuminColors.textSecondary,
-                  fontSize: 11,
+                  fontSize: 12,
                   height: 1.4,
                 ),
               ),

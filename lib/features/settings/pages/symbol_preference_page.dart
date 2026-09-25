@@ -26,6 +26,7 @@ import '../../../data/app_config.dart';
 import '../../../data/repository.dart';
 import '../../../data/server_side_execution_models.dart';
 import '../../../shared/tokens.dart';
+import '../../../shared/widgets/info_button.dart';
 import '../../../shared/widgets/lumin_card.dart';
 
 import 'eligibility_preference_page.dart' show EligibilityScope;
@@ -272,37 +273,39 @@ class _SymbolPreferenceBodyState extends State<_SymbolPreferenceBody> {
                 const Icon(Icons.shield_outlined,
                     size: 16, color: LuminColors.textSecondary),
                 const SizedBox(width: LuminSpacing.sm),
-                Text(
-                  _isPaper
-                      ? 'WHICH PAIRS PAPER-TRADE FOR YOU'
-                      : 'WHICH PAIRS AUTO-TRADE FOR YOU',
-                  style: const TextStyle(
-                    color: LuminColors.textMuted,
-                    fontSize: 11,
-                    letterSpacing: 1.2,
-                    fontWeight: FontWeight.w700,
+                Expanded(
+                  child: Text(
+                    _isPaper
+                        ? 'WHICH PAIRS PAPER-TRADE FOR YOU'
+                        : 'WHICH PAIRS AUTO-TRADE FOR YOU',
+                    style: const TextStyle(
+                      color: LuminColors.textMuted,
+                      fontSize: 11,
+                      letterSpacing: 1.2,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
+                // The explanation folds behind the ⓘ, in user words rather
+                // than engine words (owner, 2026-09-25).
+                InfoButton(
+                  title: 'About symbol preference',
+                  paragraphs: _isPaper
+                      ? [
+                          'Choose which pairs Lumin simulates in your paper book. '
+                              'Lumin trades up to ${_engineAllowed.length} pairs; you can '
+                              'narrow that list to focus your testing.',
+                          'This is separate from the pairs chosen for live auto-trade.',
+                        ]
+                      : [
+                          'Lumin places orders for you from its own servers. For '
+                              'safety it only trades a set list of '
+                              '${_engineAllowed.length} pairs.',
+                          'You can narrow that list and pick which pairs place orders '
+                              'on your account. You cannot add pairs outside it.',
+                        ],
+                ),
               ],
-            ),
-            const SizedBox(height: LuminSpacing.sm),
-            Text(
-              _isPaper
-                  ? 'Which pairs the engine simulates in your paper book.  '
-                      'The engine allowlist holds ${_engineAllowed.length} '
-                      'pairs (blast-radius cap); narrow it to focus your '
-                      'paper testing.  Independent of your live symbol list.'
-                  : 'Lumin executes server-side from the engine VPS.  The '
-                      'engine maintains an allowlist of '
-                      '${_engineAllowed.length} pairs (blast-radius cap).  '
-                      'You can narrow that list — pick which pairs trigger '
-                      'orders for your account.  You cannot widen it; that '
-                      'needs an operator change for everyone.',
-              style: const TextStyle(
-                color: LuminColors.textSecondary,
-                fontSize: 12,
-                height: 1.4,
-              ),
             ),
           ],
         ),
@@ -317,7 +320,7 @@ class _SymbolPreferenceBodyState extends State<_SymbolPreferenceBody> {
               icon: Icons.all_inclusive,
               label: 'All allowed symbols',
               subtitle:
-                  'Every pair on the engine allowlist (${_engineAllowed.length}). '
+                  'Every pair Lumin trades (${_engineAllowed.length}). '
                   'Recommended — you get every paid signal that\'s eligible.',
             ),
             const Divider(
@@ -397,7 +400,7 @@ class _SymbolPreferenceBodyState extends State<_SymbolPreferenceBody> {
                     subtitle,
                     style: const TextStyle(
                       color: LuminColors.textSecondary,
-                      fontSize: 11,
+                      fontSize: 12,
                       height: 1.4,
                     ),
                   ),

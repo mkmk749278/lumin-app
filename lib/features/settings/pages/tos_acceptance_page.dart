@@ -128,7 +128,7 @@ class _TosAcceptancePageState extends State<TosAcceptancePage> {
         padding: const EdgeInsets.all(LuminSpacing.md),
         decoration: BoxDecoration(
           color: LuminColors.bgCard,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(LuminRadii.sm),
         ),
         child: const Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -223,7 +223,7 @@ class _TosAcceptancePageState extends State<TosAcceptancePage> {
         padding: const EdgeInsets.all(LuminSpacing.md),
         decoration: BoxDecoration(
           color: LuminColors.bgCard,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(LuminRadii.sm),
           border: Border.all(color: LuminColors.loss, width: 1),
         ),
         child: Text(
