@@ -111,6 +111,8 @@ class MarketTicker {
     required this.lastPrice,
     required this.changePct,
     required this.quoteVolume,
+    this.highPrice = 0,
+    this.lowPrice = 0,
   });
 
   final String symbol;
@@ -122,12 +124,18 @@ class MarketTicker {
   /// 24h quote volume (USDT) — used to sort/floor the list by liquidity.
   final double quoteVolume;
 
+  /// 24h high / low — the chart header's range line. 0 = not reported.
+  final double highPrice;
+  final double lowPrice;
+
   factory MarketTicker.fromJson(Map<String, dynamic> j) {
     return MarketTicker(
       symbol: (j['symbol'] ?? '').toString(),
       lastPrice: Candle._dbl(j['lastPrice']),
       changePct: Candle._dbl(j['priceChangePercent']),
       quoteVolume: Candle._dbl(j['quoteVolume']),
+      highPrice: Candle._dbl(j['highPrice']),
+      lowPrice: Candle._dbl(j['lowPrice']),
     );
   }
 }

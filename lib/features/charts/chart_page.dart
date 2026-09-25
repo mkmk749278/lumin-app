@@ -29,7 +29,9 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../data/app_config.dart';
+import '../../data/binance_derivatives.dart';
 import '../../data/binance_market_data.dart';
+import '../../data/favourite_pairs.dart';
 import '../../data/market_alert.dart';
 import '../../data/mock_data.dart';
 import '../../data/repository.dart';
@@ -37,6 +39,9 @@ import '../../shared/tokens.dart';
 import '../pulse/manual_trade_sheet.dart';
 import 'chart_stats.dart';
 import 'chart_webview.dart';
+import 'coin_icon.dart';
+import 'derivatives_strip.dart';
+import 'market_view.dart' show baseAsset, contractMultiplier, formatQuoteVolume, formatMarketPrice, changeDirection;
 import 'indicators.dart';
 import 'models/alert_overlay.dart';
 import 'models/candle.dart';
@@ -119,18 +124,39 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
   MarketTicker? _ticker;
   Timer? _tickerTimer;
 
+  /// Funding / OI / long-short / taker flow under the chart — refreshed on
+  /// the ticker's 60s clock (the futures/data buckets are hourly anyway).
+  final BinanceDerivatives _dx = BinanceDerivatives();
+  DerivativesSnapshot? _deriv;
+  bool _favourite = false;
+
   /// Latest traded price for the header — last candle close, updated by
   /// the existing 2s poll; falls back to the ticker's lastPrice.
   double? get _lastPrice =>
       _candles.isNotEmpty ? _candles.last.close : _ticker?.lastPrice;
 
   Future<void> _refreshTicker() async {
+    unawaited(_refreshDerivatives());
     try {
       final t = await _md.symbolTicker24h(widget.symbol);
       if (mounted) setState(() => _ticker = t);
     } catch (_) {
       /* transient — header keeps its last value */
     }
+  }
+
+  Future<void> _refreshDerivatives() async {
+    final d = await _dx.snapshot(widget.symbol);
+    // Keep the last good strip when a refresh comes back empty (a blip
+    // should not flash every tile to "—").
+    if (mounted && (!d.isEmpty || _deriv == null)) setState(() => _deriv = d);
+  }
+
+  Future<void> _toggleFavourite() async {
+    final favs = await FavouritePairs.load();
+    if (!favs.remove(widget.symbol)) favs.add(widget.symbol);
+    await FavouritePairs.save(favs);
+    if (mounted) setState(() => _favourite = favs.contains(widget.symbol));
   }
 
   /// How often the live last bar is refreshed from REST while the chart is open.
@@ -160,6 +186,9 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
     super.initState();
     _signal = widget.signal;
     WidgetsBinding.instance.addObserver(this);
+    FavouritePairs.load().then((f) {
+      if (mounted) setState(() => _favourite = f.contains(widget.symbol));
+    });
     _refreshTicker();
     _tickerTimer = Timer.periodic(
       const Duration(seconds: 60),
@@ -180,6 +209,7 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
     _overlayTimer?.cancel();
     _tickerTimer?.cancel();
     _md.close();
+    _dx.close();
     super.dispose();
   }
 
@@ -583,127 +613,176 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final price = _lastPrice;
-    final pct = _ticker?.changePct;
-    final pctColor = (pct ?? 0) >= 0 ? LuminColors.success : LuminColors.loss;
+    final t = _ticker;
+    final pct = t?.changePct;
+    final dir = pct == null ? 0 : changeDirection(pct);
+    final pctColor = dir > 0 ? LuminColors.success : (dir < 0 ? LuminColors.loss : LuminColors.textSecondary);
+    final mult = contractMultiplier(widget.symbol);
     return Scaffold(
+      backgroundColor: LuminColors.bgDeep,
       appBar: AppBar(
-        // Symbol + live price + true 24h % — the header a trading app is
-        // expected to have (2026-07-17 charts polish).
+        backgroundColor: LuminColors.bgDeep,
+        titleSpacing: 0,
         title: Row(
           children: [
-            Text(widget.symbol),
-            if (price != null) ...[
-              const SizedBox(width: 12),
-              Text(
-                formatHeaderPrice(price, _precision),
-                style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  color: LuminColors.textPrimary,
-                ),
+            CoinIcon(symbol: widget.symbol, size: 28),
+            const SizedBox(width: 10),
+            Flexible(
+              child: Text.rich(
+                TextSpan(children: [
+                  if (mult != null)
+                    TextSpan(text: mult, style: const TextStyle(color: LuminColors.textMuted, fontSize: 13)),
+                  TextSpan(
+                    text: baseAsset(widget.symbol),
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
+                  ),
+                  const TextSpan(text: '/USDT', style: TextStyle(color: LuminColors.textMuted, fontSize: 13)),
+                ]),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
-            ],
-            if (pct != null) ...[
-              const SizedBox(width: 8),
-              Text(
-                formatHeaderPct(pct),
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: pctColor,
-                ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(5),
+                border: Border.all(color: LuminColors.cardBorder),
               ),
-            ],
+              child: const Text('PERP',
+                  style: TextStyle(color: LuminColors.textSecondary, fontSize: 11, fontWeight: FontWeight.w700)),
+            ),
           ],
         ),
+        actions: [
+          IconButton(
+            tooltip: _favourite ? 'Remove from favourites' : 'Add to favourites',
+            onPressed: _toggleFavourite,
+            icon: Icon(
+              _favourite ? Icons.star_rounded : Icons.star_outline_rounded,
+              color: _favourite ? LuminColors.warn : LuminColors.textSecondary,
+            ),
+          ),
+        ],
       ),
       body: Column(
         children: [
-          // Timeframes on their own row — the old single scrolling row
-          // pushed half the chips off-screen (owner screenshots).
-          SizedBox(
-            height: 42,
+          // Price header: the number first, then what the last 24h did.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(LuminSpacing.lg, 2, LuminSpacing.lg, LuminSpacing.sm),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                const SizedBox(width: 12),
-                for (final tf in _tfs)
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.only(right: 6),
-                      child: ChoiceChip(
-                        label: SizedBox(
-                          width: double.infinity,
-                          child: Text(tf, textAlign: TextAlign.center),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Flexible(
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                price == null ? '—' : formatHeaderPrice(price, _precision),
+                                style: const TextStyle(
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.w800,
+                                  color: LuminColors.textPrimary,
+                                  letterSpacing: -0.5,
+                                  fontFeatures: [FontFeature.tabularFigures()],
+                                ),
+                              ),
+                            ),
+                          ),
+                          if (pct != null) ...[
+                            const SizedBox(width: 10),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: pctColor.withValues(alpha: 0.16),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                dir == 0 ? '0.00%' : formatHeaderPct(pct),
+                                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: pctColor),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      if (t != null && t.highPrice > 0 && t.lowPrice > 0)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(
+                            '24h  H ${formatMarketPrice(t.highPrice)}  ·  L ${formatMarketPrice(t.lowPrice)}  ·  Vol ${formatQuoteVolume(t.quoteVolume)}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                color: LuminColors.textSecondary, fontSize: 12, fontWeight: FontWeight.w600,
+                                fontFeatures: [FontFeature.tabularFigures()]),
+                          ),
                         ),
-                        labelPadding: EdgeInsets.zero,
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        visualDensity: VisualDensity.compact,
-                        selected: tf == _tf,
-                        onSelected: (_) => _onTf(tf),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Timeframes: one segmented pill row.
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
+            child: Container(
+              height: 38,
+              padding: const EdgeInsets.all(3),
+              decoration: BoxDecoration(
+                color: LuminColors.bgCard,
+                borderRadius: BorderRadius.circular(LuminRadii.pill),
+                border: Border.all(color: LuminColors.cardBorder),
+              ),
+              child: Row(
+                children: [
+                  for (final tf in _tfs)
+                    Expanded(
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(LuminRadii.pill),
+                        onTap: () => _onTf(tf),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 160),
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: tf == _tf ? LuminColors.accent : Colors.transparent,
+                            borderRadius: BorderRadius.circular(LuminRadii.pill),
+                          ),
+                          child: Text(
+                            tf,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 13,
+                              color: tf == _tf ? LuminColors.bgDeep : LuminColors.textSecondary,
+                            ),
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                const SizedBox(width: 6),
-              ],
+                ],
+              ),
             ),
           ),
           // Indicator + overlay toggles on a second row.
           SizedBox(
-            height: 40,
+            height: 46,
             child: ListView(
               scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
+              padding: const EdgeInsets.fromLTRB(LuminSpacing.lg, 6, LuminSpacing.lg, 2),
               children: [
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: FilterChip(
-                    label: const Text('EMA'),
-                    visualDensity: VisualDensity.compact,
-                    selected: _showEma,
-                    onSelected: (_) =>
-                        _toggleIndicator(() => _showEma = !_showEma),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: FilterChip(
-                    label: const Text('MAs'),
-                    visualDensity: VisualDensity.compact,
-                    selected: _showMaStack,
-                    onSelected: (_) =>
-                        _toggleIndicator(() => _showMaStack = !_showMaStack),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: FilterChip(
-                    label: const Text('RSI'),
-                    visualDensity: VisualDensity.compact,
-                    selected: _showRsi,
-                    onSelected: (_) =>
-                        _toggleIndicator(() => _showRsi = !_showRsi),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: FilterChip(
-                    label: const Text('SAR'),
-                    visualDensity: VisualDensity.compact,
-                    selected: _showSar,
-                    onSelected: (_) =>
-                        _toggleIndicator(() => _showSar = !_showSar),
-                  ),
-                ),
+                _IndicatorChip(label: 'EMA 21/50', on: _showEma, onTap: () => _toggleIndicator(() => _showEma = !_showEma)),
+                _IndicatorChip(label: 'MA 7/25/99', on: _showMaStack, onTap: () => _toggleIndicator(() => _showMaStack = !_showMaStack)),
+                _IndicatorChip(label: 'RSI', on: _showRsi, onTap: () => _toggleIndicator(() => _showRsi = !_showRsi)),
+                _IndicatorChip(label: 'SAR', on: _showSar, onTap: () => _toggleIndicator(() => _showSar = !_showSar)),
                 if (_signal != null)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: FilterChip(
-                      label: const Text('Levels'),
-                      visualDensity: VisualDensity.compact,
-                      selected: _showLevels,
-                      onSelected: (_) => _toggleLevels(),
-                    ),
-                  ),
+                  _IndicatorChip(label: 'Signal levels', on: _showLevels, onTap: _toggleLevels, accent: true),
               ],
             ),
           ),
@@ -744,6 +823,7 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
               ],
             ),
           ),
+          DerivativesStrip(snapshot: _deriv, now: DateTime.now()),
           if (widget.alert != null) _AlertContextBar(alert: widget.alert!),
         ],
       ),
@@ -837,6 +917,49 @@ class _AlertContextBar extends StatelessWidget {
               child: const Text('Review live order'),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// An indicator toggle styled like the Markets tabs: filled when on.
+class _IndicatorChip extends StatelessWidget {
+  const _IndicatorChip({required this.label, required this.on, required this.onTap, this.accent = false});
+  final String label;
+  final bool on;
+  final VoidCallback onTap;
+
+  /// The signal's own levels — drawn in the success colour so it never
+  /// reads as one more indicator.
+  final bool accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = accent ? LuminColors.success : LuminColors.accent;
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(LuminRadii.pill),
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: on ? c.withValues(alpha: 0.16) : Colors.transparent,
+            borderRadius: BorderRadius.circular(LuminRadii.pill),
+            border: Border.all(color: on ? c.withValues(alpha: 0.7) : LuminColors.cardBorder),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            if (on) ...[Icon(Icons.check_rounded, size: 14, color: c), const SizedBox(width: 4)],
+            Text(label,
+                style: TextStyle(
+                  color: on ? c : LuminColors.textSecondary,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12,
+                )),
+          ]),
         ),
       ),
     );
