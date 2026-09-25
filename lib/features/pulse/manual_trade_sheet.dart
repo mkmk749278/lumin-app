@@ -362,7 +362,7 @@ class _ManualTradeSheetState extends State<ManualTradeSheet> {
       child: const Text(
         'No stop-loss set — this position is yours to manage and close. '
         'You can add a stop here or later from the chart.',
-        style: TextStyle(color: LuminColors.textPrimary, fontSize: 11.5, height: 1.35),
+        style: TextStyle(color: LuminColors.textPrimary, fontSize: 12, height: 1.35),
       ),
     );
   }
@@ -404,7 +404,7 @@ class _ManualTradeSheetState extends State<ManualTradeSheet> {
         msg,
         style: TextStyle(
           color: ok ? LuminColors.success : LuminColors.loss,
-          fontSize: 12.5,
+          fontSize: 13,
           height: 1.4,
         ),
       ),

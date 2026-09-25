@@ -150,7 +150,7 @@ class TrialCountdownCard extends StatelessWidget {
                                 'billed when it ends.',
                         style: const TextStyle(
                           color: LuminColors.textSecondary,
-                          fontSize: 12.5,
+                          fontSize: 13,
                           height: 1.35,
                         ),
                       ),
@@ -161,7 +161,7 @@ class TrialCountdownCard extends StatelessWidget {
                             ending ? 'Keep $tier' : 'See plans',
                             style: TextStyle(
                               color: accent,
-                              fontSize: 12.5,
+                              fontSize: 13,
                               fontWeight: FontWeight.w700,
                             ),
                           ),

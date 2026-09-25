@@ -828,9 +828,18 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
             ),
           ),
           // Indicator + overlay toggles on a second row.
+          // The row scrolls sideways; on a phone the last chip is cut by the
+          // screen edge, so a fade there says "more this way" instead of
+          // reading as a clipped label (UX review 2026-09-25).
           SizedBox(
             height: 46,
-            child: ListView(
+            child: ShaderMask(
+              blendMode: BlendMode.dstIn,
+              shaderCallback: (r) => const LinearGradient(
+                colors: [Colors.white, Colors.white, Colors.transparent],
+                stops: [0, 0.9, 1],
+              ).createShader(r),
+              child: ListView(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.fromLTRB(LuminSpacing.lg, 6, LuminSpacing.lg, 2),
               children: [
@@ -844,13 +853,14 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
                   _IndicatorChip(label: 'Signal levels', on: _showLevels, onTap: _toggleLevels, accent: true),
               ],
             ),
+            ),
           ),
           if (_showSar)
             Padding(
               padding: const EdgeInsets.fromLTRB(
-                LuminSpacing.md,
+                LuminSpacing.lg,
                 0,
-                LuminSpacing.md,
+                LuminSpacing.lg,
                 LuminSpacing.xs,
               ),
               child: Text(
@@ -870,8 +880,30 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
                   onError: _onWebError,
                   onVisibleRange: _onVisibleRange,
                 ),
-                if (_loading)
-                  const Center(child: CircularProgressIndicator()),
+                // A thin bar across the top instead of a spinner over the
+                // candles (UX review 2026-09-25): on a timeframe switch the old
+                // candles stay readable while the new ones load, and the bar
+                // fades rather than popping in and out.
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: IgnorePointer(
+                    // A switcher, not an opacity: an indeterminate indicator
+                    // animates forever, so it must leave the tree when done.
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 200),
+                      child: _loading
+                          ? const LinearProgressIndicator(
+                              key: ValueKey('chart-loading'),
+                              minHeight: 2,
+                              backgroundColor: Colors.transparent,
+                              color: LuminColors.accent,
+                            )
+                          : const SizedBox(height: 2),
+                    ),
+                  ),
+                ),
                 if (_error != null)
                   Center(
                     child: Padding(
@@ -997,7 +1029,7 @@ class _IndicatorChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = accent ? LuminColors.success : LuminColors.accent;
     return Padding(
-      padding: const EdgeInsets.only(right: 8),
+      padding: const EdgeInsets.only(right: LuminSpacing.sm),
       child: InkWell(
         borderRadius: BorderRadius.circular(LuminRadii.pill),
         onTap: onTap,

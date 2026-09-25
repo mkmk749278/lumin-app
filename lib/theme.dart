@@ -292,7 +292,10 @@ ThemeData buildLuminTheme() {
       foregroundColor: LuminColors.textPrimary,
       elevation: 0,
       centerTitle: false,
-      titleTextStyle: TextStyle(color: LuminColors.textPrimary, fontSize: 24, fontWeight: FontWeight.w300, letterSpacing: 1.5),
+      // One title style on every page (UX review 2026-09-25): the old thin
+      // w300 / +1.5 tracking read as a different app beside the bold
+      // Markets title, and was the lightest weight anywhere in the UI.
+      titleTextStyle: TextStyle(color: LuminColors.textPrimary, fontSize: 22, fontWeight: FontWeight.w700, letterSpacing: -0.3),
       // Edge-to-edge (Android 15 / SDK 35): AppBars re-assert the
       // transparent status bar with light icons — without this a page's
       // AppBar can silently override the app-wide overlay style set in main.
@@ -304,5 +307,17 @@ ThemeData buildLuminTheme() {
       ),
     ),
     iconTheme: const IconThemeData(color: LuminColors.textPrimary),
+    // One page transition everywhere (UX review 2026-09-25). 26 pushed routes
+    // used the platform default, which on web is no animation at all — a
+    // page just replaced the last one. Fade-forwards on Android and web,
+    // Cupertino swipe-back kept on iOS.
+    pageTransitionsTheme: const PageTransitionsTheme(builders: {
+      TargetPlatform.android: FadeForwardsPageTransitionsBuilder(),
+      TargetPlatform.fuchsia: FadeForwardsPageTransitionsBuilder(),
+      TargetPlatform.linux: FadeForwardsPageTransitionsBuilder(),
+      TargetPlatform.windows: FadeForwardsPageTransitionsBuilder(),
+      TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
+      TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+    }),
   );
 }

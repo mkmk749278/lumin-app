@@ -129,8 +129,14 @@ class _Slide1 extends StatelessWidget {
           // headline (measured on the live site, 2026-09-23) -- the first
           // screen ad traffic lands on. `scaleDown` lets the card shrink on
           // short phones instead of overflowing the column.
+          //
+          // Anchored low (UX review 2026-09-25): centred, a tall phone left two
+          // equal empty bands, one of them splitting the card from the
+          // headline it illustrates. The spare height now sits under the
+          // brand mark and the card reads as part of the pitch.
           const Expanded(
-            child: Center(
+            child: Align(
+              alignment: Alignment(0, 0.7),
               child: FittedBox(
                 fit: BoxFit.scaleDown,
                 child: ExampleSignalCard(),

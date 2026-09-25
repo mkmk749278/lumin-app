@@ -33,4 +33,26 @@ void main() {
             'scale down (FittedBox) or truncate rather than shrinking it for '
             'everyone.');
   });
+
+  // UX review 2026-09-25: 21 sizes sat on half points (11.5 / 12.5 / 13.5)
+  // between the scale's whole steps — each one a near-duplicate of its
+  // neighbour that made two lines of the same role read as slightly different
+  // fonts. The theme's own roles are whole points; so are the call sites now.
+  test('no hand-written half-point fontSize', () {
+    final offenders = <String>[];
+    for (final f in Directory('lib')
+        .listSync(recursive: true)
+        .whereType<File>()
+        .where((f) => f.path.endsWith('.dart'))) {
+      final lines = f.readAsLinesSync();
+      for (var i = 0; i < lines.length; i++) {
+        final l = lines[i];
+        if (l.trimLeft().startsWith('//')) continue;
+        if (RegExp(r'fontSize:\s*\d+\.\d').hasMatch(l)) {
+          offenders.add('${f.path}:${i + 1}: ${l.trim()}');
+        }
+      }
+    }
+    expect(offenders, isEmpty, reason: 'Round to the nearest whole point.');
+  });
 }

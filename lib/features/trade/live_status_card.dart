@@ -319,7 +319,7 @@ class _LiveStatusCardState extends State<LiveStatusCard> {
                             : 'Auto-trade not active'),
                     style: TextStyle(
                       color: accent,
-                      fontSize: 13.5,
+                      fontSize: 14,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0.2,
                     ),
@@ -417,7 +417,7 @@ class _LiveStatusCardState extends State<LiveStatusCard> {
           : Icon(icon, size: 16),
       label: Text(
         label,
-        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5),
+        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
       ),
     );
   }

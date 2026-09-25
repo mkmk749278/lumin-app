@@ -392,7 +392,7 @@ class _ProfileSettingsPageState extends State<ProfileSettingsPage> {
                       subtitle,
                       style: const TextStyle(
                         color: LuminColors.textSecondary,
-                        fontSize: 11.5,
+                        fontSize: 12,
                       ),
                     ),
                   ],
