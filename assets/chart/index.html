@@ -220,7 +220,7 @@
                 ctx.moveTo(x1, y2); ctx.lineTo(x2, y2);
                 ctx.stroke();
                 if (self._zone.label) {
-                  ctx.font = "10px -apple-system, Roboto, sans-serif";
+                  ctx.font = "600 11px -apple-system, Roboto, sans-serif";
                   ctx.fillStyle = self._zone.borderColor || "#9aa7b4";
                   ctx.fillText(self._zone.label, x1 + 4, y1 - 4);
                 }
@@ -262,6 +262,20 @@
             chart.removePane(RSI_PANE);
           }
         } catch (e) {}
+      }
+
+      var ctxZones = [], ctxLines = [];
+      var ctxMarkers = LightweightCharts.createSeriesMarkers(candleSeries, []);
+      function clearContextOverlay() {
+        for (var i = 0; i < ctxZones.length; i++) {
+          try { candleSeries.detachPrimitive(ctxZones[i]); } catch (e) {}
+        }
+        ctxZones = [];
+        for (var j = 0; j < ctxLines.length; j++) {
+          try { candleSeries.removePriceLine(ctxLines[j]); } catch (e) {}
+        }
+        ctxLines = [];
+        try { ctxMarkers.setMarkers([]); } catch (e) {}
       }
 
       function addLine(price, color, title) {
@@ -513,6 +527,39 @@
           }
         },
         clearAlertOverlay: clearAlertOverlay,
+        // Lumin's read of the pair (Charts redesign part 3): support /
+        // resistance bands, the value-area POC, and Lumin's own past signals
+        // as markers. Its own markers plugin and lines, so it never clears
+        // the signal or alert overlays and they never clear it.
+        setContextOverlay: function (s) {
+          try {
+            var o = JSON.parse(s);
+            clearContextOverlay();
+            (o.zones || []).forEach(function (z) {
+              if (z.low == null || z.high == null || !(z.high > z.low)) return;
+              var p = new ZonePrimitive({ from: 0, low: z.low, high: z.high,
+                color: z.color, borderColor: z.borderColor, label: z.label });
+              try { candleSeries.attachPrimitive(p); ctxZones.push(p); } catch (e) {}
+            });
+            (o.lines || []).forEach(function (l) {
+              if (l.price == null || !isFinite(l.price) || l.price <= 0) return;
+              ctxLines.push(candleSeries.createPriceLine({
+                price: l.price, color: l.color || ACCENT, lineWidth: 1,
+                lineStyle: LightweightCharts.LineStyle.Dotted,
+                axisLabelVisible: true, title: l.title || "",
+              }));
+            });
+            if (o.markers && o.markers.length) {
+              ctxMarkers.setMarkers(o.markers.map(function (m) {
+                return { time: m.time, position: m.position === "above" ? "aboveBar" : "belowBar",
+                         color: m.color || ACCENT, shape: m.shape || "circle", text: m.text || "" };
+              }).sort(function (a, b) { return a.time - b.time; }));
+            }
+          } catch (e) {
+            post({ event: "error", message: "setContextOverlay: " + e });
+          }
+        },
+        clearContextOverlay: function () { clearContextOverlay(); },
         setTheme: function (s) {
           dark = !!JSON.parse(s).dark;
           var t = theme();
