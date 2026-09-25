@@ -1,3 +1,7 @@
+// CupertinoPageTransitionsBuilder moved from material to cupertino in newer
+// Flutter (CI builds on 3.47); importing both compiles on either side.
+// ignore: unnecessary_import
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
