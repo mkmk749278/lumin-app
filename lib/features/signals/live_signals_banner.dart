@@ -270,7 +270,7 @@ class LockedSignalCard extends StatelessWidget {
                   style: FilledButton.styleFrom(
                     backgroundColor: LuminColors.accent,
                     foregroundColor: LuminColors.bgDeep,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    padding: const EdgeInsets.symmetric(vertical: LuminSpacing.md),
                   ),
                   onPressed: () => _unlock(context),
                   icon: const Icon(Icons.lock_open_rounded, size: 18),
@@ -294,7 +294,7 @@ class _LivePill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.sm, vertical: 3),
       decoration: BoxDecoration(
         color: LuminColors.success.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(LuminRadii.pill),

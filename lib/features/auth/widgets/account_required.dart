@@ -15,8 +15,7 @@ import '../pages/phone_signin_page.dart';
 
 /// True when the current session is an anonymous guest.  Mock / preview
 /// scopes have no auth and are never guests.
-bool isGuestSession(BuildContext context) =>
-    AppConfigScope.maybeOf(context)?.auth?.isGuest ?? false;
+bool isGuestSession(BuildContext context) => AppConfigScope.maybeOf(context)?.auth?.isGuest ?? false;
 
 /// Open phone sign-in on top of the current screen.  On success the OTP
 /// page replaces the stack with a fresh NavShell for the new account.
@@ -48,7 +47,24 @@ class AccountRequiredView extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 48, color: LuminColors.accent),
+            // A soft glowing badge rather than a bare glyph floating in
+            // empty space (UX review 2026-09-25).
+            Container(
+              width: 88,
+              height: 88,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: LuminColors.accent.withValues(alpha: 0.10),
+                border: Border.all(color: LuminColors.accent.withValues(alpha: 0.35)),
+                boxShadow: [
+                  BoxShadow(
+                    color: LuminColors.accent.withValues(alpha: 0.18),
+                    blurRadius: 32,
+                  ),
+                ],
+              ),
+              child: Icon(icon, size: 40, color: LuminColors.accent),
+            ),
             const SizedBox(height: LuminSpacing.lg),
             Text(
               title,
@@ -70,19 +86,27 @@ class AccountRequiredView extends StatelessWidget {
               ),
             ),
             const SizedBox(height: LuminSpacing.xl),
-            FilledButton(
-              style: FilledButton.styleFrom(
-                backgroundColor: LuminColors.accent,
-                foregroundColor: LuminColors.bgDeep,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: LuminSpacing.xl,
-                  vertical: LuminSpacing.md,
+            // Full-width like the welcome screen's primary action, capped so
+            // it does not stretch across a tablet.
+            ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 280, maxWidth: 360),
+              child: FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: LuminColors.accent,
+                  foregroundColor: LuminColors.bgDeep,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: LuminSpacing.xl,
+                    vertical: LuminSpacing.lg,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(LuminRadii.md),
+                  ),
                 ),
-              ),
-              onPressed: () => openCreateAccount(context),
-              child: const Text(
-                'Create free account',
-                style: TextStyle(fontWeight: FontWeight.w700),
+                onPressed: () => openCreateAccount(context),
+                child: const Text(
+                  'Create free account',
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                ),
               ),
             ),
             const SizedBox(height: LuminSpacing.sm),

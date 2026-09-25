@@ -220,9 +220,25 @@
                 ctx.moveTo(x1, y2); ctx.lineTo(x2, y2);
                 ctx.stroke();
                 if (self._zone.label) {
+                  // A pill on a dark backing, right-aligned against the price
+                  // axis: bare coloured text drawn over the candles was hard
+                  // to read and sat on top of the price action (UX review
+                  // 2026-09-25).
                   ctx.font = "600 11px -apple-system, Roboto, sans-serif";
-                  ctx.fillStyle = self._zone.borderColor || "#9aa7b4";
-                  ctx.fillText(self._zone.label, x1 + 4, y1 - 4);
+                  var tw = ctx.measureText(self._zone.label).width;
+                  var pw = tw + 12, ph = 17;
+                  var px = Math.max(x1 + 4, x2 - pw - 6);
+                  var py = Math.max(2, y1 - ph - 2);
+                  ctx.fillStyle = "rgba(10,14,26,0.82)";
+                  ctx.strokeStyle = self._zone.borderColor || "rgba(154,167,180,0.5)";
+                  ctx.beginPath();
+                  if (ctx.roundRect) ctx.roundRect(px, py, pw, ph, 8); else ctx.rect(px, py, pw, ph);
+                  ctx.fill();
+                  ctx.stroke();
+                  ctx.fillStyle = self._zone.labelColor || self._zone.borderColor || "#9aa7b4";
+                  ctx.textBaseline = "middle";
+                  ctx.fillText(self._zone.label, px + 6, py + ph / 2 + 0.5);
+                  ctx.textBaseline = "alphabetic";
                 }
               } catch (e) {}
             });
@@ -538,7 +554,7 @@
             (o.zones || []).forEach(function (z) {
               if (z.low == null || z.high == null || !(z.high > z.low)) return;
               var p = new ZonePrimitive({ from: 0, low: z.low, high: z.high,
-                color: z.color, borderColor: z.borderColor, label: z.label });
+                color: z.color, borderColor: z.borderColor, label: z.label, labelColor: z.labelColor });
               try { candleSeries.attachPrimitive(p); ctxZones.push(p); } catch (e) {}
             });
             (o.lines || []).forEach(function (l) {

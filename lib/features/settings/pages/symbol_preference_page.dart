@@ -397,7 +397,7 @@ class _SymbolPreferenceBodyState extends State<_SymbolPreferenceBody> {
                     subtitle,
                     style: const TextStyle(
                       color: LuminColors.textSecondary,
-                      fontSize: 11,
+                      fontSize: 12,
                       height: 1.4,
                     ),
                   ),

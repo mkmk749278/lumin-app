@@ -476,7 +476,7 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
                     'slippage, fires even if the app is closed.',
                     style: TextStyle(
                       color: LuminColors.textSecondary,
-                      fontSize: 11,
+                      fontSize: 12,
                       height: 1.4,
                     ),
                   ),
@@ -516,7 +516,7 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
                         : 'Disabled — SL stays at original position until TP/SL hit',
                     style: const TextStyle(
                       color: LuminColors.textSecondary,
-                      fontSize: 11,
+                      fontSize: 12,
                       height: 1.3,
                     ),
                   ),
@@ -580,7 +580,7 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
                             'no pre-TP partial close.',
                     style: const TextStyle(
                       color: LuminColors.textSecondary,
-                      fontSize: 11,
+                      fontSize: 12,
                       height: 1.3,
                     ),
                   ),
@@ -638,7 +638,7 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
                 'the move breathe before taking profit.',
                 style: const TextStyle(
                   color: LuminColors.textSecondary,
-                  fontSize: 11,
+                  fontSize: 12,
                   height: 1.4,
                 ),
               ),
@@ -671,7 +671,7 @@ class _PreTpSettingsPageState extends State<PreTpSettingsPage> {
                 'with SL at entry (breakeven).',
                 style: const TextStyle(
                   color: LuminColors.textSecondary,
-                  fontSize: 11,
+                  fontSize: 12,
                   height: 1.4,
                 ),
               ),

@@ -752,7 +752,7 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
                           if (pct != null) ...[
                             const SizedBox(width: 10),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.sm, vertical: 3),
                               decoration: BoxDecoration(
                                 color: pctColor.withValues(alpha: 0.16),
                                 borderRadius: BorderRadius.circular(6),
@@ -866,7 +866,7 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
               child: Text(
                 _sarCaption,
                 style: const TextStyle(
-                  fontSize: 11,
+                  fontSize: 12,
                   height: 1.3,
                   color: LuminColors.textMuted,
                 ),
@@ -907,7 +907,7 @@ class _ChartPageState extends State<ChartPage> with WidgetsBindingObserver {
                 if (_error != null)
                   Center(
                     child: Padding(
-                      padding: const EdgeInsets.all(24),
+                      padding: const EdgeInsets.all(LuminSpacing.xl),
                       child: Text(_error!, textAlign: TextAlign.center),
                     ),
                   ),
@@ -981,7 +981,7 @@ class _AlertContextBar extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       color: LuminColors.textSecondary,
-                      fontSize: 11,
+                      fontSize: 12,
                       height: 1.3,
                     ),
                   ),
@@ -993,7 +993,7 @@ class _AlertContextBar extends StatelessWidget {
               style: FilledButton.styleFrom(
                 backgroundColor: LuminColors.accent,
                 foregroundColor: LuminColors.bgDeep,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
               ),
               onPressed: () => showManualTradeSheet(
                 context,
@@ -1035,7 +1035,7 @@ class _IndicatorChip extends StatelessWidget {
         onTap: onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 160),
-          padding: const EdgeInsets.symmetric(horizontal: 12),
+          padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.md),
           alignment: Alignment.center,
           decoration: BoxDecoration(
             color: on ? c.withValues(alpha: 0.16) : Colors.transparent,

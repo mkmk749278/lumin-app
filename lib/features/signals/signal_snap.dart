@@ -188,13 +188,20 @@ class _SignalSnapState extends State<SignalSnap> {
 
   @override
   Widget build(BuildContext context) {
-    final box = ClipRRect(
-      borderRadius: BorderRadius.circular(LuminRadii.sm),
-      child: Container(
-        height: SignalSnap.height,
-        width: double.infinity,
-        color: LuminColors.bgElevated,
-        child: _body(),
+    // A failed fetch collapses to one quiet line rather than an empty box
+    // (UX review 2026-09-25), easing shut instead of jumping.
+    final box = AnimatedSize(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOut,
+      alignment: Alignment.topCenter,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(LuminRadii.sm),
+        child: Container(
+          height: _failed && _data == null ? 28 : SignalSnap.height,
+          width: double.infinity,
+          color: LuminColors.bgElevated,
+          child: _body(),
+        ),
       ),
     );
     if (widget.onTap == null) return box;

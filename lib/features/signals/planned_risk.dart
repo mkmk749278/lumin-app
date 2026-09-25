@@ -152,7 +152,7 @@ class PlannedLossRow extends StatelessWidget {
           'A gap through the stop can cost more than this.',
           style: TextStyle(
             color: LuminColors.textMuted,
-            fontSize: 11,
+            fontSize: 12,
             height: 1.3,
           ),
         ),

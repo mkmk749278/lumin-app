@@ -236,7 +236,7 @@ class _TermsLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const base = TextStyle(color: LuminColors.textMuted, fontSize: 11, height: 1.4);
+    const base = TextStyle(color: LuminColors.textMuted, fontSize: 12, height: 1.4);
     const link = TextStyle(
       color: LuminColors.textSecondary,
       fontSize: 11,
@@ -401,7 +401,7 @@ class _ExampleSignalCardState extends State<ExampleSignalCard>
   }
 
   static Widget _pill(String label, Color color) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.sm, vertical: 3),
         decoration: BoxDecoration(
           color: color.withValues(alpha: 0.14),
           borderRadius: BorderRadius.circular(LuminRadii.pill),

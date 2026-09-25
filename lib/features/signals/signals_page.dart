@@ -474,15 +474,20 @@ class _SignalsPageState extends State<SignalsPage>
         // Engine-wide feed disclaimer — prevents subscribers from
         // confusing "ACTIVE" engine signals with their personal open
         // positions.  The Trade tab is the per-user execution view.
+        // Left-aligned under the title at a readable size — centred 11px
+        // muted text read as a stray footnote (UX review 2026-09-25).
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(20),
-          child: Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Text(
-              'All Lumin signals  •  Your own trades → Trade tab',
-              style: const TextStyle(
-                color: LuminColors.textMuted,
-                fontSize: 11,
+          preferredSize: const Size.fromHeight(24),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(LuminSpacing.lg, 0, LuminSpacing.lg, LuminSpacing.sm),
+              child: const Text(
+                'All Lumin signals  •  Your own trades → Trade tab',
+                style: TextStyle(
+                  color: LuminColors.textSecondary,
+                  fontSize: 12,
+                ),
               ),
             ),
           ),
@@ -819,7 +824,7 @@ class _SkeletonCard extends StatelessWidget {
       padding: const EdgeInsets.all(LuminSpacing.md),
       decoration: BoxDecoration(
         color: LuminColors.bgCard,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(LuminRadii.md),
         border: Border.all(color: LuminColors.cardBorder),
       ),
       child: const Column(
@@ -897,7 +902,7 @@ class _SignalsError extends StatelessWidget {
           textAlign: TextAlign.center,
           style: const TextStyle(
             color: LuminColors.textSecondary,
-            fontSize: 11,
+            fontSize: 12,
             height: 1.4,
           ),
         ),
@@ -973,7 +978,7 @@ class _AccountStrip extends StatelessWidget {
                     detail,
                     style: const TextStyle(
                       color: LuminColors.textSecondary,
-                      fontSize: 11,
+                      fontSize: 12,
                       height: 1.35,
                     ),
                   ),
@@ -1857,7 +1862,7 @@ class _ManagementOption extends StatelessWidget {
                     subtitle,
                     style: const TextStyle(
                       color: LuminColors.textSecondary,
-                      fontSize: 11,
+                      fontSize: 12,
                       height: 1.4,
                     ),
                   ),
@@ -2307,7 +2312,7 @@ class _ConfidenceBadge extends StatelessWidget {
               'CONFIDENCE',
               style: TextStyle(
                 color: LuminColors.textMuted,
-                fontSize: 11,
+                fontSize: 12,
                 letterSpacing: 0.6,
                 fontWeight: FontWeight.w600,
                 height: 1.1,
@@ -2332,7 +2337,7 @@ class _ConfidenceBadge extends StatelessWidget {
                 'SETUP GRADE $grade',
                 style: const TextStyle(
                   color: LuminColors.textMuted,
-                  fontSize: 11,
+                  fontSize: 12,
                   letterSpacing: 0.4,
                   fontWeight: FontWeight.w600,
                   height: 1.25,

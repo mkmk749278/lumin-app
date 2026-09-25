@@ -410,7 +410,7 @@ class _InvalidationSettingsPageState extends State<InvalidationSettingsPage> {
                     'are wired (Phase 4).',
                     style: TextStyle(
                       color: LuminColors.textSecondary,
-                      fontSize: 11,
+                      fontSize: 12,
                       height: 1.4,
                     ),
                   ),
@@ -529,7 +529,7 @@ class _InvalidationSettingsPageState extends State<InvalidationSettingsPage> {
                       description,
                       style: const TextStyle(
                         color: LuminColors.textSecondary,
-                        fontSize: 11,
+                        fontSize: 12,
                         height: 1.4,
                       ),
                     ),
@@ -592,7 +592,7 @@ class _InvalidationSettingsPageState extends State<InvalidationSettingsPage> {
                 'Saved values persist across mode switches.',
                 style: TextStyle(
                   color: LuminColors.textSecondary,
-                  fontSize: 11,
+                  fontSize: 12,
                   height: 1.4,
                 ),
               ),
@@ -668,7 +668,7 @@ class _InvalidationSettingsPageState extends State<InvalidationSettingsPage> {
     ValueChanged<bool> onChanged,
   ) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: LuminSpacing.xs),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -689,7 +689,7 @@ class _InvalidationSettingsPageState extends State<InvalidationSettingsPage> {
                   description,
                   style: const TextStyle(
                     color: LuminColors.textSecondary,
-                    fontSize: 11,
+                    fontSize: 12,
                     height: 1.3,
                   ),
                 ),
@@ -748,7 +748,7 @@ class _InvalidationSettingsPageState extends State<InvalidationSettingsPage> {
                 helper,
                 style: const TextStyle(
                   color: LuminColors.textSecondary,
-                  fontSize: 11,
+                  fontSize: 12,
                   height: 1.3,
                 ),
               ),

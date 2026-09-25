@@ -294,7 +294,7 @@ class _TrackRecordPageState extends State<TrackRecordPage> {
               paragraphs: trackRecordInfo(d),
             ),
           const Padding(
-            padding: EdgeInsets.only(right: LuminSpacing.lg, left: 4),
+            padding: EdgeInsets.only(right: LuminSpacing.lg, left: LuminSpacing.xs),
             child: Center(child: _RecordedChip()),
           ),
         ],
@@ -447,7 +447,7 @@ class _TrackRecordPageState extends State<TrackRecordPage> {
                 '${s.trades - s.tradesPriced} of ${s.trades} could not be '
                 'priced and are left out of every figure above.',
                 style: const TextStyle(
-                    color: LuminColors.textMuted, fontSize: 11, height: 1.4),
+                    color: LuminColors.textMuted, fontSize: 12, height: 1.4),
               ),
             ],
           ],
@@ -1275,7 +1275,7 @@ class _Chip extends StatelessWidget {
           borderRadius: BorderRadius.circular(LuminRadii.pill),
           onTap: onTap,
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+            padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.md, vertical: 5),
             decoration: BoxDecoration(
               color: selected
                   ? LuminColors.accent.withOpacity(0.14)

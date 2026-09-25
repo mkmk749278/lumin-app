@@ -477,7 +477,7 @@ class _RegimeBar extends StatelessWidget {
                 return Expanded(
                   child: Padding(
                     padding: EdgeInsets.only(
-                      right: i == _segments.length - 1 ? 0 : 4,
+                      right: i == _segments.length - 1 ? 0 : LuminSpacing.xs,
                     ),
                     child: Column(
                       children: [
@@ -706,7 +706,7 @@ class _NotTradingYetCard extends StatelessWidget {
                     'auto-trading signals on your own account.',
                     style: TextStyle(
                       color: LuminColors.textSecondary,
-                      fontSize: 11,
+                      fontSize: 12,
                       height: 1.4,
                     ),
                   ),
@@ -1032,7 +1032,7 @@ class _TopPairTickerStrip extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Padding(
-              padding: EdgeInsets.only(left: 4, bottom: LuminSpacing.sm),
+              padding: EdgeInsets.only(left: LuminSpacing.xs, bottom: LuminSpacing.sm),
               child: Text(
                 'Top pairs',
                 style: TextStyle(
@@ -1350,7 +1350,7 @@ class _PulseSkeletonCard extends StatelessWidget {
       height: height,
       decoration: BoxDecoration(
         color: LuminColors.bgCard,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(LuminRadii.md),
         border: Border.all(color: LuminColors.cardBorder),
       ),
     );

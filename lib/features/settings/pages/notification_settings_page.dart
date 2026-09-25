@@ -156,7 +156,7 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
                       'notifications are allowed in Android settings.',
               style: const TextStyle(
                 color: LuminColors.textMuted,
-                fontSize: 11,
+                fontSize: 12,
                 height: 1.4,
               ),
             ),
@@ -207,7 +207,7 @@ class _ToggleRow extends StatelessWidget {
                 subtitle,
                 style: const TextStyle(
                   color: LuminColors.textSecondary,
-                  fontSize: 11,
+                  fontSize: 12,
                   height: 1.35,
                 ),
               ),

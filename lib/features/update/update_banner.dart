@@ -181,7 +181,7 @@ class _UpdateBannerState extends State<UpdateBanner> {
                         _subtitle(),
                         style: const TextStyle(
                           color: LuminColors.textSecondary,
-                          fontSize: 11,
+                          fontSize: 12,
                           height: 1.3,
                         ),
                         maxLines: 2,

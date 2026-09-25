@@ -171,7 +171,7 @@ class _TrackRecordMonthCardState extends State<TrackRecordMonthCard> {
                 Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                  margin: const EdgeInsets.only(right: 8),
+                  margin: const EdgeInsets.only(right: LuminSpacing.sm),
                   decoration: BoxDecoration(
                     color: LuminColors.success.withOpacity(0.12),
                     borderRadius: BorderRadius.circular(LuminRadii.pill),

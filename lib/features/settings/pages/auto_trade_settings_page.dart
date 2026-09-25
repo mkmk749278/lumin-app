@@ -465,7 +465,7 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
                     'next signal dispatch.',
                     style: TextStyle(
                       color: LuminColors.textSecondary,
-                      fontSize: 11,
+                      fontSize: 12,
                       height: 1.4,
                     ),
                   ),
@@ -566,7 +566,7 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
       'Mode: $modeLabel',
       style: const TextStyle(
         color: LuminColors.textSecondary,
-        fontSize: 11,
+        fontSize: 12,
         height: 1.4,
       ),
     );
@@ -606,7 +606,7 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
                     : TextButton(
                         onPressed: _resetEligibility,
                         style: TextButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.sm),
                           minimumSize: Size.zero,
                           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
@@ -623,7 +623,7 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
               'Defaults to everything eligible.',
               style: TextStyle(
                 color: LuminColors.textSecondary,
-                fontSize: 11,
+                fontSize: 12,
                 height: 1.4,
               ),
             ),
@@ -690,7 +690,7 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
                     : TextButton(
                         onPressed: _resetPaperEligibility,
                         style: TextButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.sm),
                           minimumSize: Size.zero,
                           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
@@ -707,7 +707,7 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
               'Separate from your live filters above.',
               style: TextStyle(
                 color: LuminColors.textSecondary,
-                fontSize: 11,
+                fontSize: 12,
                 height: 1.4,
               ),
             ),
@@ -1091,7 +1091,7 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
                 'insufficient margin.',
                 style: TextStyle(
                   color: LuminColors.warn,
-                  fontSize: 11,
+                  fontSize: 12,
                   height: 1.4,
                 ),
               ),
@@ -1233,7 +1233,7 @@ class _ModeToggleRow extends StatelessWidget {
             description,
             style: const TextStyle(
               color: LuminColors.textSecondary,
-              fontSize: 11,
+              fontSize: 12,
               height: 1.4,
             ),
           ),
@@ -1275,7 +1275,7 @@ class _StaleDataBanner extends StatelessWidget {
                 'Showing last saved state — could not reach engine.',
                 style: TextStyle(
                   color: LuminColors.warn,
-                  fontSize: 11,
+                  fontSize: 12,
                   height: 1.4,
                 ),
               ),
@@ -1283,7 +1283,7 @@ class _StaleDataBanner extends StatelessWidget {
             TextButton(
               onPressed: onRetry,
               style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
+                padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.sm),
                 minimumSize: Size.zero,
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
@@ -1314,7 +1314,7 @@ class _StatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.sm, vertical: 3),
       decoration: BoxDecoration(
         color: filled ? color.withOpacity(0.15) : Colors.transparent,
         borderRadius: BorderRadius.circular(LuminRadii.pill),
@@ -1386,7 +1386,7 @@ class _PauseBanner extends StatelessWidget {
                   _bodyText,
                   style: const TextStyle(
                     color: LuminColors.textSecondary,
-                    fontSize: 11,
+                    fontSize: 12,
                     height: 1.4,
                   ),
                 ),
@@ -1408,7 +1408,7 @@ class _PauseBanner extends StatelessWidget {
                   style: TextButton.styleFrom(
                     foregroundColor: LuminColors.warn,
                     padding: const EdgeInsets.symmetric(
-                        horizontal: LuminSpacing.sm, vertical: 4),
+                        horizontal: LuminSpacing.sm, vertical: LuminSpacing.xs),
                     minimumSize: Size.zero,
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),

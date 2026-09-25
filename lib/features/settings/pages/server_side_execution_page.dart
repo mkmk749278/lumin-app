@@ -344,7 +344,7 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
         padding: const EdgeInsets.all(LuminSpacing.md),
         decoration: BoxDecoration(
           color: LuminColors.bgCard,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(LuminRadii.sm),
           border: Border.all(color: LuminColors.warn, width: 1),
         ),
         child: Column(
@@ -397,7 +397,7 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
       padding: const EdgeInsets.all(LuminSpacing.md),
       decoration: BoxDecoration(
         color: LuminColors.bgCard,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(LuminRadii.sm),
         border: Border.all(color: LuminColors.warn, width: 1),
       ),
       child: Column(
@@ -486,7 +486,7 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
             'server — an extra layer of protection for your account.',
             style: TextStyle(
               color: LuminColors.textSecondary,
-              fontSize: 11,
+              fontSize: 12,
               height: 1.4,
             ),
           ),
@@ -505,7 +505,7 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
       padding: const EdgeInsets.all(LuminSpacing.md),
       decoration: BoxDecoration(
         color: LuminColors.bgCard,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(LuminRadii.sm),
         border: Border.all(color: LuminColors.success, width: 1),
       ),
       child: Column(
@@ -664,7 +664,7 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
         padding: const EdgeInsets.all(LuminSpacing.md),
         decoration: BoxDecoration(
           color: LuminColors.bgCard,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(LuminRadii.sm),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -722,7 +722,7 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
         padding: const EdgeInsets.all(LuminSpacing.md),
         decoration: BoxDecoration(
           color: LuminColors.bgCard,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(LuminRadii.sm),
           border: Border.all(color: LuminColors.loss, width: 1),
         ),
         child: Column(
@@ -798,7 +798,7 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
         padding: const EdgeInsets.all(LuminSpacing.md),
         decoration: BoxDecoration(
           color: LuminColors.bgCard,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(LuminRadii.sm),
           border: Border.all(color: LuminColors.success, width: 1),
         ),
         child: Column(

@@ -376,7 +376,7 @@ class _SignupPageState extends State<SignupPage> {
             const SizedBox(width: LuminSpacing.xs),
             const Expanded(
               child: Padding(
-                padding: EdgeInsets.only(top: 12),
+                padding: EdgeInsets.only(top: LuminSpacing.md),
                 child: Text(
                   'I understand that crypto trading carries substantial '
                   'risk and that past signal performance does not '
@@ -428,7 +428,7 @@ class _SignupPageState extends State<SignupPage> {
             'plan — and gives them free Auto days.',
             style: TextStyle(
               color: LuminColors.textMuted,
-              fontSize: 11,
+              fontSize: 12,
               height: 1.35,
             ),
           ),

@@ -203,13 +203,21 @@ class _AlertThumbnailState extends State<AlertThumbnail> {
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
+    // A failed fetch collapses to one quiet line instead of holding a
+    // 110px empty box open in the middle of the card (UX review 2026-09-25);
+    // AnimatedSize so the card eases shut rather than jumping.
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOut,
+      alignment: Alignment.topCenter,
+      child: ClipRRect(
       borderRadius: BorderRadius.circular(LuminRadii.sm),
       child: Container(
-        height: AlertThumbnail.height,
+        height: _failed && _data == null ? 28 : AlertThumbnail.height,
         width: double.infinity,
         color: LuminColors.bgElevated,
         child: _body(),
+      ),
       ),
     );
   }

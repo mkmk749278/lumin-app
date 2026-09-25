@@ -398,7 +398,7 @@ class _ReferralPageState extends State<ReferralPage> {
               'Payouts are settled directly to you by the Lumin team.',
               style: TextStyle(
                 color: LuminColors.textMuted,
-                fontSize: 11,
+                fontSize: 12,
                 height: 1.35,
               ),
             ),

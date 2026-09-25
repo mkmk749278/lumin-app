@@ -175,7 +175,7 @@ class _NotionalSheetState extends State<_NotionalSheet> {
               'only re-prices the record you are reading. Leave it blank to '
               'use the default.',
               style: TextStyle(
-                  color: LuminColors.textMuted, fontSize: 11, height: 1.45),
+                  color: LuminColors.textMuted, fontSize: 12, height: 1.45),
             ),
             const SizedBox(height: LuminSpacing.lg),
             Row(
@@ -214,7 +214,7 @@ class _Preset extends StatelessWidget {
   Widget build(BuildContext context) => GestureDetector(
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.md, vertical: 6),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(LuminRadii.pill),
             border: Border.all(color: LuminColors.cardBorder),

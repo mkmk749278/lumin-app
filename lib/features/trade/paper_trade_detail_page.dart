@@ -487,7 +487,7 @@ class _PartialFillsCard extends StatelessWidget {
               'TP ladder closes — fraction × fill price → realised slice.',
               style: TextStyle(
                 color: LuminColors.textMuted,
-                fontSize: 11,
+                fontSize: 12,
                 height: 1.3,
               ),
             ),
@@ -654,7 +654,7 @@ class _Row extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: LuminSpacing.xs),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

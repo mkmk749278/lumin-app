@@ -558,7 +558,7 @@ class _StatsCard extends StatelessWidget {
             'fires a handful of times a day.',
             style: TextStyle(
               color: LuminColors.textMuted,
-              fontSize: 11,
+              fontSize: 12,
               height: 1.4,
             ),
           ),

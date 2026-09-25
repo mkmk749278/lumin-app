@@ -434,7 +434,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
           ),
         );
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: LuminSpacing.xs),
       child: Row(
         children: [
           Expanded(
@@ -665,7 +665,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
         'Play › Subscriptions.',
         style: TextStyle(
           color: LuminColors.textMuted.withOpacity(0.85),
-          fontSize: 11,
+          fontSize: 12,
           height: 1.5,
         ),
       ),

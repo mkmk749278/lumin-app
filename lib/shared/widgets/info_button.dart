@@ -139,7 +139,7 @@ class _InfoSheet extends StatelessWidget {
                     style: TextButton.styleFrom(
                       foregroundColor: LuminColors.accent,
                       backgroundColor: LuminColors.bgElevated,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      padding: const EdgeInsets.symmetric(vertical: LuminSpacing.md),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(LuminRadii.md),
                       ),

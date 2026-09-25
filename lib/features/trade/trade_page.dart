@@ -1136,7 +1136,7 @@ class _OffStateCard extends StatelessWidget {
                     'No trades tracked. Switch to Paper to simulate fills against live signals, or Live to trade with real funds.',
                     style: TextStyle(
                       color: LuminColors.textSecondary,
-                      fontSize: 11,
+                      fontSize: 12,
                       height: 1.4,
                     ),
                   ),
@@ -1386,7 +1386,7 @@ class _TradeSkeletonCard extends StatelessWidget {
       height: height,
       decoration: BoxDecoration(
         color: LuminColors.bgCard,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(LuminRadii.md),
         border: Border.all(color: LuminColors.cardBorder),
       ),
     );
@@ -1424,7 +1424,7 @@ class _TradeError extends StatelessWidget {
           textAlign: TextAlign.center,
           style: const TextStyle(
             color: LuminColors.textSecondary,
-            fontSize: 11,
+            fontSize: 12,
             height: 1.4,
           ),
         ),
@@ -1522,7 +1522,7 @@ class _BinaryModeToggle extends StatelessWidget {
                     subtitle,
                     style: const TextStyle(
                       color: LuminColors.textSecondary,
-                      fontSize: 11,
+                      fontSize: 12,
                       height: 1.4,
                     ),
                   ),
@@ -1596,7 +1596,7 @@ class _OffStateNotice extends StatelessWidget {
               description,
               style: const TextStyle(
                 color: LuminColors.textSecondary,
-                fontSize: 11,
+                fontSize: 12,
                 height: 1.4,
               ),
             ),
@@ -1644,7 +1644,7 @@ class _SettingsUnknownBanner extends StatelessWidget {
                 'Toggles below may not reflect actual state.',
                 style: TextStyle(
                   color: LuminColors.warn,
-                  fontSize: 11,
+                  fontSize: 12,
                   height: 1.4,
                 ),
               ),
@@ -1652,7 +1652,7 @@ class _SettingsUnknownBanner extends StatelessWidget {
             TextButton(
               onPressed: onRetry,
               style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
+                padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.sm),
                 minimumSize: Size.zero,
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
@@ -1800,7 +1800,7 @@ class _ServerPositionsCard extends StatelessWidget {
                               'the engine is watching it.',
                   style: const TextStyle(
                     color: LuminColors.textSecondary,
-                    fontSize: 11,
+                    fontSize: 12,
                     height: 1.45,
                   ),
                 ),
@@ -1826,7 +1826,7 @@ class _ServerPositionsCard extends StatelessWidget {
                   'close them in the Binance app.',
                   style: TextStyle(
                     color: LuminColors.textSecondary,
-                    fontSize: 11,
+                    fontSize: 12,
                     height: 1.4,
                   ),
                 ),
@@ -1950,7 +1950,7 @@ class _UnmanagedPositionRow extends StatelessWidget {
             '${_liqSuffix(position.liquidationPrice, position.leverage)}',
             style: const TextStyle(
               color: LuminColors.textSecondary,
-              fontSize: 11,
+              fontSize: 12,
               height: 1.35,
             ),
           ),
@@ -2114,7 +2114,7 @@ class _ServerPositionRowState extends State<_ServerPositionRow> {
         : '';
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: LuminSpacing.sm),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -2220,7 +2220,7 @@ class _ServerPositionRowState extends State<_ServerPositionRow> {
             '${_liqSuffix(position.liquidationPrice, position.leverage)}',
             style: const TextStyle(
               color: LuminColors.textSecondary,
-              fontSize: 11,
+              fontSize: 12,
               height: 1.35,
             ),
           ),
@@ -2230,7 +2230,7 @@ class _ServerPositionRowState extends State<_ServerPositionRow> {
             ' • TP1 ${_fmtPrice(position.tp1Price)}$banked',
             style: const TextStyle(
               color: LuminColors.textMuted,
-              fontSize: 11,
+              fontSize: 12,
               height: 1.35,
             ),
           ),
@@ -2285,7 +2285,7 @@ class _ServerPositionRowState extends State<_ServerPositionRow> {
             isUtc: true,
           ).toLocal())}';
     return Padding(
-      padding: const EdgeInsets.only(top: 4),
+      padding: const EdgeInsets.only(top: LuminSpacing.xs),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -2297,7 +2297,7 @@ class _ServerPositionRowState extends State<_ServerPositionRow> {
               'feed — you are out of the trade.',
               style: const TextStyle(
                 color: LuminColors.warn,
-                fontSize: 11,
+                fontSize: 12,
                 height: 1.35,
               ),
             ),
@@ -2420,7 +2420,7 @@ class _RecentDispatchEventsCard extends StatelessWidget {
                   'auto-trade filters declined.',
                   style: TextStyle(
                     color: LuminColors.textSecondary,
-                    fontSize: 11,
+                    fontSize: 12,
                     height: 1.45,
                   ),
                 ),
@@ -2510,7 +2510,7 @@ class _PhoneOrderRow extends StatelessWidget {
                       : 'Placed from this phone (signal take)',
                   style: const TextStyle(
                     color: LuminColors.textSecondary,
-                    fontSize: 11,
+                    fontSize: 12,
                     height: 1.4,
                   ),
                 ),
@@ -2673,7 +2673,7 @@ class _DispatchEventRow extends StatelessWidget {
                     tx.action,
                     style: const TextStyle(
                       color: LuminColors.textSecondary,
-                      fontSize: 11,
+                      fontSize: 12,
                       height: 1.4,
                     ),
                   ),

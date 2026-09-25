@@ -219,9 +219,19 @@ class _InstallBannerState extends State<InstallBanner> {
     );
   }
 
+  // The banner appears after an async prefs read and leaves on dismiss;
+  // without easing, the whole page below it jumped both times (UX review
+  // 2026-09-25).
   @override
-  Widget build(BuildContext context) {
-    if (_state == _BannerState.hidden) return const SizedBox.shrink();
+  Widget build(BuildContext context) => AnimatedSize(
+        duration: const Duration(milliseconds: 240),
+        curve: Curves.easeOutCubic,
+        alignment: Alignment.topCenter,
+        child: _content(context),
+      );
+
+  Widget _content(BuildContext context) {
+    if (_state == _BannerState.hidden) return const SizedBox(width: double.infinity);
     final onTap = switch (_state) {
       _BannerState.playPrompt => _onPlayTap,
       _BannerState.enablePush => _onEnableTap,
@@ -265,7 +275,7 @@ class _InstallBannerState extends State<InstallBanner> {
                       _body(_state),
                       style: const TextStyle(
                         color: LuminColors.textSecondary,
-                        fontSize: 11,
+                        fontSize: 12,
                         height: 1.3,
                       ),
                       maxLines: 2,

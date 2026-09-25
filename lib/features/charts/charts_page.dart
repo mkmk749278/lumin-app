@@ -436,7 +436,7 @@ class _SegmentBar extends StatelessWidget {
       height: 52,
       child: ListView(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.fromLTRB(LuminSpacing.lg, LuminSpacing.md, LuminSpacing.lg, 4),
+        padding: const EdgeInsets.fromLTRB(LuminSpacing.lg, LuminSpacing.md, LuminSpacing.lg, LuminSpacing.xs),
         children: [
           for (final s in MarketSegment.values)
             Padding(
@@ -511,7 +511,7 @@ class _ColumnHeader extends StatelessWidget {
             ? 'PAIR · VOL ≥ \$5M'
             : 'PAIR · 24H VOL';
     return Padding(
-      padding: const EdgeInsets.fromLTRB(LuminSpacing.lg, LuminSpacing.md, 4, LuminSpacing.xs),
+      padding: const EdgeInsets.fromLTRB(LuminSpacing.lg, LuminSpacing.md, LuminSpacing.xs, LuminSpacing.xs),
       child: Row(children: [
         Expanded(child: Text(left, style: s)),
         const SizedBox(width: 64, child: Text('24H', style: s, textAlign: TextAlign.center)),
@@ -550,7 +550,7 @@ class _PairRow extends StatelessWidget {
     return InkWell(
       onTap: () => onTap(t.symbol),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(LuminSpacing.lg, 10, 4, 10),
+        padding: const EdgeInsets.fromLTRB(LuminSpacing.lg, 10, LuminSpacing.xs, 10),
         child: Row(
           children: [
             CoinIcon(symbol: t.symbol, size: 36),
@@ -609,7 +609,7 @@ class _PairRow extends StatelessWidget {
                           fontFeatures: [FontFeature.tabularFigures()])),
                   const SizedBox(height: 4),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.sm, vertical: 3),
                     decoration: BoxDecoration(
                       color: c.withValues(alpha: 0.16),
                       borderRadius: BorderRadius.circular(6),
