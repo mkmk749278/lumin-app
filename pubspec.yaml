@@ -94,3 +94,5 @@ flutter:
   assets:
     # Market Charts — vendored TradingView Lightweight Charts + WebView host.
     - assets/chart/
+    # Coin icons for the Markets list (CC0, see assets/coins/LICENSE.md).
+    - assets/coins/

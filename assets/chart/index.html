@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  Lumin Market Charts — WebView host for TradingView Lightweight Charts™.
+  Lumin Market Charts — WebView host for TradingView Lightweight Charts™ v5.
   Realises the Flutter↔JS bridge in docs/market_charts_tab.md §8.
 
   Flutter → JS:  window.lumin.<cmd>(jsonString)
@@ -29,17 +29,18 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <style>
-    html, body { margin: 0; padding: 0; height: 100%; background: #0e1116; overflow: hidden; }
+    html, body { margin: 0; padding: 0; height: 100%; background: #0a0e1a; overflow: hidden; }
     #chart { position: absolute; top: 0; left: 0; right: 0; bottom: 16px; }
     #legend {
       position: absolute; top: 4px; left: 6px; z-index: 3; pointer-events: none;
-      font: 10px -apple-system, Roboto, sans-serif; color: #9aa7b4;
-      text-shadow: 0 0 2px #0e1116; white-space: nowrap;
+      font: 600 11px -apple-system, Roboto, sans-serif; color: #94a3b8;
+      text-shadow: 0 0 3px #0a0e1a; white-space: nowrap; letter-spacing: 0.1px;
     }
-    #legend .up { color: #26a69a; }
-    #legend .dn { color: #ef5350; }
+    #legend .up { color: #22e39b; }
+    #legend .dn { color: #ff5c7a; }
+    #legend b { color: #64748b; font-weight: 600; }
     #attr { position: absolute; right: 6px; bottom: 2px; font: 10px -apple-system, Roboto, sans-serif; }
-    #attr a { color: #5d6b7a; text-decoration: none; }
+    #attr a { color: #475569; text-decoration: none; }
   </style>
   <script src="lightweight-charts.standalone.production.js"></script>
 </head>
@@ -84,32 +85,53 @@
       var dark = true;
       function theme() {
         return dark
-          ? { bg: "#0e1116", text: "#9aa7b4", grid: "#1b2027", border: "#2a313a" }
+          ? { bg: "#0a0e1a", text: "#94a3b8", grid: "rgba(123,211,247,0.06)", border: "rgba(123,211,247,0.14)" }
           : { bg: "#ffffff", text: "#33414f", grid: "#eef1f4", border: "#d6dde4" };
       }
 
-      var UP = "#26a69a", DOWN = "#ef5350";
-      var VOL_UP = "rgba(38,166,154,0.45)", VOL_DOWN = "rgba(239,83,80,0.45)";
+      // Lumin palette (2026-09-25 Charts redesign) — the app's neon, not the
+      // library's stock teal/red.
+      var UP = "#22e39b", DOWN = "#ff4d6d";
+      var VOL_UP = "rgba(34,227,155,0.28)", VOL_DOWN = "rgba(255,77,109,0.28)";
+      var ACCENT = "#7bd3f7";
+      // How many bars a fresh chart opens on. 500 bars on a phone is a smear
+      // of hairlines; ~100 reads as candles and still shows the trend.
+      var INITIAL_BARS = 100;
 
       var el = document.getElementById("chart");
       var legendEl = document.getElementById("legend");
       var chart = LightweightCharts.createChart(el, {
-        layout: { background: { color: theme().bg }, textColor: theme().text },
+        layout: { background: { color: theme().bg }, textColor: theme().text,
+                  panes: { separatorColor: theme().border, separatorHoverColor: "rgba(123,211,247,0.3)" } },
         grid: { vertLines: { color: theme().grid }, horzLines: { color: theme().grid } },
-        rightPriceScale: { borderColor: theme().border },
-        timeScale: { borderColor: theme().border, timeVisible: true, secondsVisible: false },
-        crosshair: { mode: 0 },
+        rightPriceScale: { borderColor: theme().border, scaleMargins: { top: 0.08, bottom: 0.22 } },
+        timeScale: { borderColor: theme().border, timeVisible: true, secondsVisible: false,
+                     rightOffset: 6, barSpacing: 8, minBarSpacing: 2 },
+        crosshair: {
+          mode: LightweightCharts.CrosshairMode.Normal,
+          vertLine: { color: "rgba(123,211,247,0.45)", width: 1, style: LightweightCharts.LineStyle.Dashed,
+                      labelBackgroundColor: "#1e293b" },
+          horzLine: { color: "rgba(123,211,247,0.45)", width: 1, style: LightweightCharts.LineStyle.Dashed,
+                      labelBackgroundColor: "#1e293b" },
+        },
         autoSize: true,
       });
 
-      var candleSeries = chart.addCandlestickSeries({
+      var candleSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
         upColor: UP, downColor: DOWN,
         borderUpColor: UP, borderDownColor: DOWN,
         wickUpColor: UP, wickDownColor: DOWN,
       });
+      // v5: markers are a plugin on the series, not a series method.
+      var markers = LightweightCharts.createSeriesMarkers(candleSeries, []);
+
+      // RSI lives in its own pane under the price (v5 panes). Before v5 it
+      // shared the bottom band with volume and hid it.
+      var RSI_PANE = 1;
+      var RSI_PANE_PX = 96;
 
       // Volume as an overlay histogram pinned to the lower 18% of the pane.
-      var volSeries = chart.addHistogramSeries({
+      var volSeries = chart.addSeries(LightweightCharts.HistogramSeries, {
         priceFormat: { type: "volume" },
         priceScaleId: "vol",
         color: VOL_UP,
@@ -147,10 +169,10 @@
         var chg = candle.open ? ((candle.close - candle.open) / candle.open) * 100 : 0;
         var cls = up ? "up" : "dn";
         legendEl.innerHTML =
-          "O " + fmt(candle.open) + "  H " + fmt(candle.high) +
-          "  L " + fmt(candle.low) + "  C <span class='" + cls + "'>" + fmt(candle.close) +
+          "<b>O</b> " + fmt(candle.open) + "  <b>H</b> " + fmt(candle.high) +
+          "  <b>L</b> " + fmt(candle.low) + "  <b>C</b> <span class='" + cls + "'>" + fmt(candle.close) +
           " (" + (chg >= 0 ? "+" : "") + chg.toFixed(2) + "%)</span>" +
-          (vol != null ? "  V " + fmtVol(vol) : "");
+          (vol != null ? "  <b>V</b> " + fmtVol(vol) : "");
       }
 
       function clearOverlay() {
@@ -158,7 +180,7 @@
           try { candleSeries.removePriceLine(priceLines[i]); } catch (e) {}
         }
         priceLines = [];
-        try { candleSeries.setMarkers([]); } catch (e) {}
+        try { markers.setMarkers([]); } catch (e) {}
       }
 
       var alertLines = [];      // price lines drawn by setAlertOverlay
@@ -223,11 +245,23 @@
           try { chart.removeSeries(alertSegments[j]); } catch (e) {}
         }
         alertSegments = [];
+        if (!rsiSeries) removeEmptyRsiPane();
         for (var k = 0; k < alertZones.length; k++) {
           try { candleSeries.detachPrimitive(alertZones[k]); } catch (e) {}
         }
         alertZones = [];
-        try { candleSeries.setMarkers([]); } catch (e) {}
+        try { markers.setMarkers([]); } catch (e) {}
+      }
+
+      // Drop the RSI pane once nothing is left in it (the RSI line and any
+      // divergence segments), so the price pane gets its height back.
+      function removeEmptyRsiPane() {
+        try {
+          var panes = chart.panes();
+          if (panes.length > RSI_PANE && panes[RSI_PANE].getSeries().length === 0) {
+            chart.removePane(RSI_PANE);
+          }
+        } catch (e) {}
       }
 
       function addLine(price, color, title) {
@@ -266,7 +300,9 @@
           lastBarTime = c.length ? c[c.length - 1].time : 0;
           lastCandle = c.length ? c[c.length - 1] : null;
           if (saved) { try { chart.timeScale().setVisibleRange(saved); } catch (e) {} }
-          else chart.timeScale().fitContent();
+          else if (c.length > INITIAL_BARS) {
+            chart.timeScale().setVisibleLogicalRange({ from: c.length - INITIAL_BARS, to: c.length + 6 });
+          } else chart.timeScale().fitContent();
           renderLegend(lastCandle, lastVolume);
         },
         updateCandle: function (s) {
@@ -298,7 +334,7 @@
               var L = lines[i];
               keep[L.id] = true;
               if (!indSeries[L.id]) {
-                indSeries[L.id] = chart.addLineSeries({
+                indSeries[L.id] = chart.addSeries(LightweightCharts.LineSeries, {
                   color: L.color, lineWidth: 1,
                   priceLineVisible: false, lastValueVisible: false,
                   crosshairMarkerVisible: false, title: L.title || "",
@@ -314,7 +350,7 @@
                   ? { color: L.color, title: L.title || "", lineVisible: false,
                       pointMarkersVisible: true, pointMarkersRadius: 1.6 }
                   : { color: L.color, title: L.title || "", lineVisible: true,
-                      pointMarkersVisible: false, lineWidth: 1 }
+                      pointMarkersVisible: false, lineWidth: 2 }
               );
               indSeries[L.id].setData(L.data || []);
             }
@@ -324,19 +360,18 @@
                 delete indSeries[id];
               }
             }
-            // RSI lives in the bottom band on its own overlay scale and swaps
-            // with the volume histogram (one bottom band on a phone screen).
+            // RSI in its own pane under the price; volume stays where it is.
             if (d.rsi) {
               if (!rsiSeries) {
-                rsiSeries = chart.addLineSeries({
-                  color: "#b18cf2", lineWidth: 1, priceScaleId: "rsi",
+                rsiSeries = chart.addSeries(LightweightCharts.LineSeries, {
+                  color: "#b18cf2", lineWidth: 2,
                   priceLineVisible: false, lastValueVisible: true,
                   crosshairMarkerVisible: false, title: "RSI 14",
-                });
-                chart.priceScale("rsi").applyOptions({ scaleMargins: { top: 0.78, bottom: 0 } });
+                }, RSI_PANE);
+                try { chart.panes()[RSI_PANE].setHeight(RSI_PANE_PX); } catch (e) {}
                 rsiGuides = [30, 70].map(function (lvl) {
                   return rsiSeries.createPriceLine({
-                    price: lvl, color: "#3a4452", lineWidth: 1,
+                    price: lvl, color: "rgba(148,163,184,0.35)", lineWidth: 1,
                     lineStyle: LightweightCharts.LineStyle.Dotted,
                     axisLabelVisible: false, title: "",
                   });
@@ -347,8 +382,11 @@
               try { chart.removeSeries(rsiSeries); } catch (e) {}
               rsiSeries = null;
               rsiGuides = [];
+              removeEmptyRsiPane();
             }
-            volSeries.applyOptions({ visible: d.showVolume !== false });
+            // Volume keeps its band whether or not RSI is on (it has its own
+            // pane now), unless the host explicitly turns it off.
+            volSeries.applyOptions({ visible: d.showVolume !== false || !!d.rsi });
           } catch (e) {
             post({ event: "error", message: "setIndicators: " + e });
           }
@@ -382,7 +420,7 @@
             // this did until 2026-07-29) draws the two ends identically.
             // Fall back to the side-derived form for older payloads.
             var up = (o.side === "LONG");
-            candleSeries.setMarkers(o.markers.map(function (m) {
+            markers.setMarkers(o.markers.map(function (m) {
               return {
                 time: m.time,
                 position: m.position || (up ? "belowBar" : "aboveBar"),
@@ -416,7 +454,7 @@
             });
             (o.segments || []).forEach(function (seg) {
               if (!seg.points || seg.points.length < 2) return;
-              var series = chart.addLineSeries({
+              var series = chart.addSeries(LightweightCharts.LineSeries, {
                 color: seg.color || "#f6c85f",
                 lineWidth: 2,
                 priceLineVisible: false,
@@ -432,17 +470,14 @@
             // even if it draws before setIndicators created the RSI series.
             (o.rsiSegments || []).forEach(function (seg) {
               if (!seg.points || seg.points.length < 2) return;
-              try {
-                chart.priceScale("rsi").applyOptions({ scaleMargins: { top: 0.78, bottom: 0 } });
-              } catch (e) {}
-              var series = chart.addLineSeries({
+              var series = chart.addSeries(LightweightCharts.LineSeries, {
                 color: seg.color || "#f6c85f",
                 lineWidth: 2,
-                priceScaleId: "rsi",
                 priceLineVisible: false,
                 lastValueVisible: false,
                 crosshairMarkerVisible: false,
-              });
+              }, RSI_PANE);
+              try { chart.panes()[RSI_PANE].setHeight(RSI_PANE_PX); } catch (e) {}
               series.setData(seg.points);
               alertSegments.push(series);
             });
@@ -456,7 +491,7 @@
               } catch (e) {}
             });
             if (o.markers && o.markers.length) {
-              candleSeries.setMarkers(o.markers.map(function (m) {
+              markers.setMarkers(o.markers.map(function (m) {
                 return {
                   time: m.time,
                   position: m.position === "above" ? "aboveBar" : "belowBar",
@@ -482,7 +517,7 @@
           dark = !!JSON.parse(s).dark;
           var t = theme();
           chart.applyOptions({
-            layout: { background: { color: t.bg }, textColor: t.text },
+            layout: { background: { color: t.bg }, textColor: t.text, panes: { separatorColor: t.border } },
             grid: { vertLines: { color: t.grid }, horzLines: { color: t.grid } },
             rightPriceScale: { borderColor: t.border },
             timeScale: { borderColor: t.border },
