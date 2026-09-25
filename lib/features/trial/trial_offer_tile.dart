@@ -86,7 +86,7 @@ class TrialOfferTile extends StatelessWidget {
                         'it work on your own account.',
                         style: TextStyle(
                           color: LuminColors.textSecondary,
-                          fontSize: 12.5,
+                          fontSize: 13,
                           height: 1.35,
                         ),
                       ),
@@ -97,7 +97,7 @@ class TrialOfferTile extends StatelessWidget {
                             'Start free trial',
                             style: TextStyle(
                               color: LuminColors.success,
-                              fontSize: 12.5,
+                              fontSize: 13,
                               fontWeight: FontWeight.w700,
                             ),
                           ),

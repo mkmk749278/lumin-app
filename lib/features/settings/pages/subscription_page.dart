@@ -761,7 +761,7 @@ class CurrentPlanCard extends StatelessWidget {
                 : 'Active — renews via Google Play',
             style: const TextStyle(
               color: LuminColors.textSecondary,
-              fontSize: 12.5,
+              fontSize: 13,
               height: 1.4,
             ),
           ),
@@ -781,7 +781,7 @@ class CurrentPlanCard extends StatelessWidget {
             icon: const Icon(Icons.open_in_new_rounded, size: 15),
             label: const Text(
               'Manage in Google Play',
-              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
             ),
           ),
         ],

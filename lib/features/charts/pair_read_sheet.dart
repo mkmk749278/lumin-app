@@ -226,7 +226,7 @@ class _LevelRow extends StatelessWidget {
             ),
           ]),
         ),
-        Text('${level.distPct.abs().toStringAsFixed(1)}% ${support ? 'below' : 'above'}',
+        Text(levelDistanceLabel(level.distPct, support: support),
             style: TextStyle(color: c, fontSize: 13, fontWeight: FontWeight.w700)),
       ]),
     );
@@ -392,4 +392,12 @@ class _Note extends StatelessWidget {
       child: Text(text, style: const TextStyle(color: LuminColors.textSecondary, fontSize: 14, height: 1.4)),
     );
   }
+}
+
+/// "0.8% below" — or "At price" when the level is within rounding of it.
+/// "0.0% below" read as a bug (UX review 2026-09-25).
+String levelDistanceLabel(double distPct, {required bool support}) {
+  final d = distPct.abs();
+  if (d < 0.05) return 'At price';
+  return '${d.toStringAsFixed(1)}% ${support ? 'below' : 'above'}';
 }

@@ -57,6 +57,21 @@ void main() {
     });
   });
 
+  group('UX review 2026-09-25', () {
+    test('one bold page title, not the thin w300 +1.5 tracking', () {
+      final t = theme.appBarTheme.titleTextStyle!;
+      expect(t.fontWeight, FontWeight.w700);
+      expect(t.fontSize, 22);
+    });
+
+    test('every platform has an animated page transition', () {
+      // The web default is no animation at all: a page just replaced the last.
+      for (final p in TargetPlatform.values) {
+        expect(theme.pageTransitionsTheme.builders[p], isNotNull, reason: '$p');
+      }
+    });
+  });
+
   group('component themes', () {
     // Derived rather than listed one by one: adding a reader here is what a
     // future "simplification" would have to defeat deliberately.

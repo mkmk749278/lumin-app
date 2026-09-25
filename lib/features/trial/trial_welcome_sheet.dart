@@ -186,7 +186,7 @@ class TrialWelcomeCard extends StatelessWidget {
                     'No card. No auto-charge.',
                     style: TextStyle(
                       color: LuminColors.textPrimary,
-                      fontSize: 13.5,
+                      fontSize: 14,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -197,7 +197,7 @@ class TrialWelcomeCard extends StatelessWidget {
                     'choose to subscribe.',
                     style: TextStyle(
                       color: LuminColors.textSecondary,
-                      fontSize: 12.5,
+                      fontSize: 13,
                       height: 1.4,
                     ),
                   ),
@@ -212,7 +212,7 @@ class TrialWelcomeCard extends StatelessWidget {
               'and switch it on.',
               style: TextStyle(
                 color: LuminColors.textMuted,
-                fontSize: 11.5,
+                fontSize: 12,
                 height: 1.4,
               ),
             ),
@@ -222,7 +222,7 @@ class TrialWelcomeCard extends StatelessWidget {
                 error!,
                 style: const TextStyle(
                   color: LuminColors.loss,
-                  fontSize: 12.5,
+                  fontSize: 13,
                   height: 1.4,
                 ),
               ),
@@ -269,7 +269,7 @@ class TrialWelcomeCard extends StatelessWidget {
                   'Maybe later',
                   style: TextStyle(
                     color: LuminColors.textSecondary,
-                    fontSize: 13.5,
+                    fontSize: 14,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -324,7 +324,7 @@ class _Benefit extends StatelessWidget {
                 body,
                 style: const TextStyle(
                   color: LuminColors.textSecondary,
-                  fontSize: 12.5,
+                  fontSize: 13,
                   height: 1.4,
                 ),
               ),

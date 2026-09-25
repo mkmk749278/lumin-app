@@ -266,6 +266,9 @@ class _PulsePageState extends State<PulsePage>
       physics: const AlwaysScrollableScrollPhysics(
         parent: BouncingScrollPhysics(),
       ),
+      // Breathing room under the tab bar (UX review 2026-09-25): the first
+      // card sat flush against the tabs and read as clipped.
+      padding: const EdgeInsets.only(top: LuminSpacing.md, bottom: LuminSpacing.xl),
       children: [
         if (!isLive) const PreviewBadge(),
         _RegimeBar(engine: data.engine),
@@ -1312,9 +1315,9 @@ class _PulseSkeleton extends StatelessWidget {
         physics: const AlwaysScrollableScrollPhysics(
           parent: BouncingScrollPhysics(),
         ),
-        padding: const EdgeInsets.symmetric(
-          horizontal: LuminSpacing.md,
-          vertical: LuminSpacing.sm,
+        // Same insets as the loaded list, so the swap does not jump.
+        padding: const EdgeInsets.fromLTRB(
+          LuminSpacing.lg, LuminSpacing.md, LuminSpacing.lg, LuminSpacing.xl,
         ),
         children: const [
           _PulseSkeletonCard(height: 92), // EngineStatus

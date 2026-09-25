@@ -122,4 +122,10 @@ void main() {
       }
     });
   });
+
+  test('a level within rounding of price reads "At price", not "0.0% below"', () {
+    expect(levelDistanceLabel(-0.02, support: true), 'At price');
+    expect(levelDistanceLabel(-0.8, support: true), '0.8% below');
+    expect(levelDistanceLabel(4.0, support: false), '4.0% above');
+  });
 }

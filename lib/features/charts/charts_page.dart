@@ -50,8 +50,7 @@ class ChartsPage extends StatefulWidget {
   State<ChartsPage> createState() => _ChartsPageState();
 }
 
-class _ChartsPageState extends State<ChartsPage>
-    implements ForegroundRefreshable, ScrollToTop {
+class _ChartsPageState extends State<ChartsPage> implements ForegroundRefreshable, ScrollToTop {
   /// The longest list in the app — the whole tradable perpetual universe —
   /// so a tap on the active tab returning it to the top matters most here.
   final ScrollController _listController = ScrollController();
@@ -160,80 +159,95 @@ class _ChartsPageState extends State<ChartsPage>
       backgroundColor: LuminColors.bgDeep,
       appBar: AppBar(
         backgroundColor: LuminColors.bgDeep,
-        title: const Text('Markets', style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -0.3)),
+        title: const Text('Markets'),
       ),
       body: ValueListenableBuilder<LiveFeedAccess?>(
         valueListenable: repo?.liveFeedAccess ?? ValueNotifier<LiveFeedAccess?>(null),
         builder: (context, access, _) {
           final lockedSymbols = <String>{
-            if (access != null && access.locked) for (final l in access.lockedItems) l.symbol,
+            if (access != null && access.locked)
+              for (final l in access.lockedItems) l.symbol,
           };
           final liveSymbols = {..._liveBySymbol.keys, ...lockedSymbols};
           return FutureBuilder<List<MarketTicker>>(
             future: _future,
-            builder: (context, snap) {
-              if (snap.connectionState == ConnectionState.waiting && !snap.hasData) {
-                return const _MarketsSkeleton();
-              }
-              if (snap.hasError) {
-                return _Error(onRetry: refreshFromForeground);
-              }
-              final all = snap.data ?? const <MarketTicker>[];
-              final searching = _query.isNotEmpty;
-              final rows = searching
-                  ? orderPairRows(searchRows(all, _query), liveSymbols)
-                  : segmentRows(all, _segment, favourites: _favourites, liveSymbols: liveSymbols);
-              return RefreshIndicator(
-                onRefresh: () {
-                  setState(() => _future = _load());
-                  _subscribeSignals();
-                  return _future;
-                },
-                child: CustomScrollView(
-                  controller: _listController,
-                  slivers: [
-                    SliverToBoxAdapter(
-                      child: _SearchField(onChanged: (v) => setState(() => _query = v.trim())),
-                    ),
-                    if (!searching) SliverToBoxAdapter(child: _MarketStrip(all: all, onOpen: _open)),
-                    if (!searching)
-                      SliverToBoxAdapter(
-                        child: _SegmentBar(
-                          selected: _segment,
-                          liveCount: liveSymbols.where((s) => all.any((r) => r.symbol == s)).length,
-                          onSelect: (s) => setState(() => _segment = s),
-                        ),
-                      ),
-                    SliverToBoxAdapter(child: _ColumnHeader(searching: searching, segment: _segment)),
-                    if (rows.isEmpty)
-                      SliverFillRemaining(
-                        hasScrollBody: false,
-                        child: _Empty(segment: searching ? null : _segment),
-                      )
-                    else
-                      SliverList.builder(
-                        itemCount: rows.length,
-                        itemBuilder: (_, i) {
-                          final r = rows[i];
-                          return _PairRow(
-                            key: ValueKey(r.symbol),
-                            t: r,
-                            signal: _liveBySymbol[r.symbol],
-                            locked: lockedSymbols.contains(r.symbol),
-                            favourite: _favourites.contains(r.symbol),
-                            spark: _sparks.watch(r.symbol),
-                            onTap: _open,
-                            onStar: _toggleFavourite,
-                          );
-                        },
-                      ),
-                    const SliverToBoxAdapter(child: SizedBox(height: LuminSpacing.xl)),
-                  ],
-                ),
-              );
-            },
+            // Cross-fade skeleton → board (UX review 2026-09-25).
+            builder: (context, snap) => AnimatedSwitcher(
+              duration: const Duration(milliseconds: 200),
+              switchInCurve: Curves.easeOut,
+              switchOutCurve: Curves.easeIn,
+              child: _board(context, snap, liveSymbols, lockedSymbols),
+            ),
           );
         },
+      ),
+    );
+  }
+
+  Widget _board(
+    BuildContext context,
+    AsyncSnapshot<List<MarketTicker>> snap,
+    Set<String> liveSymbols,
+    Set<String> lockedSymbols,
+  ) {
+    if (snap.connectionState == ConnectionState.waiting && !snap.hasData) {
+      return const _MarketsSkeleton(key: ValueKey('markets-skeleton'));
+    }
+    if (snap.hasError) {
+      return KeyedSubtree(key: const ValueKey('markets-error'), child: _Error(onRetry: refreshFromForeground));
+    }
+    final all = snap.data ?? const <MarketTicker>[];
+    final searching = _query.isNotEmpty;
+    final rows = searching
+        ? orderPairRows(searchRows(all, _query), liveSymbols)
+        : segmentRows(all, _segment, favourites: _favourites, liveSymbols: liveSymbols);
+    return RefreshIndicator(
+      key: const ValueKey('markets-data'),
+      onRefresh: () {
+        setState(() => _future = _load());
+        _subscribeSignals();
+        return _future;
+      },
+      child: CustomScrollView(
+        controller: _listController,
+        slivers: [
+          SliverToBoxAdapter(
+            child: _SearchField(onChanged: (v) => setState(() => _query = v.trim())),
+          ),
+          if (!searching) SliverToBoxAdapter(child: _MarketStrip(all: all, onOpen: _open)),
+          if (!searching)
+            SliverToBoxAdapter(
+              child: _SegmentBar(
+                selected: _segment,
+                liveCount: liveSymbols.where((s) => all.any((r) => r.symbol == s)).length,
+                onSelect: (s) => setState(() => _segment = s),
+              ),
+            ),
+          SliverToBoxAdapter(child: _ColumnHeader(searching: searching, segment: _segment)),
+          if (rows.isEmpty)
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: _Empty(segment: searching ? null : _segment),
+            )
+          else
+            SliverList.builder(
+              itemCount: rows.length,
+              itemBuilder: (_, i) {
+                final r = rows[i];
+                return _PairRow(
+                  key: ValueKey(r.symbol),
+                  t: r,
+                  signal: _liveBySymbol[r.symbol],
+                  locked: lockedSymbols.contains(r.symbol),
+                  favourite: _favourites.contains(r.symbol),
+                  spark: _sparks.watch(r.symbol),
+                  onTap: _open,
+                  onStar: _toggleFavourite,
+                );
+              },
+            ),
+          const SliverToBoxAdapter(child: SizedBox(height: LuminSpacing.xl)),
+        ],
       ),
     );
   }
@@ -346,14 +360,17 @@ class _MajorCard extends StatelessWidget {
                   CoinIcon(symbol: t.symbol, size: 22),
                   const SizedBox(width: 8),
                   Text(baseAsset(t.symbol),
-                      style: const TextStyle(color: LuminColors.textSecondary, fontWeight: FontWeight.w700, fontSize: 13)),
+                      style:
+                          const TextStyle(color: LuminColors.textSecondary, fontWeight: FontWeight.w700, fontSize: 13)),
                 ]),
                 Text(formatMarketPrice(t.lastPrice),
                     maxLines: 1,
                     overflow: TextOverflow.fade,
                     softWrap: false,
                     style: const TextStyle(
-                        color: LuminColors.textPrimary, fontWeight: FontWeight.w800, fontSize: 16,
+                        color: LuminColors.textPrimary,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 16,
                         fontFeatures: [FontFeature.tabularFigures()])),
                 Text(formatChangePct(t.changePct),
                     style: TextStyle(color: c, fontWeight: FontWeight.w700, fontSize: 12)),
@@ -384,15 +401,18 @@ class _BreadthCard extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           const Text('MARKET',
-              style: TextStyle(color: LuminColors.textMuted, fontWeight: FontWeight.w700, fontSize: 11, letterSpacing: 1)),
-          Text(b.mood, style: const TextStyle(color: LuminColors.textPrimary, fontWeight: FontWeight.w800, fontSize: 16)),
+              style:
+                  TextStyle(color: LuminColors.textMuted, fontWeight: FontWeight.w700, fontSize: 11, letterSpacing: 1)),
+          Text(b.mood,
+              style: const TextStyle(color: LuminColors.textPrimary, fontWeight: FontWeight.w800, fontSize: 16)),
           ClipRRect(
             borderRadius: BorderRadius.circular(4),
             child: SizedBox(
               height: 6,
               child: Row(children: [
                 Expanded(flex: (b.upShare * 1000).round().clamp(1, 999), child: Container(color: LuminColors.success)),
-                Expanded(flex: ((1 - b.upShare) * 1000).round().clamp(1, 999), child: Container(color: LuminColors.loss)),
+                Expanded(
+                    flex: ((1 - b.upShare) * 1000).round().clamp(1, 999), child: Container(color: LuminColors.loss)),
               ]),
             ),
           ),
@@ -460,9 +480,7 @@ class _SegmentChip extends StatelessWidget {
           color: selected ? LuminColors.accent : LuminColors.bgCard,
           borderRadius: BorderRadius.circular(LuminRadii.pill),
           border: Border.all(color: selected ? LuminColors.accent : LuminColors.cardBorder),
-          boxShadow: selected
-              ? [BoxShadow(color: LuminColors.accent.withValues(alpha: 0.35), blurRadius: 14)]
-              : null,
+          boxShadow: selected ? [BoxShadow(color: LuminColors.accent.withValues(alpha: 0.35), blurRadius: 14)] : null,
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(icon, size: 16, color: selected ? LuminColors.bgDeep : LuminColors.textSecondary),
@@ -549,7 +567,8 @@ class _PairRow extends StatelessWidget {
                             TextSpan(text: mult, style: const TextStyle(color: LuminColors.textMuted, fontSize: 12)),
                           TextSpan(
                             text: baseAsset(t.symbol),
-                            style: const TextStyle(color: LuminColors.textPrimary, fontWeight: FontWeight.w800, fontSize: 15),
+                            style: const TextStyle(
+                                color: LuminColors.textPrimary, fontWeight: FontWeight.w800, fontSize: 15),
                           ),
                           const TextSpan(text: ' /USDT', style: TextStyle(color: LuminColors.textMuted, fontSize: 11)),
                         ]),
@@ -567,7 +586,7 @@ class _PairRow extends StatelessWidget {
                   ]),
                   const SizedBox(height: 3),
                   Text(formatQuoteVolume(t.quoteVolume),
-                      style: const TextStyle(color: LuminColors.textMuted, fontSize: 11.5, fontWeight: FontWeight.w600)),
+                      style: const TextStyle(color: LuminColors.textMuted, fontSize: 12, fontWeight: FontWeight.w600)),
                 ],
               ),
             ),
@@ -584,7 +603,9 @@ class _PairRow extends StatelessWidget {
                   Text(formatMarketPrice(t.lastPrice),
                       maxLines: 1,
                       style: const TextStyle(
-                          color: LuminColors.textPrimary, fontWeight: FontWeight.w700, fontSize: 14,
+                          color: LuminColors.textPrimary,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14,
                           fontFeatures: [FontFeature.tabularFigures()])),
                   const SizedBox(height: 4),
                   Container(
@@ -594,7 +615,10 @@ class _PairRow extends StatelessWidget {
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(formatChangePct(t.changePct),
-                        style: TextStyle(color: c, fontWeight: FontWeight.w800, fontSize: 12,
+                        style: TextStyle(
+                            color: c,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 12,
                             fontFeatures: const [FontFeature.tabularFigures()])),
                   ),
                 ],
@@ -640,8 +664,7 @@ class _LiveBadge extends StatelessWidget {
           Icon(Icons.lock_rounded, size: 11, color: color),
           const SizedBox(width: 3),
         ],
-        Text(text,
-            style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 0.4)),
+        Text(text, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 0.4)),
       ]),
     );
   }
@@ -660,7 +683,11 @@ class _Empty extends StatelessWidget {
           'No favourites yet',
           'Tap the ☆ on any pair to keep it here.'
         ),
-      MarketSegment.live => (Icons.bolt_rounded, 'No live signals right now', 'Pairs with a live Lumin signal show up here.'),
+      MarketSegment.live => (
+          Icons.bolt_rounded,
+          'No live signals right now',
+          'Pairs with a live Lumin signal show up here.'
+        ),
       _ => (Icons.show_chart_rounded, 'Nothing here right now', 'Pull down to refresh.'),
     };
     return Padding(
@@ -697,7 +724,7 @@ class _Error extends StatelessWidget {
 
 /// Skeleton in the shape of the board: the strip, the tabs, then rows.
 class _MarketsSkeleton extends StatelessWidget {
-  const _MarketsSkeleton();
+  const _MarketsSkeleton({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -713,7 +740,9 @@ class _MarketsSkeleton extends StatelessWidget {
             _box(width: 150, height: 80),
           ]),
           const SizedBox(height: 16),
-          Row(children: [for (var i = 0; i < 4; i++) ...[_box(width: 72, height: 32), const SizedBox(width: 8)]]),
+          Row(children: [
+            for (var i = 0; i < 4; i++) ...[_box(width: 72, height: 32), const SizedBox(width: 8)]
+          ]),
           const SizedBox(height: 20),
           for (var i = 0; i < 9; i++)
             Padding(

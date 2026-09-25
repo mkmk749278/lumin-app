@@ -27,8 +27,7 @@ class AlertsTab extends StatefulWidget {
   State<AlertsTab> createState() => AlertsTabState();
 }
 
-class AlertsTabState extends State<AlertsTab>
-    with AutomaticKeepAliveClientMixin {
+class AlertsTabState extends State<AlertsTab> with AutomaticKeepAliveClientMixin {
   /// Drives the alert feed so Pulse can hand a tap on its own active tab
   /// through to whichever top tab is in front. Attached to the populated
   /// list only; the empty state is one screen tall and has nowhere to go.
@@ -54,8 +53,7 @@ class AlertsTabState extends State<AlertsTab>
   List<MarketAlert> _filtered(List<MarketAlert> alerts) {
     return [
       for (final a in alerts)
-        if ((_familyFilter == null ||
-                (_families[_familyFilter]?.contains(a.alertType) ?? true)) &&
+        if ((_familyFilter == null || (_families[_familyFilter]?.contains(a.alertType) ?? true)) &&
             (_tfFilter == null || a.timeframe == _tfFilter))
           a,
     ];
@@ -145,10 +143,23 @@ class AlertsTabState extends State<AlertsTab>
   Widget build(BuildContext context) {
     super.build(context);
     final isLive = AppConfigScope.of(context).repo.isLive;
+    // Cross-fade between skeleton / empty / feed, as the Dashboard tab beside
+    // it already does — a hard cut from shimmer to cards reads as a flicker
+    // (UX review 2026-09-25).
+    final alerts = _alerts;
+    final state = alerts == null ? (_streamError != null ? 'error' : 'loading') : (alerts.isEmpty ? 'empty' : 'data');
     return RefreshIndicator(
       color: LuminColors.accent,
       onRefresh: _refresh,
-      child: _buildBody(isLive: isLive),
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 200),
+        switchInCurve: Curves.easeOut,
+        switchOutCurve: Curves.easeIn,
+        child: KeyedSubtree(
+          key: ValueKey('alerts-$state'),
+          child: _buildBody(isLive: isLive),
+        ),
+      ),
     );
   }
 
@@ -324,9 +335,7 @@ class _AlertCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = _biasColor();
-    final label = alert.symbol.endsWith('USDT')
-        ? alert.symbol.substring(0, alert.symbol.length - 4)
-        : alert.symbol;
+    final label = alert.symbol.endsWith('USDT') ? alert.symbol.substring(0, alert.symbol.length - 4) : alert.symbol;
     return LuminCard(
       child: InkWell(
         borderRadius: BorderRadius.circular(LuminRadii.sm),

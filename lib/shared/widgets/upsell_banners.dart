@@ -222,7 +222,7 @@ class _BannerCard extends StatelessWidget {
                         subtitle,
                         style: const TextStyle(
                           color: LuminColors.textSecondary,
-                          fontSize: 12.5,
+                          fontSize: 13,
                           height: 1.35,
                         ),
                       ),
@@ -233,7 +233,7 @@ class _BannerCard extends StatelessWidget {
                             cta,
                             style: TextStyle(
                               color: accent,
-                              fontSize: 12.5,
+                              fontSize: 13,
                               fontWeight: FontWeight.w700,
                             ),
                           ),
@@ -307,7 +307,7 @@ extension on _BannerCard {
                   cta,
                   style: TextStyle(
                     color: accent,
-                    fontSize: 12.5,
+                    fontSize: 13,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
