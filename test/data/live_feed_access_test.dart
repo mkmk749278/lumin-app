@@ -49,4 +49,33 @@ void main() {
     expect(a.isFreeWindow, isFalse);
     expect(a.daysLeft(DateTime.now().toUtc()), 0);
   });
+
+  test('masked live cards parse; malformed rows are dropped, not crashed on', () {
+    final a = LiveFeedAccess.fromSignalsJson({
+      'live_locked': true,
+      'locked_open_count': 2,
+      'locked_items': [
+        {
+          'signal_id': 's1',
+          'symbol': 'BTCUSDT',
+          'agent_name': 'Trend Rider',
+          'quality_tier': 'A+',
+          'confidence': 82,
+          'minutes_ago': 4,
+        },
+        {'symbol': 'no id'},
+      ],
+      'live_access': {'allowed': false, 'reason': 'guest'},
+    })!;
+    expect(a.lockedItems, hasLength(1));
+    expect(a.lockedItems.single.symbol, 'BTCUSDT');
+    expect(a.lockedItems.single.minutesAgo, 4);
+  });
+
+  test('an engine without masked cards parses to an empty list', () {
+    final a = LiveFeedAccess.fromSignalsJson({
+      'live_access': {'allowed': false, 'reason': 'guest'},
+    })!;
+    expect(a.lockedItems, isEmpty);
+  });
 }
