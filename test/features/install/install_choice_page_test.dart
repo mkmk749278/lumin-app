@@ -26,43 +26,43 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
+  // 2026-09-25 (owner: "guest login without asking anything"): the property
+  // this group protects — an ad visitor meets the install offer without
+  // signing in — now holds through guest mode rather than a first-run page.
+  // The gate signs a visitor in as an anonymous guest and opens NavShell,
+  // and NavShell mounts [InstallBanner].  So the guard follows the property:
+  // the gate must enter as a guest BEFORE it ever shows the phone page, and
+  // NavShell must still mount the banner.
   group('the offer is reachable without signing in', () {
-    late String gateBody;
+    late String authGate;
+    late String shell;
 
     setUpAll(() {
-      final main = File('lib/main.dart');
-      expect(main.existsSync(), isTrue);
-      final text = main.readAsStringSync();
-      final start = text.indexOf('class _FirstRunGateState');
-      final end = text.indexOf('enum _OnboardingState');
+      final text = File('lib/main.dart').readAsStringSync();
+      final start = text.indexOf('class _AuthGateState');
       expect(start, greaterThan(-1),
-          reason: 'the first-run gate moved; this guard must follow it');
-      expect(end, greaterThan(start));
-      gateBody = text.substring(start, end);
+          reason: 'the auth gate moved; this guard must follow it');
+      authGate = text.substring(start);
+      shell = File('lib/app/nav_shell.dart').readAsStringSync();
     });
 
-    test('the first-run gate renders the install choice at all', () {
+    test('the auth gate enters as a guest, not at the phone page', () {
+      final guestAt = authGate.indexOf('_enterAsGuest(auth)');
+      final phoneAt = authGate.indexOf('return const PhoneSignInPage()');
+      expect(guestAt, greaterThan(-1),
+          reason: 'Phone-OTP sign-in is the single biggest drop-off in the '
+              'flow. A visitor must reach the app, and the install offer in '
+              'it, without one.');
+      expect(phoneAt, greaterThan(-1));
       expect(
-        gateBody.contains('InstallChoicePage('),
+        authGate.contains('if (_guestFailed) return const PhoneSignInPage();'),
         isTrue,
-        reason: 'The offer is only useful in front of sign-in. If it is '
-            'reachable only from inside NavShell it is invisible to every '
-            'visitor arriving from an ad — which is the bug this page '
-            'exists to fix.',
+        reason: 'the phone page is only the fallback when guest sign-in fails',
       );
     });
 
-    test('it is rendered BEFORE the auth gate, not after it', () {
-      final offerAt = gateBody.indexOf('InstallChoicePage(');
-      final authAt = gateBody.indexOf('_AuthGate()');
-      expect(authAt, greaterThan(-1),
-          reason: 'the gate no longer routes to _AuthGate; re-derive this');
-      expect(
-        offerAt,
-        lessThan(authAt),
-        reason: 'Phone-OTP sign-in is the single biggest drop-off in the '
-            'flow. An install offer behind it reaches almost nobody.',
-      );
+    test('NavShell still mounts the install banner', () {
+      expect(shell.contains('InstallBanner('), isTrue);
     });
   });
 

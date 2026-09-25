@@ -26,6 +26,8 @@ import '../../data/app_config.dart';
 import '../../data/repository.dart';
 import '../agents/agents_page.dart';
 import '../auth/pages/phone_signin_page.dart';
+import '../auth/widgets/account_required.dart';
+import '../../app/nav_shell.dart';
 import '../../shared/platform_input.dart';
 import '../../shared/tokens.dart';
 import '../../shared/widgets/free_tier_gate.dart';
@@ -73,6 +75,10 @@ class _SettingsPageState extends State<SettingsPage> implements ScrollToTop {
 
   @override
   Widget build(BuildContext context) {
+    // Guest mode (owner, 2026-09-25): a visitor browsing without an account
+    // gets one "create account" row in place of the account settings, and
+    // every row that would open a per-user page opens sign-up instead.
+    final guest = isGuestSession(context);
     return Scaffold(
       appBar: AppBar(title: const Text('Menu')),
       body: ListView(
@@ -83,6 +89,14 @@ class _SettingsPageState extends State<SettingsPage> implements ScrollToTop {
           SettingsSection(
             title: 'ACCOUNT',
             rows: [
+              if (guest)
+                SettingsRow(
+                  icon: Icons.person_add_alt_1_outlined,
+                  label: 'Create free account',
+                  subtitle: 'Phone number only — 3 days of live signals free',
+                  onTap: () => openCreateAccount(context),
+                ),
+              if (!guest) ...[
               SettingsRow(
                 icon: Icons.person_outline,
                 label: 'Profile',
@@ -97,10 +111,11 @@ class _SettingsPageState extends State<SettingsPage> implements ScrollToTop {
                 builder: (context, _, __) {
                   final tier = AppConfigScope.of(context).tier;
                   final subtitle = switch (tierRank(tier)) {
-                    >= 3 => 'All Access — every feature unlocked',
-                    2 => 'Auto plan — hands-off auto-trading',
-                    1 => 'Assist plan — one-tap trades',
-                    _ => 'Free — upgrade to automate trades',
+                    >= 4 => 'All Access — every feature unlocked',
+                    3 => 'Auto plan — hands-off auto-trading',
+                    2 => 'Assist plan — one-tap trades',
+                    1 => 'Signals plan — live signals',
+                    _ => 'Free — upgrade for live signals',
                   };
                   return SettingsRow(
                     icon: Icons.workspace_premium_outlined,
@@ -117,6 +132,7 @@ class _SettingsPageState extends State<SettingsPage> implements ScrollToTop {
                   );
                 },
               ),
+              ],
               SettingsRow(
                 icon: Icons.notifications_outlined,
                 label: 'Notifications',
@@ -136,7 +152,11 @@ class _SettingsPageState extends State<SettingsPage> implements ScrollToTop {
                 icon: Icons.auto_mode,
                 label: 'Auto-trade & execution',
                 subtitle: 'Sizing, leverage, exchange connection, preferences',
-                onTap: () => _push(context, const TradingSettingsPage()),
+                onTap: () => _push(
+                  context,
+                  const TradingSettingsPage(),
+                  needsAccount: true,
+                ),
               ),
             ],
           ),
@@ -184,12 +204,17 @@ class _SettingsPageState extends State<SettingsPage> implements ScrollToTop {
                 icon: Icons.person_add_alt_1_outlined,
                 label: 'Invite & earn',
                 subtitle: 'Earn rewards when friends join — they get a discount',
-                onTap: () => _push(context, const ReferralPage()),
+                onTap: () => _push(
+                  context,
+                  const ReferralPage(),
+                  needsAccount: true,
+                ),
               ),
+              if (!guest) ...[
               SettingsRow(
                 icon: Icons.logout,
                 label: 'Sign out',
-                subtitle: 'You will verify your phone again next launch',
+                subtitle: 'You can keep browsing as a guest',
                 destructive: true,
                 onTap: () => _signOut(context),
               ),
@@ -207,6 +232,7 @@ class _SettingsPageState extends State<SettingsPage> implements ScrollToTop {
                 destructive: true,
                 onTap: () => _deleteAccount(context),
               ),
+              ],
             ],
           ),
           const SizedBox(height: LuminSpacing.lg),
@@ -216,16 +242,41 @@ class _SettingsPageState extends State<SettingsPage> implements ScrollToTop {
           // They used to occupy the entire first screen of this tab, so a user
           // who opened the Menu to change a setting saw two adverts and no
           // settings (handoff §6 / §27).
-          const UpgradeBanner(slot: 'menu'),
-          const InviteBanner(slot: 'menu'),
+          if (!guest) ...[
+            const UpgradeBanner(slot: 'menu'),
+            const InviteBanner(slot: 'menu'),
+          ],
           const SizedBox(height: LuminSpacing.xl),
         ],
       ),
     );
   }
 
-  void _push(BuildContext context, Widget page) {
+  void _push(BuildContext context, Widget page, {bool needsAccount = false}) {
+    if (needsAccount && isGuestSession(context)) {
+      openCreateAccount(context);
+      return;
+    }
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
+  }
+
+  /// After sign-out or account deletion, drop back into the app as a guest
+  /// (owner, 2026-09-25: nobody is asked for anything to browse).  If guest
+  /// sign-in is unavailable, fall back to the phone page as before.
+  Future<void> _continueAsGuest(BuildContext context) async {
+    final auth = AppConfigScope.of(context).auth;
+    var guestOk = false;
+    try {
+      await auth?.signInAsGuest();
+      guestOk = auth != null;
+    } catch (_) {}
+    if (!context.mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(
+        builder: (_) => guestOk ? const NavShell() : const PhoneSignInPage(),
+      ),
+      (_) => false,
+    );
   }
 
   Future<void> _signOut(BuildContext context) async {
@@ -238,9 +289,9 @@ class _SettingsPageState extends State<SettingsPage> implements ScrollToTop {
           style: TextStyle(color: LuminColors.textPrimary),
         ),
         content: const Text(
-          'You\'ll need to verify your phone again on next launch.  Your '
-          'Binance keys stay on the device — you can pick up where you '
-          'left off when you sign back in with the same phone.',
+          'You can keep browsing as a guest.  Your Binance keys stay on '
+          'the device — you can pick up where you left off when you sign '
+          'back in with the same phone.',
           style: TextStyle(color: LuminColors.textSecondary),
         ),
         actions: [
@@ -269,10 +320,7 @@ class _SettingsPageState extends State<SettingsPage> implements ScrollToTop {
     final scope = AppConfigScope.of(context);
     await scope.resetConnection();
     if (!context.mounted) return;
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const PhoneSignInPage()),
-      (_) => false,
-    );
+    await _continueAsGuest(context);
   }
 
   Future<void> _deleteAccount(BuildContext context) async {
@@ -304,11 +352,9 @@ class _SettingsPageState extends State<SettingsPage> implements ScrollToTop {
       // ``resetConnection`` is the same path the sign-out flow uses.
       await scope.resetConnection();
       if (!context.mounted) return;
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const PhoneSignInPage()),
-        (_) => false,
-      );
-      ScaffoldMessenger.of(context).showSnackBar(
+      final messenger = ScaffoldMessenger.of(context);
+      await _continueAsGuest(context);
+      messenger.showSnackBar(
         const SnackBar(
           content: Text('Account deleted. You can sign up again any time.'),
           duration: Duration(seconds: 4),

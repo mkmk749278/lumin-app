@@ -358,8 +358,8 @@ class UpgradeBannerCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (tierRank(tier) >= 2) return const SizedBox.shrink();
-    final isAssist = tierRank(tier) == 1;
+    if (tierRank(tier) >= 3) return const SizedBox.shrink();
+    final isAssist = tierRank(tier) == 2;
     return _BannerCard(
       icon: Icons.workspace_premium_rounded,
       accent: LuminColors.accent,
@@ -367,8 +367,8 @@ class UpgradeBannerCard extends StatelessWidget {
       subtitle: isAssist
           ? 'Upgrade to Auto — the engine trades every eligible signal for '
               'you, 24/7, on your own exchange keys.'
-          : 'Every signal is free. Add one-tap trading with Assist, or '
-              'hands-off Auto — all on your own exchange keys.',
+          : 'Add one-tap trading with Assist, or hands-off Auto — all on '
+              'your own exchange keys.',
       cta: isAssist ? 'Upgrade to Auto' : 'See plans',
       onTap: onSeePlans,
       onDismiss: onDismiss,
@@ -405,6 +405,9 @@ class _UpgradeBannerState extends State<UpgradeBanner> {
   @override
   Widget build(BuildContext context) {
     final scope = AppConfigScope.of(context);
+    // A guest has no account to put a plan on; the paywall strip and the
+    // account prompts carry the invitation instead.
+    if (scope.auth?.isGuest ?? false) return const SizedBox.shrink();
     return ValueListenableBuilder<Set<String>>(
       valueListenable: upsellDismissed,
       builder: (context, dismissed, _) {
@@ -489,14 +492,18 @@ class _InviteBannerState extends State<InviteBanner> {
     hydrateUpsellDismissals();
   }
 
+  bool get _guest => AppConfigScope.of(context).auth?.isGuest ?? false;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _future ??= _referralStats(AppConfigScope.of(context).repo);
+    // Referral stats are per-user; a guest would only be refused.
+    if (!_guest) _future ??= _referralStats(AppConfigScope.of(context).repo);
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_guest) return const SizedBox.shrink();
     return ValueListenableBuilder<Set<String>>(
       valueListenable: upsellDismissed,
       builder: (context, dismissed, _) => dismissed.contains('invite')

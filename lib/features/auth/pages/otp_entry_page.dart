@@ -33,9 +33,10 @@
 /// rebuilt the navigator from scratch and the user was simply logged in —
 /// the report that surfaced this.
 ///
-/// So: [_watchAuthState] completes the flow on *any* sign-in regardless of
-/// which callback produced it, and [_submit] never reports a failure while
-/// [AuthService.currentUser] is non-null.
+/// So: [_watchAuthState] completes the flow on *any* account sign-in
+/// regardless of which callback produced it, and [_submit] never reports a
+/// failure while [AuthService.accountUser] is non-null.  (An anonymous guest
+/// session does not count — it was signed in before this page opened.)
 ///
 /// "Resend" re-issues the OTP on the same channel.  Telegram re-uses
 /// [AuthService.startTelegramSignIn].  SMS re-invokes the same call
@@ -221,7 +222,10 @@ class _OtpEntryPageState extends State<OtpEntryPage> {
     final auth = AppConfigScope.maybeOf(context)?.auth;
     if (auth == null) return;
     _watchingAuth = true;
-    _authSub = auth.authStateChanges.listen((user) {
+    // accountChanges, not authStateChanges: a guest (anonymous session) is
+    // already "signed in" when this page opens, and must not complete a
+    // phone sign-in it never made.
+    _authSub = auth.accountChanges.listen((user) {
       if (user == null || !mounted) return;
       _completeSignIn();
     });
@@ -335,7 +339,7 @@ class _OtpEntryPageState extends State<OtpEntryPage> {
       if (!mounted) return;
       switch (classifyOtpFailure(
         code: e.code,
-        signedIn: auth.currentUser != null,
+        signedIn: auth.accountUser != null,
       )) {
         case OtpFailureAction.completeSignIn:
           // The exchange failed but the account is already authenticated —

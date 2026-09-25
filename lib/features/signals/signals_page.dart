@@ -9,6 +9,9 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+
+import '../auth/widgets/account_required.dart';
+import 'live_signals_banner.dart';
 import 'package:http/http.dart' as http;
 
 import '../../app/foreground_refresh.dart';
@@ -491,7 +494,13 @@ class _SignalsPageState extends State<SignalsPage>
           // Automate-these-signals upsell — free/Assist users only; hides
           // itself at Auto tier.  The signals feed is the strongest
           // conversion surface, so the pitch sits right above the list.
-          const UpgradeBanner(slot: 'signals', compact: true),
+          // Live-signal paywall strip (engine truth, 2026-09-25): why the
+          // feed has no live signals for this caller, and how to get them.
+          const LiveSignalsBanner(),
+          // Automate-these-signals upsell — not for a guest, who has no
+          // account to put a plan on yet.
+          if (!isGuestSession(context))
+            const UpgradeBanner(slot: 'signals', compact: true),
           _FilterRow(current: _filter, onChanged: _setFilter),
           if (_filter == _SignalFilter.closed) ...[
             const SizedBox(height: LuminSpacing.sm),

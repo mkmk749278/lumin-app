@@ -40,7 +40,7 @@ class WebBillingService {
   final Future<bool> Function(Uri) _launch;
 
   /// Tier precedence — a higher tier satisfies a lower purchase check.
-  static const List<String> _order = ['free', 'assist', 'auto', 'owner'];
+  static const List<String> _order = ['free', 'signals', 'assist', 'auto', 'owner'];
 
   Future<WebBillingConfig> loadConfig() => repo.fetchWebBillingConfig();
 
@@ -93,8 +93,8 @@ class WebBillingService {
   bool _tierSatisfies(String have, String want) {
     if (have == want) return true;
     if (have == 'owner') return true;
-    // 'paid' is the legacy single paid tier — counts for either paid SKU.
-    if (have == 'paid') return want == 'assist' || want == 'auto';
+    // 'paid' is the legacy single paid tier — counts for every paid SKU.
+    if (have == 'paid') return want == 'signals' || want == 'assist' || want == 'auto';
     final h = _order.indexOf(have);
     final w = _order.indexOf(want);
     return h >= 0 && w >= 0 && h >= w;

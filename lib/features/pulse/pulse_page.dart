@@ -10,6 +10,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../auth/widgets/account_required.dart';
+
 import '../../app/foreground_refresh.dart';
 import '../../app/scroll_to_top.dart';
 import '../../data/app_config.dart';
@@ -276,8 +278,12 @@ class _PulsePageState extends State<PulsePage>
         const TrialGate(),
         // Subscription upsell on the landing tab — auto-hides at Auto tier.
         const UpgradeBanner(slot: 'pulse'),
-        _TodayPnlCard(userPnl: data.userPnl),
-        const SizedBox(height: LuminSpacing.md),
+        // A guest has no paper book or trades; "your P&L" would be a card of
+        // zeros that invites a tap into pages that need an account.
+        if (!isGuestSession(context)) ...[
+          _TodayPnlCard(userPnl: data.userPnl),
+          const SizedBox(height: LuminSpacing.md),
+        ],
         // The RECORDED delivered-signal book, directly under the user's own.
         // Their money first, the product's record second — and for a user who
         // has never traded (where _TodayPnlCard renders "Trading not enabled

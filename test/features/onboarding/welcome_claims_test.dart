@@ -45,12 +45,18 @@ void main() {
     // 2026-09-24 audit: "Every open trade is placed with a stop-loss" was
     // absolute where the product is not — a user's own trade may be
     // entry-only — and never said a fast market can move past a stop.
+    //
+    // 2026-09-25: the welcome became one screen (owner: "no more scary
+    // warnings") and the safety slide carrying this claim is gone, so today
+    // the welcome makes no stop-loss claim at all.  The rule still holds for
+    // the next edit: if one comes back, it comes back with its disclosure.
     expect(code, isNot(contains('Every open trade is placed')));
-    expect(code, contains('from a signal carries a stop-loss'));
-    expect(code, contains('can be larger than planned'));
-    expect(code, contains('yours to protect'));
     expect(RegExp(r'runaway loss', caseSensitive: false).hasMatch(code),
         isFalse);
+    if (code.contains('stop-loss')) {
+      expect(code, contains('can be larger than planned'));
+      expect(code, contains('yours to protect'));
+    }
   });
 
   test('the pair claim is a floor, not an exact figure', () {

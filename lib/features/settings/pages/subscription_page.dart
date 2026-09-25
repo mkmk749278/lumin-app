@@ -1,9 +1,11 @@
-/// Subscription page — two-tier auto-trade plans via Google Play Billing (B16).
+/// Subscription page — the paid plans via Google Play Billing.
 ///
-/// Signals + levels + analysis are FREE; the paywall is on trade automation:
-///   * Assist (₹1000/mo) — one-tap "take trade".
-///   * Auto   (₹2000/mo) — hands-off auto-execution.
-/// Telegram is banned in-region, so the bot paywall reaches no one.  Each
+/// Closed signals are FREE.  2026-09-25 (owner): LIVE signals need an
+/// account plus a plan, after 3 free days from sign-up:
+///   * Signals (₹499/mo)  — the live signal feed.
+///   * Assist  (₹1000/mo) — live signals + one-tap "take trade".
+///   * Auto    (₹2000/mo) — live signals + hands-off auto-execution.
+/// Each
 /// purchase is verified server-side by the engine
 /// (`POST /api/billing/play/verify`), the entitlement source of truth.  The
 /// paid feature is automation *software functionality* run on the user's own
@@ -28,13 +30,21 @@ import '../../../shared/widgets/lumin_card.dart';
 import '../../trial/trial_offer_tile.dart';
 import '../../../shared/widgets/page_skeleton.dart';
 
-/// Play Console subscription product ids (B16 two-tier model).  Keep in
-/// lockstep with the engine's GOOGLE_PLAY_ASSIST/AUTO_PRODUCT_IDS env.
-///   * Assist (₹1000/mo) — one-tap "take trade".
-///   * Auto   (₹2000/mo) — hands-off auto-execution.
+/// Play Console subscription product ids.  Keep in lockstep with the
+/// engine's GOOGLE_PLAY_{SIGNALS,ASSIST,AUTO}_PRODUCT_IDS env.
+///   * Signals (₹499/mo)  — the live signal feed (owner, 2026-09-25).
+///   * Assist  (₹1000/mo) — live signals + one-tap "take trade".
+///   * Auto    (₹2000/mo) — live signals + hands-off auto-execution.
+/// A product missing from Play Console is simply not returned by the store
+/// query, so its tile does not render; nothing here assumes it exists.
+const String kSignalsMonthlyId = 'lumin_signals_monthly';
 const String kAssistMonthlyId = 'lumin_assist_monthly';
 const String kAutoMonthlyId = 'lumin_auto_monthly';
-const Set<String> kSubscriptionProductIds = {kAssistMonthlyId, kAutoMonthlyId};
+const Set<String> kSubscriptionProductIds = {
+  kSignalsMonthlyId,
+  kAssistMonthlyId,
+  kAutoMonthlyId,
+};
 
 class SubscriptionPage extends StatefulWidget {
   const SubscriptionPage({super.key});
@@ -173,7 +183,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
         }
         products.add(pick);
       }
-      // Cheapest first so Assist (₹1000) renders above Auto (₹2000).
+      // Cheapest first: Signals (₹499), Assist (₹1000), Auto (₹2000).
       products.sort((a, b) => a.rawPrice.compareTo(b.rawPrice));
       if (mounted) {
         setState(() {
@@ -358,9 +368,10 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
             ),
             SizedBox(height: LuminSpacing.xs),
             Text(
-              'All signals, levels and analysis are free. Upgrade to '
-              'automate the trades — one-tap with Assist, fully hands-off '
-              'with Auto. Trades run on your own exchange keys.',
+              'Closed signals and their results are free. Live signals '
+              'need the Signals plan, and come with Assist and Auto too. '
+              'Assist adds one-tap trades; Auto trades hands-off on your '
+              'own exchange keys.',
               style: TextStyle(
                 color: LuminColors.textSecondary,
                 fontSize: 13,
@@ -380,29 +391,41 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header row — Free / Assist / Auto column labels.
+            // Header row — Free / Signals / Assist / Auto column labels.
             Row(
               children: const [
                 Expanded(flex: 5, child: SizedBox()),
                 Expanded(child: Center(child: _ColHead('FREE'))),
+                Expanded(child: Center(child: _ColHead('SIGNALS'))),
                 Expanded(child: Center(child: _ColHead('ASSIST'))),
                 Expanded(child: Center(child: _ColHead('AUTO'))),
               ],
             ),
             const SizedBox(height: LuminSpacing.sm),
-            _featureRow('Signals + entry / SL / TP', true, true, true),
-            _featureRow('Full 15-analyst breakdown', true, true, true),
-            _featureRow('Paper trading', true, true, true),
-            _featureRow('One-tap "take trade"', false, true, true),
-            _featureRow('Hands-off auto-execution', false, false, true),
-            _featureRow('Per-agent & risk controls', false, false, true),
+            _featureRow('Closed signals + results', true, true, true, true),
+            _featureRow('Live signals + entry / SL / TP', false, true, true, true),
+            _featureRow('Paper trading on live signals', false, true, true, true),
+            _featureRow('One-tap "take trade"', false, false, true, true),
+            _featureRow('Hands-off auto-execution', false, false, false, true),
+            _featureRow('Per-agent & risk controls', false, false, false, true),
+            const SizedBox(height: LuminSpacing.xs),
+            const Text(
+              'New accounts get 3 days of live signals free.',
+              style: TextStyle(color: LuminColors.textMuted, fontSize: 11),
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _featureRow(String label, bool free, bool assist, bool auto) {
+  Widget _featureRow(
+    String label,
+    bool free,
+    bool signals,
+    bool assist,
+    bool auto,
+  ) {
     Widget mark(bool on, Color onColor) => Center(
           child: Icon(
             on ? Icons.check_circle : Icons.remove_circle_outline,
@@ -425,6 +448,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
             ),
           ),
           Expanded(child: mark(free, LuminColors.success)),
+          Expanded(child: mark(signals, LuminColors.accent)),
           Expanded(child: mark(assist, LuminColors.accent)),
           Expanded(child: mark(auto, LuminColors.accent)),
         ],
@@ -466,11 +490,17 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
 
   Widget _planTile(ProductDetails product) {
     final isAuto = product.id == kAutoMonthlyId;
-    final label = isAuto ? 'Auto' : 'Assist';
+    final label = switch (product.id) {
+      kAutoMonthlyId => 'Auto',
+      kSignalsMonthlyId => 'Signals',
+      _ => 'Assist',
+    };
     const unit = '/ month';
-    final note = isAuto
-        ? 'Hands-off — every eligible signal auto-executed'
-        : 'One-tap — take any signal in a tap';
+    final note = switch (product.id) {
+      kAutoMonthlyId => 'Hands-off — every eligible signal auto-executed',
+      kSignalsMonthlyId => 'Live signals — entry, stop-loss and target as they fire',
+      _ => 'One-tap — take any signal in a tap',
+    };
     // Referral discount tile state: the price on `product` IS the offer's
     // first-phase (discounted) price straight from Play; the struck-out
     // base price gives the discount its reference point.
@@ -483,6 +513,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     // subscription — plan changes need Play-side proration).
     final subscribed = isPaidTier(_tier);
     final ownedProductId = switch ((_tier ?? '').toLowerCase()) {
+      'signals' => kSignalsMonthlyId,
       'assist' => kAssistMonthlyId,
       'auto' || 'paid' => kAutoMonthlyId,
       _ => null,
@@ -624,9 +655,10 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
       child: Text(
-        'Crypto trading carries substantial risk of loss. Assist and Auto '
+        'Crypto trading carries substantial risk of loss. Signals are '
+        'information, not financial advice. Assist and Auto '
         'are trade-automation tools that act on your own connected exchange '
-        'account with your own keys — not financial advice, and past results '
+        'account with your own keys, and past results '
         'do not guarantee future performance. You are responsible for your '
         'trades. Subscriptions are billed through Google Play and renew '
         'automatically until cancelled; manage or cancel anytime in Google '

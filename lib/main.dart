@@ -20,8 +20,6 @@ import 'data/notification_service.dart';
 import 'data/track_record_prefs.dart';
 import 'data/repository.dart';
 import 'features/auth/pages/phone_signin_page.dart';
-import 'features/install/install_choice_page.dart';
-import 'features/onboarding/pages/welcome_consent_page.dart';
 import 'features/onboarding/pages/welcome_page.dart';
 import 'firebase_options.dart';
 import 'shared/boot_failure.dart';
@@ -106,54 +104,33 @@ class LuminApp extends StatelessWidget {
   }
 }
 
-/// First-run gate — orchestrates the onboarding flow:
+/// First-run gate — ONE welcome screen, then the app.
 ///
-/// 1. **WelcomePage** — brand intro + value-prop + "Get Started"
-///    (shows once per device, persists via ``welcomeSeen`` flag)
-/// 2. **InstallChoicePage** — web only, and only when the browser is one
-///    we have an offer for: Android → Google Play, iOS → Add to Home
-///    Screen, everything else skipped entirely.  Added 2026-09-13 because
-///    the equivalent banner ([InstallBanner]) mounts inside [NavShell] —
-///    i.e. behind consent *and* behind Firebase phone sign-in — so a
-///    visitor arriving from a paid ad could never reach it.  It was
-///    wired, tested and deployed, and unreachable by the exact audience
-///    it was built for.  Placed after the welcome rather than before it
-///    so the offer arrives with one screen of context and still ahead of
-///    the two real drop-off points (the consent checkboxes and the SMS
-///    OTP); the welcome is a single tap.
-/// 3. **WelcomeConsentPage** — 3-checkbox legal acknowledgement
-///    (18+ / risk / not-advice; re-shows on consent-version bump)
-/// 4. **AuthGate → PhoneSignInPage / NavShell** — Firebase phone-OTP
-///    sign-in / sign-up, then the main app
+/// Owner, 2026-09-25: *"make everything access as guest login without
+/// asking anything from user, just one welcome screen and enter into app,
+/// no more scary warnings."*  Ad visitors were bouncing off a phone-number
+/// screen that read as "they want my personal data".
 ///
-/// Stage 2 is **skippable and stays suggested**: declining records its own
-/// flag and deliberately does not touch [InstallBanner]'s dismissal keys,
-/// so the in-app suggestion still appears while the app is in use.  One
-/// decline at the door is not a decline forever.
+/// So the first run is:
 ///
-/// We use a single gate widget instead of nested widgets because
-/// each stage needs to observe a SharedPreferences flag and the
-/// caller (LuminApp) doesn't want to know about either flag.
+/// 1. **WelcomePage** — one screen, one button.  "Get Started" records the
+///    welcome and the terms acceptance together (the single 18+ / Terms &
+///    Risk line under the button is that acceptance).
+/// 2. **[_AuthGate]** — signs the visitor in as an anonymous **guest** and
+///    opens the app.  A phone number is asked for only when they use
+///    something that needs an account (live signals after the free days,
+///    Trade, plans, settings).
 ///
-/// The flags are read **once**, on mount.  Advancing between stages
-/// then walks the enum synchronously rather than re-running the async
-/// resolve (2026-07-26 iPhone setup-screen fix): the old `_advance`
-/// replaced the resolved future with a fresh one, so every "Get
-/// Started" / "Continue" tap dropped the UI back to the blank splash
-/// for at least one frame — and on iOS Safari, where the
-/// SharedPreferences round-trip is slower, for long enough to read as
-/// a freeze.  Taps landing in that window hit the splash and did
-/// nothing, which is why the screen appeared to need pressing twice.
-/// Stage order is fixed (welcome → install choice → consent → ready),
-/// so the next stage is known without re-reading storage; the stage
-/// widgets still persist their flag before calling back, so a relaunch
-/// resumes at the right place.
+/// What left the first run, and where it went:
+///   * the 3-checkbox consent page — folded into the one line above; the
+///     risk text itself is still one tap away (the line's links, Menu →
+///     Legal).  A consent-version bump re-shows the welcome.
+///   * the Play / Add-to-Home-Screen choice page — [InstallBanner] inside
+///     NavShell carries the same offer, and NavShell is now reachable
+///     without signing in, which was the reason that page existed.
 ///
-/// Lives in front of [_AuthGate] (not behind it) because the welcome
-/// + consent disclosures are required BEFORE any data collection —
-/// including the Firebase Auth session — per Google's prominent-
-/// disclosure guidance
-/// (https://support.google.com/googleplay/android-developer/answer/11150561).
+/// The flags are read **once**, on mount (2026-07-26 iPhone fix: re-reading
+/// between stages dropped a frame to the blank splash and ate taps).
 class _FirstRunGate extends StatefulWidget {
   const _FirstRunGate();
 
@@ -162,22 +139,8 @@ class _FirstRunGate extends StatefulWidget {
 }
 
 class _FirstRunGateState extends State<_FirstRunGate> {
-  /// Null until the one-shot flag read completes; the blank splash shows
-  /// only during that first read, never again between stages.
-  _OnboardingState? _stage;
-
-  /// Mirrors the consent flag as last read / written, so [_advance] can
-  /// pick the next stage without another storage round-trip.
-  bool _consentSatisfied = false;
-
-  /// What this browser gets offered, resolved once on mount so the gate
-  /// and the page cannot disagree about which platform this is.
-  /// [InstallOffer.none] on every native build (the stub environment
-  /// probes are constant false) and on desktop browsers.
-  InstallOffer _installOffer = InstallOffer.none;
-
-  /// True while there is an offer this visitor has not yet answered.
-  bool _installPending = false;
+  /// Null until the one-shot flag read completes.
+  bool? _needsWelcome;
 
   @override
   void initState() {
@@ -188,59 +151,13 @@ class _FirstRunGateState extends State<_FirstRunGate> {
   Future<void> _resolve() async {
     final welcomeSeen = await ConsentStorage.welcomeSeen();
     final consentDone = await ConsentStorage.isUpToDate();
-    // Same read-once discipline as the consent flags. The `none` check
-    // short-circuits, so a native build never touches SharedPreferences
-    // for a page it can never render.
-    final offer = resolveOffer();
-    final offerAnswered =
-        offer == InstallOffer.none || await InstallChoiceStorage.seen();
     if (!mounted) return;
-    setState(() {
-      _consentSatisfied = consentDone;
-      _installOffer = offer;
-      _installPending = !offerAnswered;
-      if (!welcomeSeen) {
-        _stage = _OnboardingState.welcome;
-      } else if (_installPending) {
-        _stage = _OnboardingState.installChoice;
-      } else if (!consentDone) {
-        _stage = _OnboardingState.consent;
-      } else {
-        _stage = _OnboardingState.ready;
-      }
-    });
+    setState(() => _needsWelcome = !(welcomeSeen && consentDone));
   }
-
-  /// Synchronous hand-off to the next stage.  Skips consent when the
-  /// stored version is already current — a fresh install never hits that
-  /// branch, but a welcome replay on a consented device would.
-  void _advance() {
-    setState(() => _stage = _nextStage(_stage));
-  }
-
-  /// The stage after [from], written as an **exhaustive** switch rather
-  /// than the old `_ => ready` default.  That default is why adding a
-  /// stage is dangerous here: it compiles, and the new stage is silently
-  /// skipped for anyone who arrives at it from the stage before.
-  /// A further stage must now fail to compile instead.
-  _OnboardingState _nextStage(_OnboardingState? from) => switch (from) {
-        _OnboardingState.welcome => _installPending
-            ? _OnboardingState.installChoice
-            : _afterInstallChoice,
-        _OnboardingState.installChoice => _afterInstallChoice,
-        _OnboardingState.consent => _OnboardingState.ready,
-        _OnboardingState.ready => _OnboardingState.ready,
-        // Only reachable if something advances before the first flag read
-        // resolves; the blank splash swallows taps, so this is defensive.
-        null => _OnboardingState.ready,
-      };
-
-  _OnboardingState get _afterInstallChoice =>
-      _consentSatisfied ? _OnboardingState.ready : _OnboardingState.consent;
 
   @override
   Widget build(BuildContext context) {
-    switch (_stage) {
+    switch (_needsWelcome) {
       case null:
         // Same blank-splash convention as [_AuthGate] to avoid a
         // visible flicker on the very first flag read.
@@ -248,32 +165,15 @@ class _FirstRunGateState extends State<_FirstRunGate> {
           backgroundColor: Color(0xFF0A0E1A),
           body: SizedBox.shrink(),
         );
-      case _OnboardingState.welcome:
-        return WelcomePage(onContinue: _advance);
-      case _OnboardingState.installChoice:
-        return InstallChoicePage(
-          offer: _installOffer,
-          // Fires whether the user took the offer or skipped it — the
-          // page records its own flag either way, so taking the offer
-          // still leaves a working web app underneath rather than
-          // stranding them on a dead screen if Play does not open.
-          onContinue: () {
-            _installPending = false;
-            _advance();
-          },
+      case true:
+        return WelcomePage(
+          onContinue: () => setState(() => _needsWelcome = false),
         );
-      case _OnboardingState.consent:
-        return WelcomeConsentPage(onAccepted: () {
-          _consentSatisfied = true;
-          _advance();
-        });
-      case _OnboardingState.ready:
+      case false:
         return const _AuthGate();
     }
   }
 }
-
-enum _OnboardingState { welcome, installChoice, consent, ready }
 
 /// First-frame gate that decides between [PhoneSignInPage] and
 /// [NavShell].  Mock mode bypasses auth.  Live mode subscribes to
@@ -308,6 +208,26 @@ class _AuthGate extends StatefulWidget {
 
 class _AuthGateState extends State<_AuthGate> {
   bool _prewarmed = false;
+
+  /// Guest entry (owner, 2026-09-25): with no session, the gate signs the
+  /// visitor in anonymously instead of showing the phone page.  One attempt
+  /// per signed-out spell; reset whenever a user is observed, so signing
+  /// out lands on a fresh guest session.
+  bool _guestAttempted = false;
+
+  /// Anonymous sign-in failed (provider disabled in the Firebase console,
+  /// offline, or the guest token would not mint).  The gate then shows phone
+  /// sign-in — exactly the pre-guest behaviour — rather than looping.
+  bool _guestFailed = false;
+
+  Future<void> _enterAsGuest(AuthService auth) async {
+    try {
+      await auth.signInAsGuest();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _guestFailed = true);
+    }
+  }
 
   /// uid of the user whose Firebase ID-token mint we've already confirmed
   /// works.  When ``snap.data?.uid != _verifiedUid`` we don't trust the
@@ -354,6 +274,9 @@ class _AuthGateState extends State<_AuthGate> {
     }
     if (!mounted) return;
     if (token == null) {
+      // A guest whose token will not mint would otherwise loop: sign out →
+      // no user → sign in as guest → same failure.  Stop at phone sign-in.
+      if (user.isAnonymous) _guestFailed = true;
       // Clear the unusable session so the StreamBuilder re-emits
       // null and routes the user to PhoneSignInPage.  signOut is
       // idempotent and safe even if Firebase already considers
@@ -430,8 +353,18 @@ class _AuthGateState extends State<_AuthGate> {
           _prewarmed = false;
           _verifiedUid = null;
           _verifyingUid = null;
-          return const PhoneSignInPage();
+          if (_guestFailed) return const PhoneSignInPage();
+          if (!_guestAttempted) {
+            _guestAttempted = true;
+            final auth = scope.auth!;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _enterAsGuest(auth);
+            });
+          }
+          return _blankSplash();
         }
+        // A user is present — the next signed-out spell may try guest again.
+        _guestAttempted = false;
         // Optimistic launch (2026-05-30 perf push): a returning user
         // routes straight to NavShell rendered against the SDK-cached ID
         // token (``currentIdToken`` without forceRefresh resolves from the
@@ -465,7 +398,8 @@ class _AuthGateState extends State<_AuthGate> {
           final repo = scope.repo;
           WidgetsBinding.instance.addPostFrameCallback((_) {
             repo.prewarmCaches();
-            _hydrateEngineMetadata(auth, repo);
+            // A guest has no account row: /api/profile would only refuse.
+            if (!user.isAnonymous) _hydrateEngineMetadata(auth, repo);
           });
         }
         return const NavShell();

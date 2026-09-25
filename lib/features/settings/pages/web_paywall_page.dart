@@ -1,10 +1,12 @@
 /// Web paywall — the PWA's crypto (NOWPayments) subscription page (Phase 3).
 ///
 /// Shown instead of the Play [SubscriptionPage] on the **web** build
-/// (`kDistribution == AppDistribution.web`).  Signals + levels + analysis are
-/// FREE; the paywall is on trade automation — the SAME two tiers as Play:
-///   * Assist ($15/mo) — one-tap "take trade".
-///   * Auto   ($25/mo) — hands-off auto-execution.
+/// (`kDistribution == AppDistribution.web`).  Closed signals are FREE; the
+/// SAME three plans as Play (owner, 2026-09-25 added Signals):
+///   * Signals ($6/mo)  — the live signal feed.
+///   * Assist  ($15/mo) — live signals + one-tap "take trade".
+///   * Auto    ($25/mo) — live signals + hands-off auto-execution.
+/// A plan the engine does not price is not rendered (see `crypto.tiers`).
 ///
 /// Crypto settles asynchronously on-chain, so after the user pays on the
 /// hosted NOWPayments page we cannot know locally when funds land — the
@@ -20,6 +22,7 @@ import '../../../data/repository.dart';
 import '../../../data/web_billing_service.dart';
 import '../../../shared/tokens.dart';
 import '../../../shared/widgets/lumin_card.dart';
+import '../../../shared/widgets/free_tier_gate.dart';
 import '../../../shared/friendly_error.dart';
 import '../../../shared/widgets/page_skeleton.dart';
 
@@ -94,8 +97,7 @@ class _WebPaywallPageState extends State<WebPaywallPage> {
     }
   }
 
-  bool get _isPaid =>
-      _tier == 'assist' || _tier == 'auto' || _tier == 'paid' || _tier == 'owner';
+  bool get _isPaid => isPaidTier(_tier);
 
   Future<void> _buy(String tier) async {
     final svc = _svc;
@@ -302,7 +304,9 @@ class _WebPaywallPageState extends State<WebPaywallPage> {
       ];
     }
     const specs = [
-      ('assist', 'Assist', 'One-tap live trades — take any signal on your own '
+      ('signals', 'Signals', 'Live signals — entry, stop-loss and target the '
+          'moment they fire.'),
+      ('assist', 'Assist', 'Live signals plus one-tap trades on your own '
           'exchange.'),
       ('auto', 'Auto', 'Hands-off auto-execution — the engine trades the '
           'signals for you.'),
@@ -319,9 +323,8 @@ class _WebPaywallPageState extends State<WebPaywallPage> {
 
   Widget _planCard(
       String tierId, String label, String blurb, WebTierPrice price) {
-    final owned = _tier == tierId ||
-        _tier == 'owner' ||
-        (tierId == 'assist' && _tier == 'auto');
+    // A higher plan includes a lower one, so it reads as owned.
+    final owned = _tier == tierId || tierRank(_tier) > tierRank(tierId);
     return LuminCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

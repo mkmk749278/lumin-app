@@ -200,10 +200,13 @@ class _TrialGateState extends State<TrialGate> {
   Future<TrialState>? _future;
   TrialState? _state;
 
+  /// The signup trial is per-account; a guest has none to offer it to.
+  bool get _guest => AppConfigScope.of(context).auth?.isGuest ?? false;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _future ??= _load();
+    if (!_guest) _future ??= _load();
   }
 
   Future<TrialState> _load() async {
