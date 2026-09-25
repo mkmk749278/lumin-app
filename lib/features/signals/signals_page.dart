@@ -517,7 +517,14 @@ class _SignalsPageState extends State<SignalsPage>
                 duration: const Duration(milliseconds: 200),
                 switchInCurve: Curves.easeOut,
                 switchOutCurve: Curves.easeIn,
-                child: _buildList(isLive: isLive),
+                // Masked live cards ride the engine's latest live_access
+                // (owner, 2026-09-25), so the list rebuilds when it changes.
+                child: ValueListenableBuilder<LiveFeedAccess?>(
+                  valueListenable:
+                      AppConfigScope.of(context).repo.liveFeedAccess,
+                  builder: (context, access, _) =>
+                      _buildList(isLive: isLive, access: access),
+                ),
               ),
             ),
           ),
@@ -526,7 +533,13 @@ class _SignalsPageState extends State<SignalsPage>
     );
   }
 
-  Widget _buildList({required bool isLive}) {
+  Widget _buildList({required bool isLive, LiveFeedAccess? access}) {
+    // Live signals this caller may not see, shown masked above the feed on
+    // the All and Open tabs — never on Closed, which they are not.
+    final locked = (_filter == _SignalFilter.closed || access == null)
+        ? const <LockedSignal>[]
+        : access.lockedItems;
+    final guest = access?.isGuest ?? false;
     final data = _dataByFilter[_filter];
     final error = _errorByFilter[_filter];
     if (data == null && error == null) {
@@ -556,7 +569,7 @@ class _SignalsPageState extends State<SignalsPage>
         ...items.where((s) => !s.effectiveIsOpen),
       ];
     }
-    if (items.isEmpty) {
+    if (items.isEmpty && locked.isEmpty) {
       return _SignalsEmpty(
         key: const ValueKey('signals-empty'),
         filter: _filter,
@@ -571,9 +584,13 @@ class _SignalsPageState extends State<SignalsPage>
         parent: BouncingScrollPhysics(),
       ),
       padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
-      itemCount: items.length,
+      itemCount: locked.length + items.length,
       separatorBuilder: (_, __) => const SizedBox(height: LuminSpacing.md),
-      itemBuilder: (_, i) {
+      itemBuilder: (_, index) {
+        if (index < locked.length) {
+          return LockedSignalCard(signal: locked[index], guest: guest);
+        }
+        final i = index - locked.length;
         final card = _SignalCard(
           sig: items[i],
           priceNotifier: _priceNotifiers[items[i].symbol],

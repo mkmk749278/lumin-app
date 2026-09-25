@@ -9,6 +9,8 @@
 ///   * anything else (plan, paywall off, older engine) — nothing.
 library;
 
+import 'dart:ui' show ImageFilter;
+
 import 'package:flutter/material.dart';
 
 import '../../app/distribution.dart';
@@ -154,6 +156,204 @@ class _Strip extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// A live signal shown masked to a caller without live access (owner,
+/// 2026-09-25: *"show all live signals but mask them, and add click here to
+/// see signal and ask user to sign up"*).
+///
+/// The real levels never reach the app (engine `LockedSignal`); the blurred
+/// numbers here are fixed placeholders, so there is nothing to un-blur.
+class LockedSignalCard extends StatelessWidget {
+  const LockedSignalCard({
+    super.key,
+    required this.signal,
+    required this.guest,
+  });
+
+  final LockedSignal signal;
+  final bool guest;
+
+  void _unlock(BuildContext context) {
+    if (guest) {
+      openCreateAccount(context);
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => kDistribution == AppDistribution.web
+            ? const WebPaywallPage()
+            : const SubscriptionPage(),
+      ),
+    );
+  }
+
+  String get _age {
+    final m = signal.minutesAgo;
+    if (m < 1) return 'just now';
+    if (m < 60) return '$m min ago';
+    final h = m ~/ 60;
+    return h == 1 ? '1 hr ago' : '$h hrs ago';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cta = guest ? 'Sign up free to see signal' : 'Unlock with Signals plan';
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(LuminRadii.md),
+        onTap: () => _unlock(context),
+        child: Container(
+          padding: const EdgeInsets.all(LuminSpacing.md),
+          decoration: BoxDecoration(
+            color: LuminColors.bgCard,
+            borderRadius: BorderRadius.circular(LuminRadii.md),
+            border: Border.all(color: LuminColors.accent.withValues(alpha: 0.55)),
+            boxShadow: [
+              BoxShadow(
+                color: LuminColors.accent.withValues(alpha: 0.18),
+                blurRadius: 18,
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const _LivePill(),
+                  const SizedBox(width: LuminSpacing.sm),
+                  Text(
+                    signal.symbol,
+                    style: const TextStyle(
+                      color: LuminColors.textPrimary,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(width: LuminSpacing.sm),
+                  const _Masked(width: 52, height: 20),
+                  const Spacer(),
+                  Text(
+                    _age,
+                    style: const TextStyle(color: LuminColors.textMuted, fontSize: 11),
+                  ),
+                ],
+              ),
+              if (signal.agentName.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  signal.qualityTier.isEmpty
+                      ? signal.agentName
+                      : '${signal.agentName} · ${signal.qualityTier} tier',
+                  style: const TextStyle(
+                    color: LuminColors.textSecondary,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+              const SizedBox(height: LuminSpacing.md),
+              const Row(
+                children: [
+                  Expanded(child: _MaskedLevel(label: 'Entry')),
+                  Expanded(child: _MaskedLevel(label: 'Stop')),
+                  Expanded(child: _MaskedLevel(label: 'Target')),
+                ],
+              ),
+              const SizedBox(height: LuminSpacing.md),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: LuminColors.accent,
+                    foregroundColor: LuminColors.bgDeep,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                  onPressed: () => _unlock(context),
+                  icon: const Icon(Icons.lock_open_rounded, size: 18),
+                  label: Text(
+                    cta,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LivePill extends StatelessWidget {
+  const _LivePill();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: LuminColors.success.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(LuminRadii.pill),
+        border: Border.all(color: LuminColors.success.withValues(alpha: 0.6)),
+      ),
+      child: const Text(
+        '● LIVE',
+        style: TextStyle(
+          color: LuminColors.success,
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.8,
+        ),
+      ),
+    );
+  }
+}
+
+/// A blurred placeholder block.  Placeholder only: the real value is not in
+/// the app to blur.
+class _Masked extends StatelessWidget {
+  const _Masked({required this.width, required this.height});
+
+  final double width;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    return ImageFiltered(
+      imageFilter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
+      child: Container(
+        width: width,
+        height: height,
+        decoration: BoxDecoration(
+          color: LuminColors.textSecondary.withValues(alpha: 0.55),
+          borderRadius: BorderRadius.circular(4),
+        ),
+      ),
+    );
+  }
+}
+
+class _MaskedLevel extends StatelessWidget {
+  const _MaskedLevel({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Text(
+          '$label ',
+          style: const TextStyle(color: LuminColors.textMuted, fontSize: 11),
+        ),
+        const Icon(Icons.lock_outline, size: 12, color: LuminColors.textMuted),
+        const SizedBox(width: 4),
+        const Flexible(child: _Masked(width: 44, height: 12)),
+      ],
     );
   }
 }

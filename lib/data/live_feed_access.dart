@@ -12,13 +12,54 @@
 /// parses to null (no banner) rather than to "locked".
 library;
 
+/// A live signal the caller may not see yet, as the engine masks it: no
+/// direction, no entry / stop / target ever reaches the app (engine
+/// `LockedSignal`), so the blurred levels on the card are placeholders, not
+/// the real numbers hidden under a filter.
+class LockedSignal {
+  const LockedSignal({
+    required this.id,
+    required this.symbol,
+    required this.agentName,
+    required this.qualityTier,
+    required this.confidence,
+    required this.minutesAgo,
+  });
+
+  final String id;
+  final String symbol;
+  final String agentName;
+  final String qualityTier;
+  final double confidence;
+  final int minutesAgo;
+
+  static LockedSignal? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final id = raw['signal_id'];
+    final symbol = raw['symbol'];
+    if (id is! String || symbol is! String) return null;
+    return LockedSignal(
+      id: id,
+      symbol: symbol,
+      agentName: (raw['agent_name'] as String?) ?? '',
+      qualityTier: (raw['quality_tier'] as String?) ?? '',
+      confidence: (raw['confidence'] as num?)?.toDouble() ?? 0,
+      minutesAgo: (raw['minutes_ago'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
 class LiveFeedAccess {
   const LiveFeedAccess({
     required this.locked,
     required this.lockedOpenCount,
     required this.reason,
     this.until,
+    this.lockedItems = const [],
   });
+
+  /// The withheld live signals, masked, newest first.
+  final List<LockedSignal> lockedItems;
 
   /// True when the feed is closed-signals-only for this caller.
   final bool locked;
@@ -56,6 +97,10 @@ class LiveFeedAccess {
       lockedOpenCount: (j['locked_open_count'] as num?)?.toInt() ?? 0,
       reason: (access['reason'] as String?) ?? '',
       until: untilRaw is String ? DateTime.tryParse(untilRaw)?.toUtc() : null,
+      lockedItems: [
+        for (final raw in (j['locked_items'] as List? ?? const []))
+          if (LockedSignal.fromJson(raw) case final s?) s,
+      ],
     );
   }
 }
