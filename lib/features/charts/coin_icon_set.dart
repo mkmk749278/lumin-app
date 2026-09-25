@@ -4,16 +4,16 @@
 /// github.com/spothq/cryptocurrency-icons), 32px colour PNGs, filtered to the
 /// bases Binance lists against USDT (2026-09-25). Bundled rather than loaded
 /// from a CDN so the pair list works offline and no third party sees which
-/// coins a user browses. Anything not in this set gets a generated monogram
+/// coins a user browses. Tickers since reused by a different coin (D, SKY,
+/// ACT, AUTO, ATM) and fiat were dropped: a wrong logo is worse than none.
+/// Anything not in this set gets a generated monogram
 /// ([CoinIcon]), so a missing file is never a blank circle.
 library;
 
 const Set<String> kBundledCoinIcons = {
   'aave',
-  'act',
   'ada',
   'adx',
-  'aeur',
   'aion',
   'algo',
   'amb',
@@ -24,9 +24,7 @@ const Set<String> kBundledCoinIcons = {
   'ardr',
   'ark',
   'ast',
-  'atm',
   'atom',
-  'auto',
   'avax',
   'bal',
   'band',
@@ -44,7 +42,6 @@ const Set<String> kBundledCoinIcons = {
   'crv',
   'ctxc',
   'cvc',
-  'd',
   'dash',
   'data',
   'dcr',
@@ -59,13 +56,11 @@ const Set<String> kBundledCoinIcons = {
   'eos',
   'etc',
   'eth',
-  'eur',
   'fida',
   'fil',
   'flux',
   'fun',
   'gas',
-  'gbp',
   'gmt',
   'gno',
   'grt',
@@ -120,7 +115,6 @@ const Set<String> kBundledCoinIcons = {
   'sand',
   'sc',
   'skl',
-  'sky',
   'snt',
   'snx',
   'sol',
