@@ -210,6 +210,16 @@ class _PhoneSignInPageState extends State<PhoneSignInPage> {
     final country = _country;
     return Scaffold(
       backgroundColor: LuminColors.bgDeep,
+      // Pushed from guest mode ("Create free account"), the user must be able
+      // to go back to the app they were browsing.  Shown by the gate as the
+      // root (guest sign-in unavailable) there is nothing to go back to.
+      appBar: Navigator.of(context).canPop()
+          ? AppBar(
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              foregroundColor: LuminColors.textPrimary,
+            )
+          : null,
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(
@@ -231,9 +241,15 @@ class _PhoneSignInPageState extends State<PhoneSignInPage> {
                   ),
                 ),
                 const SizedBox(height: LuminSpacing.sm),
+                // Why we ask, and what we do not do with it — people coming
+                // from an ad read a bare phone field as a data grab
+                // (owner, 2026-09-25).
                 const Text(
                   'Enter your phone number — we\'ll text you a 6-digit '
-                  'code. Same flow whether you\'re new or returning.',
+                  'code. Same flow whether you\'re new or returning. Your '
+                  'number is only used to sign you in: no promotional calls '
+                  'or messages, and it is never sold or shared with '
+                  'marketers.',
                   style: TextStyle(
                     color: LuminColors.textSecondary,
                     fontSize: 14,

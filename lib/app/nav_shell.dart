@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import '../data/app_config.dart';
 import '../data/notification_service.dart';
+import '../features/auth/widgets/account_required.dart';
 import '../features/charts/charts_page.dart';
 import '../features/install/install_banner.dart';
 import '../features/pulse/pulse_page.dart';
@@ -161,6 +162,21 @@ class _NavShellState extends State<NavShell> with WidgetsBindingObserver {
       case 2:
         return ChartsPage(key: _tabKeys[2]);
       case 3:
+        // A guest has no paper book, no keys and no plan — every Trade
+        // endpoint is per-user and would only refuse.  Invite instead.
+        if (isGuestSession(context)) {
+          return Scaffold(
+            key: _tabKeys[3],
+            appBar: AppBar(title: const Text('Trade')),
+            body: const AccountRequiredView(
+              icon: Icons.swap_vert,
+              title: 'Trade with a free account',
+              body: 'Paper trading, one-tap trades and Auto Trade run on '
+                  'your own account. Sign up with your phone number to '
+                  'start — no card needed.',
+            ),
+          );
+        }
         return TradePage(key: _tabKeys[3]);
       case 4:
         return SettingsPage(key: _tabKeys[4]);

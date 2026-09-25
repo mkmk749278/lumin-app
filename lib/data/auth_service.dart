@@ -118,6 +118,40 @@ class AuthService {
   /// for one-shot boot-time checks.
   User? get currentUser => _auth.currentUser;
 
+  // ---- Guest mode (owner, 2026-09-25) ------------------------------------
+  //
+  // A visitor enters the app with no questions asked: after the one welcome
+  // screen the gate signs them in with Firebase ANONYMOUS auth.  The engine
+  // honours that token as a read-only, free-tier guest with no account row
+  // (360-v2 `server._guest_claims`): closed signals, pulse, charts, track
+  // record and push — never a live signal, never anything per-user.
+  //
+  // Everything that means "has an account" must therefore ask
+  // [accountUser], not [currentUser]: a guest IS a signed-in Firebase user.
+  // The OTP page learned that the hard way in review — it completes on "any
+  // signed-in user", so a guest would have skipped the code entirely.
+
+  /// True when the current session is an anonymous guest.
+  bool get isGuest => _auth.currentUser?.isAnonymous ?? false;
+
+  /// The signed-in ACCOUNT (phone-verified), or null for a guest / no one.
+  User? get accountUser {
+    final u = _auth.currentUser;
+    return (u == null || u.isAnonymous) ? null : u;
+  }
+
+  /// [authStateChanges] with guests mapped to null — "did an account sign
+  /// in", which is what the sign-in pages wait for.
+  Stream<User?> get accountChanges => _auth
+      .authStateChanges()
+      .map((u) => (u == null || u.isAnonymous) ? null : u);
+
+  /// Enter as a guest.  Throws on failure (anonymous auth disabled in the
+  /// Firebase console, offline); the gate then falls back to phone sign-in.
+  Future<void> signInAsGuest() async {
+    await _auth.signInAnonymously();
+  }
+
   /// Returns the current Firebase ID token, or null if no user is
   /// signed in.  Passing `forceRefresh: true` bypasses the SDK's
   /// in-memory cache and round-trips to Firebase — the API client

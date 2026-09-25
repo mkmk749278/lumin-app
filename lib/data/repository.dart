@@ -7,11 +7,15 @@
 /// implementation; no page has to change.
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../shared/tokens.dart';
 import 'api_client.dart';
+import 'live_feed_access.dart';
+export 'live_feed_access.dart';
 import 'market_alert.dart';
 import 'mock_data.dart';
 import 'server_side_execution_models.dart';
@@ -1911,6 +1915,11 @@ class WebCheckout {
 }
 
 abstract class LuminRepository {
+  /// Live-signal access from the latest `/api/signals` read (engine truth):
+  /// whether live signals are hidden from this caller, how many, and why.
+  /// Null until a read reports it, and always null in mock mode.
+  ValueListenable<LiveFeedAccess?> get liveFeedAccess;
+
   /// True when the underlying source is the live engine (vs. mocks).
   bool get isLive;
 
@@ -2463,6 +2472,12 @@ abstract class LuminRepository {
 
 class MockRepository implements LuminRepository {
   const MockRepository();
+
+  static final ValueNotifier<LiveFeedAccess?> _noLiveFeedAccess =
+      ValueNotifier<LiveFeedAccess?>(null);
+
+  @override
+  ValueListenable<LiveFeedAccess?> get liveFeedAccess => _noLiveFeedAccess;
 
   @override
   bool get isLive => false;
@@ -4107,6 +4122,12 @@ class HttpRepository implements LuminRepository {
   /// dies with it; no explicit ``clear()`` plumbing required.
   final SwrCache _swr = SwrCache();
 
+  final ValueNotifier<LiveFeedAccess?> _liveFeedAccess =
+      ValueNotifier<LiveFeedAccess?>(null);
+
+  @override
+  ValueListenable<LiveFeedAccess?> get liveFeedAccess => _liveFeedAccess;
+
   @override
   bool get isLive => true;
 
@@ -4527,6 +4548,7 @@ class HttpRepository implements LuminRepository {
     }
     final j = (await client.get('/api/signals', query: query))
         as Map<String, dynamic>;
+    _liveFeedAccess.value = LiveFeedAccess.fromSignalsJson(j);
     final items = (j['items'] as List? ?? []).cast<Map<String, dynamic>>();
     return items.map(_signalFromJson).toList();
   }

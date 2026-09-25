@@ -1,7 +1,10 @@
-/// Tier gate for the B16 two-tier auto-trade paywall.
+/// Tier gate for the paid plans.
 ///
-/// Signals + entry/SL/TP + analysis are FREE — the paywall is on trade
-/// automation only.  This file exposes the tier helpers (`tierRank`,
+/// Closed signals are FREE.  Since 2026-09-25 (owner) ACTIVE signals need an
+/// account plus the Signals plan (₹499/mo) or any automation plan, after 3
+/// free days from sign-up — the engine enforces it (`/api/signals` hides
+/// them) and this file only mirrors the tier order for UI.  Automation is the
+/// rest of the paywall.  This file exposes the tier helpers (`tierRank`,
 /// `canAssist`, `canAuto`) used to gate the one-tap "take trade" (Assist)
 /// and hands-off auto-execution (Auto) surfaces, plus [UpgradeSheet] — a
 /// lightweight inline upsell that routes to the full SubscriptionPage so
@@ -14,11 +17,11 @@ import 'package:flutter/material.dart';
 import '../../features/settings/pages/subscription_page.dart';
 import '../tokens.dart';
 
-/// Subscription tier rank for the B16 two-tier auto-trade model.
+/// Subscription tier rank — mirrors the engine's `_TIER_RANK`.
 ///
-/// `free(0) < assist(1) < auto(2)`; legacy `paid` maps to auto, and
-/// `all-access` / `owner` sit above.  Signals + levels are FREE — the
-/// paywall is on trade automation only.
+/// `free(0) < signals(1) < assist(2) < auto(3)`; legacy `paid` maps to
+/// auto, and `all-access` / `owner` sit above.  Every tier from `signals`
+/// up includes the live signal feed.
 ///
 /// Null / unknown → 0 (free).  We err **closed** on the paid actions: the
 /// Assist (one-tap) path places orders **client-side**, so the app is the
@@ -27,25 +30,31 @@ int tierRank(String? tier) {
   switch ((tier ?? '').toLowerCase()) {
     case 'owner':
     case 'all-access':
-      return 3;
+      return 4;
     case 'auto':
     case 'paid': // legacy single paid tier == full automation
-      return 2;
+      return 3;
     case 'assist':
+      return 2;
+    case 'signals':
       return 1;
     default:
       return 0;
   }
 }
 
+/// The plan itself includes live signals (Signals plan or higher).  The
+/// 3 free days are not a tier — the engine reports them on each feed read.
+bool tierIncludesLiveSignals(String? tier) => tierRank(tier) >= 1;
+
 /// May place one-tap (assisted) live trades — Assist tier or higher.
-bool canAssist(String? tier) => tierRank(tier) >= 1;
+bool canAssist(String? tier) => tierRank(tier) >= 2;
 
 /// May enable hands-off auto-execution — Auto tier (or higher).
-bool canAuto(String? tier) => tierRank(tier) >= 2;
+bool canAuto(String? tier) => tierRank(tier) >= 3;
 
 /// Any paying tier (mirrors the engine's `PlayVerifyResult.isPaid` set:
-/// assist / auto / legacy paid / all-access / owner).  Drives the
+/// signals / assist / auto / legacy paid / all-access / owner).  Drives the
 /// "you're subscribed" surfaces — CurrentPlanCard, Profile subscription
 /// card, Menu subtitle.
 bool isPaidTier(String? tier) => tierRank(tier) >= 1;
@@ -64,6 +73,8 @@ String tierDisplayName(String? tier) {
       return 'Auto'; // legacy single paid tier == full automation
     case 'assist':
       return 'Assist';
+    case 'signals':
+      return 'Signals';
     case '':
     case 'free':
       return 'Free';
@@ -80,6 +91,7 @@ String tierDisplayName(String? tier) {
 String playManageSubscriptionUrl(String? tier) {
   const pkg = 'org.luminapp.lumin';
   final sku = switch ((tier ?? '').toLowerCase()) {
+    'signals' => kSignalsMonthlyId,
     'assist' => kAssistMonthlyId,
     'auto' => kAutoMonthlyId,
     _ => null,

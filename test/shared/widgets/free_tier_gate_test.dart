@@ -13,17 +13,25 @@ void main() {
       expect(tierRank(null), 0);
       expect(tierRank('free'), 0);
       expect(tierRank('garbage'), 0);
-      expect(tierRank('assist'), 1);
-      expect(tierRank('auto'), 2);
-      expect(tierRank('paid'), 2);
-      expect(tierRank('all-access'), 3);
-      expect(tierRank('owner'), 3);
-      expect(tierRank('AUTO'), 2, reason: 'case-insensitive');
+      // 2026-09-25: the Signals plan (live signals only) sits below Assist,
+      // mirroring the engine's _TIER_RANK.
+      expect(tierRank('signals'), 1);
+      expect(tierRank('assist'), 2);
+      expect(tierRank('auto'), 3);
+      expect(tierRank('paid'), 3);
+      expect(tierRank('all-access'), 4);
+      expect(tierRank('owner'), 4);
+      expect(tierRank('AUTO'), 3, reason: 'case-insensitive');
+      expect(canAssist('signals'), isFalse,
+          reason: 'the Signals plan is live signals, not trading');
+      expect(tierIncludesLiveSignals('signals'), isTrue);
+      expect(tierIncludesLiveSignals('free'), isFalse);
     });
   });
 
   group('isPaidTier', () {
     test('any paying tier counts', () {
+      expect(isPaidTier('signals'), isTrue);
       expect(isPaidTier('assist'), isTrue);
       expect(isPaidTier('auto'), isTrue);
       expect(isPaidTier('paid'), isTrue);
@@ -42,6 +50,7 @@ void main() {
     test('consumer names, never engine vocabulary', () {
       expect(tierDisplayName('auto'), 'Auto');
       expect(tierDisplayName('assist'), 'Assist');
+      expect(tierDisplayName('signals'), 'Signals');
       expect(tierDisplayName('paid'), 'Auto');
       expect(tierDisplayName('all-access'), 'All Access');
       expect(tierDisplayName('owner'), 'All Access');
