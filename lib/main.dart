@@ -209,6 +209,28 @@ class _AuthGate extends StatefulWidget {
 class _AuthGateState extends State<_AuthGate> {
   bool _prewarmed = false;
 
+  /// The auth stream, created ONCE per [AuthService].
+  ///
+  /// `AuthService.authStateChanges` is a getter over
+  /// `FirebaseAuth.authStateChanges()`, which returns a NEW stream on every
+  /// call. Passed straight into the StreamBuilder, every rebuild of this gate
+  /// (its own setState after the background token check, a sign-in change)
+  /// handed StreamBuilder a different stream; it resubscribed, reported
+  /// `waiting` for a frame, the gate rendered the blank splash for that frame
+  /// — and the NavShell underneath was thrown away and rebuilt on Pulse. The
+  /// user, still inside a settings page, pressed back and landed on Pulse
+  /// instead of the Menu they came from (owner-reported 2026-09-25).
+  Stream<User?>? _authStream;
+  AuthService? _streamAuth;
+
+  Stream<User?> _authStreamFor(AuthService auth) {
+    if (!identical(auth, _streamAuth) || _authStream == null) {
+      _streamAuth = auth;
+      _authStream = auth.authStateChanges;
+    }
+    return _authStream!;
+  }
+
   /// Guest entry (owner, 2026-09-25): with no session, the gate signs the
   /// visitor in anonymously instead of showing the phone page.  One attempt
   /// per signed-out spell; reset whenever a user is observed, so signing
@@ -336,12 +358,15 @@ class _AuthGateState extends State<_AuthGate> {
       return const NavShell();
     }
     return StreamBuilder<User?>(
-      stream: scope.auth!.authStateChanges,
+      stream: _authStreamFor(scope.auth!),
       // Seed the first frame with the synchronous `currentUser` so a
       // logged-in user doesn't see the splash flash on cold-start.
       initialData: scope.auth!.currentUser,
       builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) {
+        // Splash only when there is genuinely nothing to show yet. A
+        // resubscribe that still carries the last user must never tear down
+        // the app underneath the routes the user has open.
+        if (snap.connectionState == ConnectionState.waiting && snap.data == null) {
           return _blankSplash();
         }
         final user = snap.data;

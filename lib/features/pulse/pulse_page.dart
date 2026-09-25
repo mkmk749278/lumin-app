@@ -143,11 +143,12 @@ class _PulsePageState extends State<PulsePage>
 
   @override
   void scrollToTop() {
-    // Whichever top tab is in front — scrolling the Dashboard while the user
-    // is reading Alerts would move a list they cannot see and leave the one
-    // they can exactly where it was.
-    if (_tabController.index == 1) {
-      _alertsKey.currentState?.scrollToTop();
+    // Re-tapping Pulse is "take me home", and home is the Dashboard. It used
+    // to only scroll the Alerts list, so a user on Alerts could tap Pulse
+    // three times and never get back (owner-reported 2026-09-25). First tap
+    // from Alerts returns to the Dashboard; the next scrolls it to the top.
+    if (_tabController.index != 0) {
+      _tabController.animateTo(0);
       return;
     }
     if (!_dashboardController.hasClients) return;

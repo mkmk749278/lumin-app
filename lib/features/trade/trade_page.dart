@@ -988,7 +988,7 @@ class _ModePnlCard extends StatelessWidget {
             ? "PAPER P&L TODAY"
             : "LIVE P&L TODAY";
     final subtitle = hasBinance
-        ? 'Engine\'s reference paper trader.  Per-user PnL ships in Phase 4.'
+        ? "Lumin's reference paper book — not your account's P&L."
         : isPaper
             ? 'Paper sim — zero risk, mirrors live execution'
             : 'Realised on Binance Futures';

@@ -369,9 +369,9 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
             const Text(
               'Before connecting Binance for server-side trading, '
               'please read and accept the terms of service.  They '
-              'cover the non-custodial nature of the service, the '
-              'no-warranty posture, and the blast-radius limits '
-              'that bound damage in any worst-case scenario.',
+              'explain that Lumin never holds your funds, that the '
+              'service comes with no warranty, and the safety limits '
+              'placed on every order.',
               style: TextStyle(
                 color: LuminColors.textPrimary,
                 fontSize: 12,
@@ -824,8 +824,8 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
             ),
             const SizedBox(height: LuminSpacing.sm),
             Text(
-              'Key ${success.keyPublicIdFirst8}… stored encrypted '
-              'engine-side.  Validation passed:',
+              'Key ${success.keyPublicIdFirst8}… stored encrypted on '
+              "Lumin's servers. Checks passed:",
               style: const TextStyle(
                 color: LuminColors.textPrimary,
                 fontSize: 12,

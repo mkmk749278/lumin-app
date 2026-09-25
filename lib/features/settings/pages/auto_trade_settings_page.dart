@@ -13,6 +13,7 @@ import '../../../data/api_client.dart';
 import '../../../data/app_config.dart';
 import '../../../data/repository.dart';
 import '../../../shared/tokens.dart';
+import '../../../shared/widgets/info_button.dart';
 import '../../../shared/widgets/free_tier_gate.dart';
 import '../../../shared/widgets/lumin_card.dart';
 import '../../../shared/widgets/preview_badge.dart';
@@ -210,7 +211,7 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
         SnackBar(
           content: Text(
             cleared
-                ? 'Resumed. Next signal will dispatch.'
+                ? 'Resumed. Auto-trade picks up from the next signal.'
                 : 'Already active — nothing to clear.',
           ),
           backgroundColor: LuminColors.success,
@@ -423,54 +424,35 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
   Widget _scopeBanner() {
     final usingDefaults = _usingDefaults;
     final accent = usingDefaults ? LuminColors.textMuted : LuminColors.accent;
-    final label = usingDefaults ? 'Using engine defaults.' : 'Custom — your overrides.';
+    // One line of state; the explanation sits behind the ⓘ (owner,
+    // 2026-09-25: "make it fold into i icon only").
+    final label = usingDefaults ? "Using Lumin's defaults" : 'Custom — your settings';
     return Padding(
       padding: const EdgeInsets.fromLTRB(
         LuminSpacing.lg, LuminSpacing.sm, LuminSpacing.lg, LuminSpacing.md,
       ),
       child: Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: LuminSpacing.md,
-          vertical: LuminSpacing.sm,
-        ),
+        padding: const EdgeInsets.only(left: LuminSpacing.md),
         decoration: BoxDecoration(
-          color: accent.withOpacity(0.08),
+          color: accent.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(LuminRadii.sm),
-          border: Border.all(color: accent.withOpacity(0.30)),
+          border: Border.all(color: accent.withValues(alpha: 0.30)),
         ),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(
-              usingDefaults ? Icons.info_outline : Icons.tune,
-              color: accent,
-              size: 16,
-            ),
+            Icon(usingDefaults ? Icons.check_circle_outline : Icons.tune, color: accent, size: 16),
             const SizedBox(width: LuminSpacing.sm),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    label,
-                    style: TextStyle(
-                      color: accent,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  const Text(
-                    'Saved to your profile. Settings take effect on the '
-                    'next signal dispatch.',
-                    style: TextStyle(
-                      color: LuminColors.textSecondary,
-                      fontSize: 12,
-                      height: 1.4,
-                    ),
-                  ),
-                ],
+              child: Text(
+                label,
+                style: TextStyle(color: accent, fontSize: 13, fontWeight: FontWeight.w600),
               ),
+            ),
+            const InfoButton(
+              title: 'About auto-trade settings',
+              paragraphs: [
+                'These settings are saved to your account and take effect from the next signal.',
+              ],
             ),
           ],
         ),
