@@ -82,8 +82,17 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
   void initState() {
     super.initState();
     _refreshTosStatus();
-    _refreshConnectStatus();
-    _refreshConnectInfo();
+    // After the first frame, not here: both read `AppConfigScope.of(context)`
+    // before their first await, which Flutter forbids during initState. In a
+    // debug build that assert fired and each function's `catch (_)` turned it
+    // into "not connected" / "no IP" — so a connected user saw the connect
+    // form. Release builds compile the assert out, which is the only reason
+    // production looked right (2026-09-26).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _refreshConnectStatus();
+      _refreshConnectInfo();
+    });
   }
 
   Future<void> _refreshTosStatus() async {

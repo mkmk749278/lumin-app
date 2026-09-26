@@ -62,10 +62,24 @@ class AppConfig {
 /// updated copy.  Updating triggers a rebuild of the whole subtree so
 /// FutureBuilder-driven pages refetch automatically.
 class AppConfigScope extends StatefulWidget {
-  const AppConfigScope({super.key, required this.initial, required this.child});
+  const AppConfigScope({
+    super.key,
+    required this.initial,
+    required this.child,
+    this.debugDependencies,
+  });
 
   final AppConfig initial;
   final Widget child;
+
+  /// Test seam (2026-09-26): hand the scope a repository + auth pair instead
+  /// of building one from [initial]. Without it the only reachable states in
+  /// a widget test were mock mode (no identity, so every money screen stops
+  /// at "sign in first") or a live `HttpRepository` over the network — which
+  /// is why the take sheet, the one button that spends a user's capital, was
+  /// documented as impossible to pump. Production never passes it.
+  @visibleForTesting
+  final ({LuminRepository repo, AuthService? auth})? debugDependencies;
 
   static _AppConfigScopeState of(BuildContext context) {
     final inh = context.dependOnInheritedWidgetOfExactType<_InheritedConfig>();
@@ -196,6 +210,8 @@ class _AppConfigScopeState extends State<AppConfigScope> {
   /// AuthService.  Otherwise → MockRepository with no auth (mock-mode
   /// tests / offline preview need neither network nor identity).
   ({LuminRepository repo, AuthService? auth}) _buildDeps(AppConfig c) {
+    final injected = widget.debugDependencies;
+    if (injected != null) return injected;
     if (c.dataSource == DataSource.live && c.apiBaseUrl.isNotEmpty) {
       final auth = AuthService(baseUrl: c.apiBaseUrl);
       return (

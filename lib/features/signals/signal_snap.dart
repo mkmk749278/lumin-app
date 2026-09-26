@@ -142,7 +142,13 @@ class SignalSnapData {
 }
 
 class SignalSnap extends StatefulWidget {
-  const SignalSnap({super.key, required this.sig, this.onTap, this.service});
+  const SignalSnap({
+    super.key,
+    required this.sig,
+    this.onTap,
+    this.service,
+    this.clock,
+  });
 
   final MockSignal sig;
 
@@ -151,6 +157,11 @@ class SignalSnap extends StatefulWidget {
 
   /// Test seam — production uses [KlinesThumbnailService.instance].
   final KlinesThumbnailService? service;
+
+  /// Test seam — production reads the wall clock. The timeframe pick and the
+  /// entry-bar lookup must see ONE instant: read separately, a 15m boundary
+  /// crossed between them resolves the entry against a different bar.
+  final DateTime Function()? clock;
 
   static const double height = 110;
 
@@ -171,7 +182,9 @@ class _SignalSnapState extends State<SignalSnap> {
   Future<void> _load() async {
     try {
       final service = widget.service ?? KlinesThumbnailService.instance;
-      final tf = SignalSnapData.pickTf(SignalSnapData.ageMinutes(widget.sig));
+      final now = (widget.clock ?? DateTime.now)();
+      final tf = SignalSnapData.pickTf(
+          SignalSnapData.ageMinutes(widget.sig, now: now));
       final candles = await service.get(widget.sig.symbol, tf);
       if (!mounted) return;
       if (candles.isEmpty) {
@@ -179,7 +192,7 @@ class _SignalSnapState extends State<SignalSnap> {
         return;
       }
       setState(
-        () => _data = SignalSnapData.build(widget.sig, tf, candles),
+        () => _data = SignalSnapData.build(widget.sig, tf, candles, now: now),
       );
     } catch (_) {
       if (mounted) setState(() => _failed = true);
