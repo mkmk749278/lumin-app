@@ -127,14 +127,35 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
       final ok = await _confirmLiveFlip();
       if (ok != true) return;
     }
+    final wasLive = _liveEnabled;
+    final wasPaper = _paperEnabled;
     setState(() => _liveEnabled = newValue);
-    await _saveModeOnly();
+    await _saveModeOnly(wasLive: wasLive, wasPaper: wasPaper);
+  }
+
+  /// Set both switches from the mode the ENGINE holds.  A null mode is an
+  /// engine that did not say, so the switches keep what was asked rather
+  /// than reading "off" on a book that may be live.
+  void _applyEngineMode(String? mode) {
+    if (mode == null) return;
+    final m = mode.toLowerCase();
+    _liveEnabled = m == 'live' || m == 'both';
+    _paperEnabled = m == 'paper' || m == 'both';
   }
 
   /// Save only the execution mode, leaving sizing fields untouched.
   /// Called on every live/paper toggle so the engine sees the change
   /// immediately.  The Save ✓ button still persists all fields together.
-  Future<void> _saveModeOnly() async {
+  ///
+  /// The switches then show what the engine HOLDS, not what was tapped
+  /// (2026-09-26): on success they follow the mode the engine answered
+  /// with, and on a failed write they go back to [wasLive] / [wasPaper].
+  /// Before this, a failed turn-OFF left the switch reading "off" over a
+  /// book that was still placing real orders.
+  Future<void> _saveModeOnly({
+    required bool wasLive,
+    required bool wasPaper,
+  }) async {
     if (!mounted) return;
     final repo = AppConfigScope.of(context).repo;
     try {
@@ -142,9 +163,16 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
         AutoTradeSettings(mode: _computedMode),
       );
       if (!mounted) return;
-      setState(() => _settings = saved);
+      setState(() {
+        _settings = saved;
+        _applyEngineMode(saved.mode);
+      });
     } catch (e) {
       if (!mounted) return;
+      setState(() {
+        _liveEnabled = wasLive;
+        _paperEnabled = wasPaper;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(friendlyActionError(e, action: 'change the mode')),
@@ -172,6 +200,7 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
         _usingDefaults = saved.usingDefaults ?? false;
         // Refresh pause state from the server response.
         _settings = saved;
+        _applyEngineMode(saved.mode);
       });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -509,8 +538,10 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
               enabled: _paperEnabled,
               statusWidget: _paperStatusChip(),
               onChanged: (v) async {
+                final wasLive = _liveEnabled;
+                final wasPaper = _paperEnabled;
                 setState(() => _paperEnabled = v);
-                await _saveModeOnly();
+                await _saveModeOnly(wasLive: wasLive, wasPaper: wasPaper);
               },
             ),
             const SizedBox(height: LuminSpacing.sm),

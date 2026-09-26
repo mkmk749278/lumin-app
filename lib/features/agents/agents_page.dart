@@ -234,15 +234,18 @@ class _AgentDetailSheet extends StatefulWidget {
 }
 
 class _AgentDetailSheetState extends State<_AgentDetailSheet> {
-  late Future<_AgentDetailBundle> _future;
+  Future<_AgentDetailBundle>? _future;
 
+  // Started here, not in initState: `_load` reads `AppConfigScope.of(context)`
+  // before its first await, and an inherited-widget lookup during initState
+  // is an assert failure in debug builds — the sheet opened on its error
+  // state there. (The comment that stood here said the opposite: that the
+  // lookup was safe because the sheet's context sits below the scope. Being
+  // below the scope is necessary; it is not what the assert checks.)
   @override
-  void initState() {
-    super.initState();
-    // We must read AppConfigScope after the first frame; doing so here is
-    // safe because showModalBottomSheet is called with a context that
-    // sits below AppConfigScope.
-    _future = _load();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _future ??= _load();
   }
 
   Future<_AgentDetailBundle> _load() async {
