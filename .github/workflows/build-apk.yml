@@ -39,6 +39,12 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          # Pinned (2026-09-26). `stable` alone moves under the build: #169's
+          # web job broke when 3.47 moved CupertinoPageTransitionsBuilder out
+          # of material.dart, with nothing in that PR's diff to blame. 3.47.5
+          # is what main built green on (run 403). Bump deliberately, in its
+          # own PR, in BOTH flutter-action steps of this file.
+          flutter-version: 3.47.5
           cache: true
 
       - name: Flutter version
@@ -679,6 +685,12 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          # Pinned (2026-09-26). `stable` alone moves under the build: #169's
+          # web job broke when 3.47 moved CupertinoPageTransitionsBuilder out
+          # of material.dart, with nothing in that PR's diff to blame. 3.47.5
+          # is what main built green on (run 403). Bump deliberately, in its
+          # own PR, in BOTH flutter-action steps of this file.
+          flutter-version: 3.47.5
           cache: true
 
       - name: Inject firebase_options.dart web block (if secret is set)

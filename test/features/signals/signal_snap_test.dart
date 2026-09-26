@@ -211,12 +211,12 @@ void main() {
 
     KlinesThumbnailService service() {
       hits = 0;
-      // Newest bar opens on the real wall-clock 15m bucket — the widget
-      // resolves the entry bar against DateTime.now().
-      final lastOpen =
-          (DateTime.now().millisecondsSinceEpoch ~/ 1000 ~/ _tfSec) * _tfSec;
+      // Newest bar opens at [_now], and the widget is handed the same clock
+      // (`clock: () => _now`). This used to read the wall clock here, in the
+      // signal anchor and again inside the widget — three instants that
+      // disagree whenever a 15m boundary falls between them.
       final rows = [
-        for (final c in _candles(lastOpen: lastOpen))
+        for (final c in _candles())
           [c.time * 1000, '${c.open}', '${c.high}', '${c.low}', '${c.close}', '${c.volume}'],
       ];
       final mock = MockClient((req) async {
@@ -237,7 +237,7 @@ void main() {
 
     testWidgets('shimmer while loading, CustomPaint once resolved with one fetch',
         (tester) async {
-      await tester.pumpWidget(host(SignalSnap(sig: _sig(anchor: DateTime.now().toUtc()), service: service())));
+      await tester.pumpWidget(host(SignalSnap(sig: _sig(anchor: _now), service: service(), clock: () => _now)));
       expect(
         find.descendant(
           of: find.byType(SignalSnap),
@@ -256,13 +256,32 @@ void main() {
       expect(hits, 1);
     });
 
+    testWidgets('the widget resolves the entry bar on the clock it is given',
+        (tester) async {
+      // 240 minutes before the injected instant = 16 bars back. Read off the
+      // real wall clock instead, the signal would sit months in the future of
+      // these 2026-07-11 candles and the entry marker would not be found.
+      await tester.pumpWidget(host(SignalSnap(
+        sig: _sig(ageMins: 240),
+        service: service(),
+        clock: () => _now,
+      )));
+      await tester.pumpAndSettle();
+      final paint = tester.widget<CustomPaint>(find.descendant(
+        of: find.byType(SignalSnap),
+        matching: find.byType(CustomPaint),
+      ));
+      final data = (paint.painter! as SignalSnapPainter).data;
+      expect(data.entryIndex, data.candles.length - 1 - 16);
+    });
+
     testWidgets('fetch failure shows the unavailable placeholder',
         (tester) async {
       final mock = MockClient((req) async => http.Response('{}', 500));
       final s = KlinesThumbnailService.forTest(
         BinanceMarketData(httpClient: mock),
       );
-      await tester.pumpWidget(host(SignalSnap(sig: _sig(anchor: DateTime.now().toUtc()), service: s)));
+      await tester.pumpWidget(host(SignalSnap(sig: _sig(anchor: _now), service: s, clock: () => _now)));
       await tester.pumpAndSettle();
       expect(find.text('chart unavailable'), findsOneWidget);
     });
@@ -270,8 +289,9 @@ void main() {
     testWidgets('tap fires onTap', (tester) async {
       var tapped = false;
       await tester.pumpWidget(host(SignalSnap(
-        sig: _sig(anchor: DateTime.now().toUtc()),
+        sig: _sig(anchor: _now),
         service: service(),
+        clock: () => _now,
         onTap: () => tapped = true,
       )));
       await tester.pumpAndSettle();
