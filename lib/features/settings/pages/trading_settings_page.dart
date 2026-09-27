@@ -26,6 +26,7 @@ import 'invalidation_settings_page.dart';
 import 'pretp_settings_page.dart';
 import 'server_side_execution_page.dart';
 import 'symbol_preference_page.dart';
+import 'trading_platform_page.dart';
 
 class TradingSettingsPage extends StatelessWidget {
   const TradingSettingsPage({super.key});
@@ -46,6 +47,12 @@ class TradingSettingsPage extends StatelessWidget {
                 label: 'Auto-trade',
                 subtitle: 'Position size, leverage, and how much Lumin manages',
                 onTap: () => _push(context, const AutoTradeSettingsPage()),
+              ),
+              SettingsRow(
+                icon: Icons.swap_horiz,
+                label: 'Trading platform',
+                subtitle: 'Trade on Binance or CoinDCX (₹ or USDT margin)',
+                onTap: () => _push(context, const TradingPlatformPage()),
               ),
               SettingsRow(
                 icon: Icons.cloud_done_outlined,

@@ -28,6 +28,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:lumin/data/api_client.dart';
 import 'package:lumin/data/auth_service.dart';
+import 'package:lumin/data/coindcx_models.dart';
 import 'package:lumin/data/repository.dart';
 import 'package:lumin/data/server_side_execution_models.dart';
 
@@ -59,6 +60,22 @@ const engineManualTradeFields = {
   'tp_prices',
   'valid_for_minutes',
 };
+
+/// The engine's `CoinDCXConnectRequest` (360-v2 `src/api/coindcx_routes.py`,
+/// pinned there in `tests/api/test_app_request_contract.py`).  Every
+/// attestation box is its own key: the engine refuses a connect that does not
+/// confirm all three, so a renamed one would refuse every user.
+const engineCoinDCXConnectFields = {
+  'api_key',
+  'api_secret',
+  'attest_ip_bound',
+  'attest_no_withdraw',
+  'attest_trading_consent',
+};
+
+/// The engine's `VenueUpdateRequest` — read with `exclude_unset`, so the app
+/// sends only what the user changed.
+const engineVenueUpdateFields = {'venue', 'margin_currency', 'leverage'};
 
 class _FakeAuth extends Fake implements AuthService {
   @override
@@ -276,6 +293,95 @@ void main() {
           ['POST /api/auto-mode', 'GET /api/auto-mode'],
           reason: 'the screen must render what the engine says, not the click');
       expect(status.mode, 'paper');
+    });
+  });
+
+  group('CoinDCX key connect + trading platform', () {
+    test('connect sends the key, the secret and all three attestations',
+        () async {
+      final w = _Wire()
+        ..on('POST /api/coindcx/connect', {
+          'ok': true,
+          'key_public_id_first8': 'PUBKEY12',
+          'futures_wallet_ok': true,
+          'balances': {'USDT': 10.0},
+        });
+      final ok = await w.repo().connectCoinDCX(
+            apiKey: 'PUBKEY12345',
+            apiSecret: 'S',
+            attestIpBound: true,
+            attestNoWithdraw: true,
+            attestTradingConsent: true,
+          );
+      final body = w.bodyOf(w.only('POST', '/api/coindcx/connect'));
+      expect(body.keys.toSet(), engineCoinDCXConnectFields);
+      expect(body['attest_ip_bound'], isTrue);
+      expect(body['attest_no_withdraw'], isTrue);
+      expect(body['attest_trading_consent'], isTrue);
+      expect(ok.keyPublicIdFirst8, 'PUBKEY12');
+      expect(ok.balances, {'USDT': 10.0});
+    });
+
+    test('a refused connect carries the engine code, never the secret',
+        () async {
+      const secret = 'dcx-sEcReT-do-not-echo';
+      final w = _Wire()
+        ..on('POST /api/coindcx/connect',
+            {'detail': 'Confirm every item on the safety checklist.'},
+            status: 400,
+            headers: {'x-connect-error-code': 'ATTESTATION_REQUIRED'});
+      final err = await w
+          .repo()
+          .connectCoinDCX(
+            apiKey: 'K',
+            apiSecret: secret,
+            attestIpBound: true,
+            attestNoWithdraw: false,
+            attestTradingConsent: true,
+          )
+          .then<CoinDCXConnectError?>((_) => null,
+              onError: (Object e) => e as CoinDCXConnectError);
+      expect(err, isNotNull);
+      expect(err!.code, 'ATTESTATION_REQUIRED');
+      expect(err.httpStatus, 400);
+      expect(err.toString(), isNot(contains(secret)));
+    });
+
+    test('a venue change sends only what changed — never a null', () async {
+      final w = _Wire()
+        ..on('PUT /api/venue', {
+          'venue': 'binance',
+          'margin_currency': 'INR',
+          'leverage': 3.0,
+          'readable': true,
+          'coindcx': {'readable': true, 'connected': true, 'attested': true},
+        });
+      await w.repo().updateVenue(leverage: 3);
+      final body = w.bodyOf(w.only('PUT', '/api/venue'));
+      expect(body, {'leverage': 3.0});
+      expect(engineVenueUpdateFields.containsAll(body.keys), isTrue);
+    });
+
+    test('choosing CoinDCX sends exactly {venue}', () async {
+      final w = _Wire()
+        ..on('PUT /api/venue', {'venue': 'coindcx', 'readable': true});
+      final v = await w.repo().updateVenue(venue: 'coindcx');
+      expect(w.bodyOf(w.only('PUT', '/api/venue')), {'venue': 'coindcx'});
+      expect(v.venue, 'coindcx');
+    });
+
+    test('a 409 "not open yet" surfaces the engine\'s own sentence', () async {
+      final w = _Wire()
+        ..on('PUT /api/venue',
+            {'detail': 'CoinDCX auto-trade is not open yet.'},
+            status: 409,
+            headers: {'x-venue-error-code': 'COINDCX_NOT_OPEN'});
+      final err = await w
+          .repo()
+          .updateVenue(venue: 'coindcx')
+          .then<ApiError?>((_) => null, onError: (Object e) => e as ApiError);
+      expect(err?.statusCode, 409);
+      expect(err?.message, 'CoinDCX auto-trade is not open yet.');
     });
   });
 }

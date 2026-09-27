@@ -14,6 +14,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../shared/tokens.dart';
 import 'api_client.dart';
+import 'coindcx_models.dart';
 import 'live_feed_access.dart';
 import 'pair_context.dart';
 export 'live_feed_access.dart';
@@ -2275,6 +2276,46 @@ abstract class LuminRepository {
   /// engine loses its signed-call path once the blob is gone).
   Future<void> disconnectBinanceServerSide();
 
+  // ---- CoinDCX trading platform (engine 2026-09-27) ----------------------
+  // A user trades on ONE exchange.  These read and write that choice and the
+  // CoinDCX key.  Statuses are tri-state: `readable == false` is "we could
+  // not check", never "not connected".
+
+  /// `GET /api/coindcx/info` — IP to bind, attestation wording, ranges.
+  Future<CoinDCXInfo> fetchCoinDCXInfo();
+
+  /// `POST /api/coindcx/connect`.  Throws [CoinDCXConnectError] with the
+  /// engine's `X-Connect-Error-Code` on a refusal.  The secret travels once,
+  /// over TLS, and is never logged or stored on the device.
+  Future<CoinDCXConnectSuccess> connectCoinDCX({
+    required String apiKey,
+    required String apiSecret,
+    required bool attestIpBound,
+    required bool attestNoWithdraw,
+    required bool attestTradingConsent,
+  });
+
+  /// `GET /api/coindcx/connect/status`.
+  Future<CoinDCXConnectStatus> fetchCoinDCXStatus();
+
+  /// `DELETE /api/coindcx/connect` — refused (409) while a CoinDCX position
+  /// is open.
+  Future<void> disconnectCoinDCX();
+
+  /// `GET /api/venue`.
+  Future<VenueSettings> fetchVenue();
+
+  /// `PUT /api/venue` — only the fields passed are sent; the engine's
+  /// stored result is returned (read back, never echoed).
+  Future<VenueSettings> updateVenue({
+    String? venue,
+    String? marginCurrency,
+    double? leverage,
+  });
+
+  /// `GET /api/coindcx/positions`.
+  Future<CoinDCXPositions> fetchCoinDCXPositions();
+
   /// Fetch the user's auto-trade enablement state (engine PR-14
   /// follow-up — ``GET /api/auto-trade/user-status``).  Drives the
   /// Trade-tab "your auto-trade is disabled" banner.  Cached 5s
@@ -3727,6 +3768,112 @@ class MockRepository implements LuminRepository {
     // Mock: no-op; idempotent disconnect.
   }
 
+  // Mock CoinDCX: a not-connected user on Binance, so the connect guide and
+  // the platform picker are exercisable offline.  Static so
+  // ``const MockRepository()`` stays valid (same convention as the other
+  // mutable mock state in this class).
+  static VenueSettings _mockVenue = const VenueSettings(
+    venue: 'binance', marginCurrency: 'INR', leverage: 5, readable: true,
+    coindcxConnected: false, coindcxAttested: false, coindcxKeyReadable: true,
+    coindcxExecutionEnabled: false, coindcxAllowListed: true,
+  );
+  static bool _mockCoinDCXConnected = false;
+
+  @override
+  Future<CoinDCXInfo> fetchCoinDCXInfo() async => const CoinDCXInfo(
+        engineIp: '203.0.113.42',
+        attestationItems: [
+          'I created this CoinDCX API key only for Lumin and bound it to the server IP shown on this screen.',
+          'This key cannot withdraw funds.',
+          'I understand Lumin can place and close futures orders on my CoinDCX account with this key, within my Auto Trade settings.',
+        ],
+        marginCurrencies: ['INR', 'USDT'],
+        marginDefault: 'INR',
+        leverageMin: 1,
+        leverageMax: 20,
+        leverageDefault: 5,
+        inrPerUsdt: 102,
+        executionEnabled: false,
+        exitProfile: 'On CoinDCX every trade uses one exit: the whole position '
+            'closes at TP1 or at the stop.',
+      );
+
+  @override
+  Future<CoinDCXConnectSuccess> connectCoinDCX({
+    required String apiKey,
+    required String apiSecret,
+    required bool attestIpBound,
+    required bool attestNoWithdraw,
+    required bool attestTradingConsent,
+  }) async {
+    if (!(attestIpBound && attestNoWithdraw && attestTradingConsent)) {
+      throw const CoinDCXConnectError(
+          code: 'ATTESTATION_REQUIRED',
+          detail: 'Confirm every item on the safety checklist to connect.');
+    }
+    _mockCoinDCXConnected = true;
+    return CoinDCXConnectSuccess(
+      keyPublicIdFirst8: apiKey.length >= 8 ? apiKey.substring(0, 8) : apiKey,
+      balances: const {'USDT': 0, 'INR': 0},
+    );
+  }
+
+  @override
+  Future<CoinDCXConnectStatus> fetchCoinDCXStatus() async => CoinDCXConnectStatus(
+        readable: true,
+        connected: _mockCoinDCXConnected,
+        attested: _mockCoinDCXConnected,
+      );
+
+  @override
+  Future<void> disconnectCoinDCX() async => _mockCoinDCXConnected = false;
+
+  @override
+  Future<VenueSettings> fetchVenue() async => VenueSettings(
+        venue: _mockVenue.venue,
+        marginCurrency: _mockVenue.marginCurrency,
+        leverage: _mockVenue.leverage,
+        readable: true,
+        coindcxConnected: _mockCoinDCXConnected,
+        coindcxAttested: _mockCoinDCXConnected,
+        coindcxKeyReadable: true,
+        coindcxExecutionEnabled: false,
+        coindcxAllowListed: true,
+      );
+
+  @override
+  Future<VenueSettings> updateVenue({
+    String? venue,
+    String? marginCurrency,
+    double? leverage,
+  }) async {
+    // Mirror the engine: choosing CoinDCX needs an attested key, and is
+    // refused (409) while CoinDCX execution is not open for this account.
+    if (venue == 'coindcx') {
+      if (!_mockCoinDCXConnected) {
+        throw ApiError(409, 'Connect an attested CoinDCX key first.');
+      }
+      throw ApiError(409,
+          'CoinDCX trading is not open for your account yet. Your trades stay on Binance.');
+    }
+    _mockVenue = VenueSettings(
+      venue: venue ?? _mockVenue.venue,
+      marginCurrency: marginCurrency ?? _mockVenue.marginCurrency,
+      leverage: leverage ?? _mockVenue.leverage,
+      readable: true,
+      coindcxConnected: _mockCoinDCXConnected,
+      coindcxAttested: _mockCoinDCXConnected,
+      coindcxKeyReadable: true,
+      coindcxExecutionEnabled: false,
+      coindcxAllowListed: true,
+    );
+    return fetchVenue();
+  }
+
+  @override
+  Future<CoinDCXPositions> fetchCoinDCXPositions() async =>
+      const CoinDCXPositions(readable: true, positions: []);
+
   @override
   Future<AutoTradeRuntimeStatus> getAutoTradeRuntimeStatus() async {
     // Mock: all gates configured + green, exercising the armed-card
@@ -5076,6 +5223,80 @@ class HttpRepository implements LuminRepository {
   Future<void> disconnectBinanceServerSide() async {
     await client.delete('/api/binance/connect');
   }
+
+  @override
+  Future<CoinDCXInfo> fetchCoinDCXInfo() async => CoinDCXInfo.fromJson(
+      (await client.get('/api/coindcx/info')) as Map<String, dynamic>);
+
+  @override
+  Future<CoinDCXConnectSuccess> connectCoinDCX({
+    required String apiKey,
+    required String apiSecret,
+    required bool attestIpBound,
+    required bool attestNoWithdraw,
+    required bool attestTradingConsent,
+  }) async {
+    // postRaw so the engine's typed refusal headers are readable.  The body
+    // carries the plaintext secret — never log it.
+    final resp = await client.postRaw('/api/coindcx/connect', body: {
+      'api_key': apiKey,
+      'api_secret': apiSecret,
+      'attest_ip_bound': attestIpBound,
+      'attest_no_withdraw': attestNoWithdraw,
+      'attest_trading_consent': attestTradingConsent,
+    });
+    if (resp.statusCode >= 200 && resp.statusCode < 300) {
+      return CoinDCXConnectSuccess.fromJson(resp.body.isEmpty
+          ? <String, dynamic>{}
+          : jsonDecode(resp.body) as Map<String, dynamic>);
+    }
+    String detail = 'CoinDCX connect failed (HTTP ${resp.statusCode})';
+    try {
+      final j = jsonDecode(resp.body);
+      if (j is Map && j['detail'] != null) detail = '${j['detail']}';
+    } catch (_) {/* keep default */}
+    throw CoinDCXConnectError(
+      code: resp.headers['x-connect-error-code'] ?? 'UNKNOWN',
+      detail: detail,
+      httpStatus: resp.statusCode,
+      engineIp: resp.headers['x-engine-vps-ip'],
+    );
+  }
+
+  @override
+  Future<CoinDCXConnectStatus> fetchCoinDCXStatus() async =>
+      CoinDCXConnectStatus.fromJson(
+          (await client.get('/api/coindcx/connect/status')) as Map<String, dynamic>);
+
+  @override
+  Future<void> disconnectCoinDCX() async {
+    await client.delete('/api/coindcx/connect');
+  }
+
+  @override
+  Future<VenueSettings> fetchVenue() async => VenueSettings.fromJson(
+      (await client.get('/api/venue')) as Map<String, dynamic>);
+
+  @override
+  Future<VenueSettings> updateVenue({
+    String? venue,
+    String? marginCurrency,
+    double? leverage,
+  }) async {
+    // Only what the user changed: the engine merges a partial row.
+    final body = <String, dynamic>{
+      if (venue != null) 'venue': venue,
+      if (marginCurrency != null) 'margin_currency': marginCurrency,
+      if (leverage != null) 'leverage': leverage,
+    };
+    return VenueSettings.fromJson(
+        (await client.put('/api/venue', body: body)) as Map<String, dynamic>);
+  }
+
+  @override
+  Future<CoinDCXPositions> fetchCoinDCXPositions() async =>
+      CoinDCXPositions.fromJson(
+          (await client.get('/api/coindcx/positions')) as Map<String, dynamic>);
 
   @override
   Future<AutoTradeRuntimeStatus> getAutoTradeRuntimeStatus() async {
