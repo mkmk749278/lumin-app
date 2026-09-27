@@ -132,7 +132,6 @@ class _TradingPlatformPageState extends State<TradingPlatformPage> {
           : 'Auto-trade now places your trades on Binance.');
     } catch (e) {
       if (!mounted) return;
-<<<<<<< HEAD
       if (_unconfirmed(e)) {
         final stored = await _reread();
         if (!mounted) return;
@@ -149,8 +148,6 @@ class _TradingPlatformPageState extends State<TradingPlatformPage> {
           return;
         }
       }
-=======
->>>>>>> origin/claude/multi-exchange-audit-0azeiv
       _say(_detailOf(e), error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -167,7 +164,6 @@ class _TradingPlatformPageState extends State<TradingPlatformPage> {
       setState(() => _venue = v);
     } catch (e) {
       if (!mounted) return;
-<<<<<<< HEAD
       if (_unconfirmed(e)) {
         final stored = await _reread();
         if (!mounted) return;
@@ -176,15 +172,12 @@ class _TradingPlatformPageState extends State<TradingPlatformPage> {
             (leverage == null || stored.leverage == leverage);
         if (landed) return;
       }
-=======
->>>>>>> origin/claude/multi-exchange-audit-0azeiv
       _say(_detailOf(e), error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-<<<<<<< HEAD
   /// No reply, or a server error: the change may or may not have been
   /// stored.  (Owner, 2026-09-27: choosing CoinDCX came back "no reply
   /// arrived in time" while the tiles still showed Binance, so nobody could
@@ -211,8 +204,6 @@ class _TradingPlatformPageState extends State<TradingPlatformPage> {
   static String _venueName(String venue) =>
       venue == 'coindcx' ? 'CoinDCX' : 'Binance';
 
-=======
->>>>>>> origin/claude/multi-exchange-audit-0azeiv
   Future<void> _connect() async {
     final key = _keyCtrl.text.trim();
     final secret = _secretCtrl.text.trim();
