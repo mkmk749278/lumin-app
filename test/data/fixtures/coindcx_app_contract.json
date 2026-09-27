@@ -1,0 +1,91 @@
+{
+  "info": {
+    "attestation_items": [
+      "I created this CoinDCX API key only for Lumin and bound it to the server IP shown on this screen.",
+      "This key cannot withdraw funds.",
+      "I understand Lumin can place and close futures orders on my CoinDCX account with this key, within my Auto Trade settings."
+    ],
+    "attestation_version": 1,
+    "engine_ip": "203.0.113.9",
+    "execution_enabled": true,
+    "exit_profile": "On CoinDCX every trade uses one exit: the whole position closes at TP1 or at the stop, placed on CoinDCX the moment the entry fills. Pre-TP partials, TP2/TP3 and trailing exits are Binance-only.",
+    "inr_per_usdt": 102.0,
+    "leverage_default": 5.0,
+    "leverage_max": 20.0,
+    "leverage_min": 1.0,
+    "margin_currencies": [
+      "INR",
+      "USDT"
+    ],
+    "margin_default": "INR"
+  },
+  "positions": {
+    "positions": [
+      {
+        "close_reason": "TP1",
+        "closed_at": null,
+        "conversion_price": 102.0,
+        "created_at": "<ts>",
+        "entry_filled": 0.2001,
+        "entry_order_id": "",
+        "entry_target": 0.2,
+        "exit_price": 0.205,
+        "fees_usdt": 0.02,
+        "last_error": "",
+        "leverage": 3.0,
+        "liquidation_price": 0.0,
+        "margin_currency": "INR",
+        "notional_inr": 2041.02,
+        "notional_usdt": 20.01,
+        "opened_at": null,
+        "pair": "B-DOGE_USDT",
+        "position_id": "",
+        "qty": 100.0,
+        "realized_pnl_inr": 49.98,
+        "realized_pnl_usdt": 0.49,
+        "side": "LONG",
+        "signal_id": "SIG-1",
+        "sl_order_id": "",
+        "sl_price": 0.196,
+        "sl_resting": false,
+        "source": "auto",
+        "state": "CLOSED",
+        "symbol": "DOGEUSDT",
+        "tp_order_id": "",
+        "tp_price": 0.205,
+        "tp_resting": false,
+        "uid": "u1",
+        "updated_at": "<ts>",
+        "venue": "coindcx"
+      }
+    ],
+    "readable": true
+  },
+  "status_not_connected": {
+    "attested": false,
+    "connected": false,
+    "engine_ip": "203.0.113.9",
+    "readable": true
+  },
+  "status_unreadable": {
+    "attested": null,
+    "connected": null,
+    "engine_ip": "203.0.113.9",
+    "readable": false
+  },
+  "venue_coindcx": {
+    "coindcx": {
+      "allow_listed": true,
+      "attested": true,
+      "connected": true,
+      "execution_enabled": true,
+      "key_public_id_first8": "PUBKEY12",
+      "readable": true
+    },
+    "leverage": 3.0,
+    "margin_currency": "INR",
+    "readable": true,
+    "reason": "ok",
+    "venue": "coindcx"
+  }
+}
