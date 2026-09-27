@@ -132,6 +132,22 @@ class _TradingPlatformPageState extends State<TradingPlatformPage> {
           : 'Auto-trade now places your trades on Binance.');
     } catch (e) {
       if (!mounted) return;
+      if (_unconfirmed(e)) {
+        final stored = await _reread();
+        if (!mounted) return;
+        if (stored != null && stored.venue == venue) {
+          _say('Saved. Auto-trade now places your trades on '
+              '${_venueName(venue)}. The first reply was slow, so we checked '
+              'again, and the change is stored.');
+          return;
+        }
+        if (stored != null) {
+          _say('${_detailOf(e)} We checked again: your platform is still '
+              '${_venueName(stored.venue)}.',
+              error: true);
+          return;
+        }
+      }
       _say(_detailOf(e), error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -148,11 +164,45 @@ class _TradingPlatformPageState extends State<TradingPlatformPage> {
       setState(() => _venue = v);
     } catch (e) {
       if (!mounted) return;
+      if (_unconfirmed(e)) {
+        final stored = await _reread();
+        if (!mounted) return;
+        final landed = stored != null &&
+            (margin == null || stored.marginCurrency == margin) &&
+            (leverage == null || stored.leverage == leverage);
+        if (landed) return;
+      }
       _say(_detailOf(e), error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
+
+  /// No reply, or a server error: the change may or may not have been
+  /// stored.  (Owner, 2026-09-27: choosing CoinDCX came back "no reply
+  /// arrived in time" while the tiles still showed Binance, so nobody could
+  /// tell which it was.)  A 4xx is the engine's answer and needs no re-read.
+  bool _unconfirmed(Object e) {
+    if (e is CoinDCXConnectError) return false;
+    if (e is ApiError) return e.statusCode == 0 || e.statusCode >= 500;
+    return true;
+  }
+
+  /// Re-reads what the engine stored and shows it.  Returns `null` when that
+  /// read fails too, so the caller keeps the original, unconfirmed wording
+  /// rather than guessing.
+  Future<VenueSettings?> _reread() async {
+    try {
+      final v = await AppConfigScope.of(context).repo.fetchVenue();
+      if (mounted) setState(() => _venue = v);
+      return v;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static String _venueName(String venue) =>
+      venue == 'coindcx' ? 'CoinDCX' : 'Binance';
 
   Future<void> _connect() async {
     final key = _keyCtrl.text.trim();

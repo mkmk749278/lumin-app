@@ -51,6 +51,10 @@ class _Repo extends MockRepository {
   int connects = 0;
   ApiError? refuseVenue;
 
+  /// Stores the change, then the reply is lost (the owner's 2026-09-27 case).
+  bool storeThenLoseReply = false;
+  bool rereadFails = false;
+
   VenueSettings _v() => VenueSettings(
         venue: venue,
         marginCurrency: 'INR',
@@ -93,8 +97,14 @@ class _Repo extends MockRepository {
   Future<CoinDCXPositions> fetchCoinDCXPositions() async =>
       const CoinDCXPositions(readable: true, positions: []);
 
+  int venueReads = 0;
+
   @override
-  Future<VenueSettings> fetchVenue() async => _v();
+  Future<VenueSettings> fetchVenue() async {
+    venueReads++;
+    if (rereadFails && venueReads > 1) throw ApiError(0, 'offline');
+    return _v();
+  }
 
   @override
   Future<VenueSettings> updateVenue({
@@ -107,6 +117,10 @@ class _Repo extends MockRepository {
       'margin_currency': marginCurrency,
       'leverage': leverage,
     });
+    if (storeThenLoseReply) {
+      if (venue != null) this.venue = venue;
+      throw ApiError(0, 'timeout');
+    }
     final r = refuseVenue;
     if (r != null) throw r;
     if (venue != null) this.venue = venue;
@@ -187,6 +201,51 @@ void main() {
     await tester.tap(find.byKey(const Key('platform-coindcx')));
     await tester.pumpAndSettle();
     expect(_allText(tester), contains('CoinDCX auto-trade is not open yet.'));
+  });
+
+  testWidgets('a lost reply is re-read: a stored choice reads as saved',
+      (tester) async {
+    final repo = _Repo(connected: true)..storeThenLoseReply = true;
+    await _pump(tester, repo);
+    await tester.tap(find.byKey(const Key('platform-coindcx')));
+    await tester.pumpAndSettle();
+    expect(repo.venueReads, 2);
+    final text = _allText(tester);
+    expect(text, contains('the change is stored'));
+    expect(text, isNot(contains('still Binance')));
+  });
+
+  testWidgets('a lost reply that did not land says which platform is stored',
+      (tester) async {
+    final repo = _Repo(connected: true)
+      ..refuseVenue = ApiError(0, 'timeout');
+    await _pump(tester, repo);
+    await tester.tap(find.byKey(const Key('platform-coindcx')));
+    await tester.pumpAndSettle();
+    expect(repo.venueReads, 2);
+    expect(_allText(tester), contains('your platform is still Binance'));
+  });
+
+  testWidgets('an engine refusal is not re-read', (tester) async {
+    final repo = _Repo(connected: true)
+      ..refuseVenue = ApiError(409, 'CoinDCX auto-trade is not open yet.');
+    await _pump(tester, repo);
+    await tester.tap(find.byKey(const Key('platform-coindcx')));
+    await tester.pumpAndSettle();
+    expect(repo.venueReads, 1);
+  });
+
+  testWidgets('if the re-read fails too, the unconfirmed wording stays',
+      (tester) async {
+    final repo = _Repo(connected: true)
+      ..refuseVenue = ApiError(0, 'timeout')
+      ..rereadFails = true;
+    await _pump(tester, repo);
+    await tester.tap(find.byKey(const Key('platform-coindcx')));
+    await tester.pumpAndSettle();
+    final text = _allText(tester);
+    expect(text, isNot(contains('still Binance')));
+    expect(text, isNot(contains('the change is stored')));
   });
 
   testWidgets('connect needs every box; the secret never lingers',

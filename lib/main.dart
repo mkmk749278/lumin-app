@@ -285,16 +285,35 @@ class _AuthGateState extends State<_AuthGate> {
     if (_verifyingUid == user.uid) return;
     _verifyingUid = user.uid;
     String? token;
-    try {
-      token = await auth.currentIdToken(forceRefresh: true);
-    } catch (_) {
-      // Treat any throw (Play Integrity rejection, network error,
-      // revoked refresh material) the same as a null token — fall
-      // through to signOut + PhoneSignInPage so the user has an
-      // actionable path.
-      token = null;
+    Object? failure;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        token = await auth.currentIdToken(forceRefresh: true);
+        failure = null;
+        break;
+      } catch (e) {
+        failure = e;
+        // A dead session will not come back on retry — stop at once.
+        if (AuthService.sessionIsDead(e)) break;
+        await Future<void>.delayed(Duration(seconds: 5 * (attempt + 1)));
+        if (!mounted) return;
+      }
     }
     if (!mounted) return;
+    if (failure != null && !AuthService.sessionIsDead(failure)) {
+      // Unreachable, not dead (2026-09-27): no network yet after a cold
+      // start, a rate limit, an internal error.  Signing out here threw
+      // away a real account and dropped the user back to "Sign up".  Keep
+      // the session: the cached token still serves, the SDK refreshes on
+      // its own, and the API client force-refreshes on any 401.  Marked
+      // verified for this run so a rebuild does not start another round of
+      // refreshes while the network is down.
+      setState(() {
+        _verifiedUid = user.uid;
+        _verifyingUid = null;
+      });
+      return;
+    }
     if (token == null) {
       // A guest whose token will not mint would otherwise loop: sign out →
       // no user → sign in as guest → same failure.  Stop at phone sign-in.

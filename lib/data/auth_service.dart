@@ -152,6 +152,33 @@ class AuthService {
     await _auth.signInAnonymously();
   }
 
+  /// Firebase error codes that mean the cached session can never mint a
+  /// token again: the account is gone or disabled, or its refresh material
+  /// was revoked or restored onto a different install.  Only these justify
+  /// signing a user out on a failed refresh.
+  static const Set<String> deadSessionCodes = {
+    'user-disabled',
+    'user-not-found',
+    'user-token-expired',
+    'invalid-user-token',
+    'invalid-credential',
+  };
+
+  /// Whether a failed token refresh means the session is DEAD (sign out)
+  /// rather than merely unreachable right now (keep it).
+  ///
+  /// Owner, 2026-09-27: *"recent APKs are resetting user after clearing
+  /// from recent apps, asking sign up again"*.  A cold start ran a forced
+  /// refresh and signed out on ANY throw — a network error seconds after
+  /// launch included — and since guest mode the gate then quietly made a
+  /// fresh anonymous session, so a paying user landed back on "Sign up".
+  /// A lost account needs its phone number and OTP again; a slow network
+  /// fixes itself.  So only a named, definitive code signs out; anything
+  /// else (network, rate limit, internal, a non-Firebase error) keeps the
+  /// session.
+  static bool sessionIsDead(Object error) =>
+      error is FirebaseAuthException && deadSessionCodes.contains(error.code);
+
   /// Returns the current Firebase ID token, or null if no user is
   /// signed in.  Passing `forceRefresh: true` bypasses the SDK's
   /// in-memory cache and round-trips to Firebase — the API client
