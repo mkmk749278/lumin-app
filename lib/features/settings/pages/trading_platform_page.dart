@@ -117,6 +117,14 @@ class _TradingPlatformPageState extends State<TradingPlatformPage> {
       return e.message;
     }
     if (e is CoinDCXConnectError) return e.detail;
+    // A server error the engine could name ("Server error (OperationalError,
+    // ref 1a2b3c4d)") keeps its name on screen: the reference finds the
+    // traceback in the server log, so a screenshot is enough to diagnose it
+    // (2026-09-27 — "no reply arrived" had no cause anywhere).
+    if (e is ApiError && e.statusCode >= 500 &&
+        e.message.startsWith('Server error (')) {
+      return '${friendlyActionError(e, action: 'save this')} [${e.message}]';
+    }
     return friendlyActionError(e, action: 'save this');
   }
 

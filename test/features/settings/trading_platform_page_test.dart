@@ -248,6 +248,16 @@ void main() {
     expect(text, isNot(contains('the change is stored')));
   });
 
+  testWidgets('a named server error keeps its reference on screen',
+      (tester) async {
+    final repo = _Repo(connected: true)
+      ..refuseVenue = ApiError(500, 'Server error (OperationalError, ref 1a2b3c4d).');
+    await _pump(tester, repo);
+    await tester.tap(find.byKey(const Key('platform-coindcx')));
+    await tester.pumpAndSettle();
+    expect(_allText(tester), contains('ref 1a2b3c4d'));
+  });
+
   testWidgets('connect needs every box; the secret never lingers',
       (tester) async {
     final repo = _Repo();
