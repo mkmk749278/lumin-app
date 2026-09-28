@@ -13,6 +13,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lumin/features/settings/pages/auto_trade_settings_page.dart';
 import 'package:lumin/features/settings/pages/server_side_execution_page.dart';
+import 'package:lumin/features/settings/pages/trading_platform_page.dart';
 import 'package:lumin/features/signals/take_recovery_action.dart';
 import 'package:lumin/data/take_error_mapper.dart';
 import 'package:lumin/data/server_side_execution_models.dart';
@@ -141,7 +142,7 @@ void main() {
 
     testWidgets('names the destination for a key failure', (tester) async {
       await pump(tester, TakeRecovery.exchangeConnection);
-      expect(find.textContaining('Fix connection'), findsOneWidget);
+      expect(find.textContaining('Fix Binance key'), findsOneWidget);
     });
 
     testWidgets('names the destination for a sizing failure', (tester) async {
@@ -223,5 +224,14 @@ void main() {
         }
       }
     });
+  });
+
+  test('a CoinDCX key problem routes to the CoinDCX key, not the Binance one',
+      () {
+    final m = translateTakeRejection(_rejected('CoinDCXKeyProblem'));
+    expect(m.recovery, TakeRecovery.coindcxConnection);
+    final d = TakeRecoveryAction.destinationFor(m.recovery)!;
+    expect(d.$1, contains('CoinDCX'));
+    expect(d.$2(), isA<TradingPlatformPage>());
   });
 }

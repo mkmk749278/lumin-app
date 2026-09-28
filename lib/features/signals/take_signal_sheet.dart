@@ -20,6 +20,7 @@ import '../../data/api_client.dart' show ApiError;
 import '../../data/app_config.dart';
 import '../../data/binance_client.dart';
 import '../../data/binance_keys_service.dart';
+import '../../data/coindcx_models.dart';
 import '../../data/mock_data.dart';
 import '../../data/order_executor.dart';
 import '../../data/order_log.dart';
@@ -74,6 +75,15 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
   /// Binance-rejected; server-side is the only path that works for it.
   bool _serverSide = false;
 
+  /// The exchange the engine will place this take on (2026-09-28).  A user
+  /// who chose CoinDCX is routed to the CoinDCX executor engine-side, so the
+  /// sheet must say CoinDCX — it used to say "your connected Binance account"
+  /// above a CoinDCX refusal (owner screenshot).  Read from `/api/venue`,
+  /// the same stored choice the engine routes on; unreadable → Binance,
+  /// which is also the engine's own fallback.
+  String _venue = 'binance';
+  String get _venueName => _venue == 'coindcx' ? 'CoinDCX' : 'Binance';
+
   BinanceKeys? _keys;
   AutoTradeSettings? _settings;
   double _equity = 0.0;
@@ -111,6 +121,37 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
       return;
     }
     try {
+      // Platform first: a CoinDCX user never needs a Binance key here.
+      VenueSettings? venue;
+      try {
+        venue = await scope.repo.fetchVenue();
+      } catch (_) {
+        venue = null;
+      }
+      if (venue != null && venue.readable && venue.isCoinDCX) {
+        if (venue.coindcxConnected == false) {
+          if (!mounted) return;
+          setState(() {
+            _venue = 'coindcx';
+            _loading = false;
+            _loadError =
+                'Your trading platform is CoinDCX, but no CoinDCX API key is '
+                'connected. Connect one on Settings → Auto-trade & execution '
+                '→ Trading platform & API keys.';
+          });
+          return;
+        }
+        final settings = await scope.repo.fetchUserAutoTradeSettings();
+        if (!mounted) return;
+        setState(() {
+          _venue = 'coindcx';
+          _serverSide = true;
+          _settings = settings;
+          _loading = false;
+        });
+        return;
+      }
+
       // Server-connected key first — the engine path needs no device
       // keys, no client-side equity read, and works with an
       // IP-whitelisted key.  Soft-fail to the device-key flow when the
@@ -141,9 +182,9 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
         setState(() {
           _loading = false;
           _loadError =
-              'No Binance key connected. Connect one on Settings → '
-              'Server-side auto-trade — Lumin places and manages the '
-              'order for you.';
+              'No Binance API key connected. Connect one on Settings → '
+              'Auto-trade & execution → Trading platform & API keys — '
+              'Lumin places and manages the order for you.';
         });
         return;
       }
@@ -153,10 +194,11 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
         setState(() {
           _loading = false;
           _loadError =
-              'No Binance key found. Connect one on Settings → '
-              'Server-side auto-trade (recommended — Lumin places and '
-              'manages the order for you), or store device API keys on '
-              'Settings → API keys for phone-side orders.';
+              'No Binance API key found. Connect one on Settings → '
+              'Auto-trade & execution → Trading platform & API keys '
+              '(recommended — Lumin places and manages the order for '
+              'you), or store device API keys on Settings → API keys for '
+              'phone-side orders.';
         });
         return;
       }
@@ -275,7 +317,7 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
       if (result.placed) {
         success = true;
         final qty = result.totalQty;
-        message = 'Order placed on Binance'
+        message = 'Order placed on $_venueName'
             '${qty != null ? ' — qty ${qty.toStringAsFixed(6)}' : ''}. '
             'Lumin manages the SL/TPs from here; track it on '
             'Trade → Live.';
@@ -496,17 +538,18 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
           borderRadius: BorderRadius.circular(LuminRadii.sm),
           border: Border.all(color: LuminColors.accent.withOpacity(0.30)),
         ),
-        child: const Row(
+        child: Row(
           children: [
-            Icon(Icons.cloud_done_outlined,
+            const Icon(Icons.cloud_done_outlined,
                 color: LuminColors.accent, size: 16),
-            SizedBox(width: LuminSpacing.sm),
+            const SizedBox(width: LuminSpacing.sm),
             Expanded(
               child: Text(
-                'Placed by Lumin on your connected Binance account — '
+                'Placed by Lumin on your connected $_venueName account — '
                 'entry, stop-loss and take-profits managed for you. '
                 'Real money.',
-                style: TextStyle(
+                key: const Key('take-venue-banner'),
+                style: const TextStyle(
                   color: LuminColors.accent,
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
@@ -603,14 +646,14 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
             // told us that number we still publish the stop distance — the
             // percentage is a property of the geometry and needs no size.
             _plannedLossRow(notionalUsd: notional),
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: LuminSpacing.xs),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: LuminSpacing.xs),
               child: Text(
                 'Lumin sizes the order from your position size, places '
-                'the entry + stop-loss + take-profits on Binance, and '
+                'the entry + stop-loss${_venue == 'coindcx' ? ' + take-profit' : ' + take-profits'} on $_venueName, and '
                 'manages the position. Change your position size in '
                 'Settings → Auto-trade.',
-                style: TextStyle(
+                style: const TextStyle(
                   color: LuminColors.textSecondary,
                   fontSize: 12,
                   height: 1.4,

@@ -33,6 +33,12 @@ enum TakeRecovery {
   /// that most looks permanent to a user and most is not.
   exchangeConnection,
 
+  /// Connect or re-connect the CoinDCX key (Trading platform & API keys page,
+  /// 2026-09-28). Kept apart from [exchangeConnection], which is the Binance
+  /// key page: sending a CoinDCX user there asks them to fix a key they do
+  /// not trade with.
+  coindcxConnection,
+
   /// Position size and leverage.
   autoTradeSettings,
 
@@ -81,6 +87,8 @@ const Map<String, TakeRecovery> _recoveryByRejectClass = {
   'OrderPlacementKeyError': TakeRecovery.exchangeConnection,
   // "Go to Settings → Auto-trade and increase your position size".
   'NotionalTooSmall': TakeRecovery.autoTradeSettings,
+  // CoinDCX executor: "Reconnect your CoinDCX key …".
+  'CoinDCXKeyProblem': TakeRecovery.coindcxConnection,
 };
 
 /// Business rejection (HTTP 200, ``outcome: rejected``).

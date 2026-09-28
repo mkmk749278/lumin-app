@@ -20,6 +20,7 @@ import '../../shared/tokens.dart';
 import '../settings/pages/auto_trade_settings_page.dart';
 import '../settings/pages/server_side_execution_page.dart';
 import '../settings/pages/subscription_page.dart';
+import '../settings/pages/trading_platform_page.dart';
 import '../settings/pages/web_paywall_page.dart';
 
 class TakeRecoveryAction extends StatelessWidget {
@@ -50,7 +51,9 @@ class TakeRecoveryAction extends StatelessWidget {
   static (String, Widget Function())? destinationFor(TakeRecovery recovery) {
     switch (recovery) {
       case TakeRecovery.exchangeConnection:
-        return ('Fix connection', () => const ServerSideExecutionPage());
+        return ('Fix Binance key', () => const ServerSideExecutionPage());
+      case TakeRecovery.coindcxConnection:
+        return ('Fix CoinDCX key', () => const TradingPlatformPage());
       case TakeRecovery.autoTradeSettings:
         return (
           'Open auto-trade settings',

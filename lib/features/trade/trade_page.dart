@@ -799,7 +799,7 @@ class _TradePageState extends State<TradePage>
             description: 'Flip the toggle above to start simulating fills '
                 'against the engine\'s paper book.  Server-side live '
                 'auto-trade is configured separately in Settings → '
-                'Server-side auto-trade.',
+                'Auto-trade & execution.',
           )
         else ...[
           const SizedBox(height: LuminSpacing.md),

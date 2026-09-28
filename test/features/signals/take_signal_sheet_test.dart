@@ -23,6 +23,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:lumin/data/api_client.dart';
 import 'package:lumin/data/app_config.dart';
 import 'package:lumin/data/auth_service.dart';
+import 'package:lumin/data/coindcx_models.dart';
 import 'package:lumin/data/mock_data.dart';
 import 'package:lumin/data/repository.dart';
 import 'package:lumin/data/server_side_execution_models.dart';
@@ -34,7 +35,23 @@ class _SignedIn extends Fake implements AuthService {
 }
 
 class _Repo extends MockRepository {
-  _Repo();
+  _Repo({this.venue = 'binance', this.coindcxConnected = true});
+
+  final String venue;
+  final bool coindcxConnected;
+
+  @override
+  Future<VenueSettings> fetchVenue() async => VenueSettings(
+        venue: venue,
+        marginCurrency: 'INR',
+        leverage: 5,
+        readable: true,
+        coindcxConnected: coindcxConnected,
+        coindcxAttested: coindcxConnected,
+        coindcxKeyReadable: true,
+        coindcxExecutionEnabled: true,
+        coindcxAllowListed: true,
+      );
 
   int takes = 0;
   final List<String> takenIds = [];
@@ -219,6 +236,31 @@ void main() {
     final repo = _Repo();
     await _open(tester, repo: repo);
     expect(find.text('Sign in with phone first to take signals.'), findsOneWidget);
+    expect(_confirmEnabled(tester), isFalse);
+    expect(repo.takes, 0);
+  });
+
+  // Owner screenshot 2026-09-28: the sheet said "your connected Binance
+  // account" above a CoinDCX refusal.
+  testWidgets('a CoinDCX user is told CoinDCX, never Binance', (tester) async {
+    final repo = _Repo(venue: 'coindcx');
+    await _open(tester, repo: repo, auth: _SignedIn());
+    final banner = tester.widget<Text>(find.byKey(const Key('take-venue-banner')));
+    expect(banner.data, contains('CoinDCX'));
+    expect(banner.data, isNot(contains('Binance')));
+    await tester.tap(_confirm);
+    await tester.pump();
+    repo.answer.complete(const TakeSignalResult(
+        outcome: 'placed', signalId: 'sig-42', totalQty: 1023));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Order placed on CoinDCX'), findsOneWidget);
+  });
+
+  testWidgets('a CoinDCX user with no CoinDCX key is sent to connect THAT key',
+      (tester) async {
+    final repo = _Repo(venue: 'coindcx', coindcxConnected: false);
+    await _open(tester, repo: repo, auth: _SignedIn());
+    expect(find.textContaining('no CoinDCX API key is connected'), findsOneWidget);
     expect(_confirmEnabled(tester), isFalse);
     expect(repo.takes, 0);
   });

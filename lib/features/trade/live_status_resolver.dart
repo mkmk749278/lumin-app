@@ -162,7 +162,7 @@ LiveStatus resolveLiveStatus({
               // if it is already connected, that is an instruction to redo
               // finished work on the screen that spends their money.
               ? 'We couldn\'t check this just now — don\'t re-add your key.'
-              : 'Settings → Server-side auto-trade.',
+              : 'Settings → Auto-trade & execution → Binance API key.',
     ),
     LiveGate(
       label: 'Live mode on',
