@@ -99,6 +99,7 @@ TakeErrorMessage translateTakeRejection(TakeSignalResult r) {
     binanceCode: r.rejectBinanceCode,
     binanceMsg: r.rejectBinanceMsg,
     symbol: r.symbol ?? '',
+    venue: r.venue,
   );
   return TakeErrorMessage(
     headline: t.headline,

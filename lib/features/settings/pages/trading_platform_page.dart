@@ -45,6 +45,7 @@ import '../../../shared/tokens.dart';
 import '../../../shared/widgets/page_skeleton.dart';
 import '../../../data/server_side_execution_models.dart';
 import '../../launch/region_gate.dart';
+import '../../trade/coindcx_positions_card.dart';
 import 'server_side_execution_page.dart';
 import 'tos_acceptance_page.dart';
 
@@ -735,61 +736,8 @@ class _TradingPlatformPageState extends State<TradingPlatformPage> {
     if (!p.readable) {
       return _note("Couldn't load your CoinDCX trades right now.", color: LuminColors.warn);
     }
-    return Column(children: [for (final pos in p.positions) _positionRow(pos)]);
+    return Column(children: [for (final pos in p.positions) CoinDCXPositionTile(position: pos)]);
   }
-
-  Widget _positionRow(CoinDCXPosition p) {
-    final inr = p.marginCurrency == 'INR';
-    // Net of CoinDCX's fees where both fills reported one; otherwise the
-    // gross move, labelled as such — never a gross figure passed off as net.
-    final net = inr ? p.netPnlInr : p.netPnlUsdt;
-    final isNet = net != null;
-    final pnl = net ?? (inr ? p.realizedPnlInr : p.realizedPnlUsdt);
-    final pnlText = pnl == null
-        ? (p.isLive ? 'Open' : '—')
-        : '${pnl >= 0 ? '+' : ''}${inr ? '₹' : ''}${pnl.toStringAsFixed(2)}${inr ? '' : ' USDT'}';
-    final pnlNote = pnl == null ? null : (isNet ? 'after fees' : 'before fees');
-    final color = pnl == null
-        ? LuminColors.textSecondary
-        : (pnl >= 0 ? LuminColors.success : LuminColors.loss);
-    final reason = p.isLive
-        ? (p.slResting ? 'Stop placed on CoinDCX' : 'Placing stop…')
-        : (p.closeReason.isEmpty ? p.state : _reasonLabel(p.closeReason));
-    return Container(
-      margin: const EdgeInsets.only(bottom: LuminSpacing.sm),
-      padding: const EdgeInsets.all(LuminSpacing.md),
-      decoration: BoxDecoration(
-          color: LuminColors.bgCard, borderRadius: BorderRadius.circular(LuminRadii.sm)),
-      child: Row(children: [
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('${p.symbol} · ${p.side}',
-                style: const TextStyle(color: LuminColors.textPrimary, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 2),
-            Text('$reason · ${p.leverage.toStringAsFixed(0)}x ${p.marginCurrency}',
-                style: const TextStyle(color: LuminColors.textSecondary, fontSize: 12)),
-          ]),
-        ),
-        Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-          Text(pnlText, style: TextStyle(color: color, fontWeight: FontWeight.w700)),
-          if (pnlNote != null)
-            Text(pnlNote, style: const TextStyle(color: LuminColors.textMuted, fontSize: 11)),
-        ]),
-      ]),
-    );
-  }
-
-  static String _reasonLabel(String r) => const {
-        'SL': 'Stopped out',
-        'TP1': 'Target hit',
-        'EXIT': 'Closed',
-        'AGE_CAP': 'Closed (time limit)',
-        'LIQUIDATED': 'Liquidated',
-        'PROTECTION_FAILED': 'Closed — stop could not be placed',
-        'LIQUIDATION_INSIDE_STOP': 'Closed — liquidation was nearer than the stop',
-        'EXTERNAL': 'Closed on CoinDCX',
-      }[r] ??
-      r;
 
   // --------------------------------------------------------------- pieces
 

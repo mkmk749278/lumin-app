@@ -46,6 +46,10 @@ enum LiveBlockReason {
   /// a failed read wearing an answer's caption.
   keyStatusUnknown,
 
+  /// The user chose CoinDCX and CoinDCX execution is not open for them —
+  /// nothing is placed on either exchange (2026-09-28).
+  venueNotOpen,
+
   /// User's own mode toggle is off.
   modeOff,
 
@@ -114,10 +118,12 @@ LiveStatus resolveLiveStatus({
       reason = runtime.globalFlagsReadable == false
           ? LiveBlockReason.statusUnknown
           : LiveBlockReason.globalOff;
-    } else if (!runtime.binanceKeyConnected) {
-      reason = runtime.binanceKeyReadable == false
+    } else if (!runtime.keyConnected) {
+      reason = runtime.keyReadable == false
           ? LiveBlockReason.keyStatusUnknown
           : LiveBlockReason.keyNotConnected;
+    } else if (runtime.isCoinDCX && runtime.venueOpen == false) {
+      reason = LiveBlockReason.venueNotOpen;
     } else if (!modeLive) {
       reason = LiveBlockReason.modeOff;
     } else if (runtime.tierAllowsAuto == false) {
@@ -152,18 +158,31 @@ LiveStatus resolveLiveStatus({
                   : 'Paused — tap Resume above once fixed.')
               : null,
     ),
+    // The key gate names the exchange the user actually trades on
+    // (2026-09-28): a CoinDCX user was shown "Binance key connected ✗".
     LiveGate(
-      label: 'Binance key connected',
-      ok: runtime.binanceKeyConnected,
-      hint: runtime.binanceKeyConnected
+      label: '${runtime.isCoinDCX ? 'CoinDCX' : 'Binance'} key connected',
+      ok: runtime.keyConnected,
+      hint: runtime.keyConnected
           ? null
-          : runtime.binanceKeyReadable == false
+          : runtime.keyReadable == false
               // Never send someone to connect a key we could not check for:
               // if it is already connected, that is an instruction to redo
               // finished work on the screen that spends their money.
               ? 'We couldn\'t check this just now — don\'t re-add your key.'
-              : 'Settings → Auto-trade & execution → Binance API key.',
+              : runtime.isCoinDCX
+                  ? 'Settings → Auto-trade & execution → Trading platform & API keys.'
+                  : 'Settings → Auto-trade & execution → Binance API key.',
     ),
+    if (runtime.isCoinDCX && runtime.venueOpen != null)
+      LiveGate(
+        label: 'CoinDCX open for your account',
+        ok: runtime.venueOpen!,
+        hint: runtime.venueOpen!
+            ? null
+            : 'CoinDCX auto-trade is paused right now — switch to Binance '
+                'to keep trading.',
+      ),
     LiveGate(
       label: 'Live mode on',
       ok: modeLive,
@@ -213,12 +232,13 @@ LiveStatus resolveLiveStatus({
 String liveToggleSubtitle({
   required bool liveActive,
   required bool dispatching,
+  String exchange = 'Binance',
 }) {
   if (!liveActive) {
     return 'Off — enable to place real orders on the next signal.';
   }
   if (dispatching) {
-    return 'Lumin places real Binance Futures orders on your account.';
+    return 'Lumin places real $exchange Futures orders on your account.';
   }
   return 'On — not placing orders yet. See the status below.';
 }
