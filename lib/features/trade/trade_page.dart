@@ -33,6 +33,7 @@ import 'package:flutter/material.dart';
 import '../../app/foreground_refresh.dart';
 import '../../app/scroll_to_top.dart';
 import '../../data/app_config.dart';
+import '../../data/coindcx_models.dart';
 import '../../data/mock_data.dart';
 import '../../data/order_log.dart';
 import '../../data/repository.dart';
@@ -43,6 +44,7 @@ import '../../shared/widgets/lumin_card.dart';
 import '../../shared/widgets/preview_badge.dart';
 import '../../shared/widgets/shimmer.dart';
 import '../../shared/widgets/upsell_banners.dart';
+import 'coindcx_positions_card.dart';
 import 'live_status_card.dart';
 import 'live_status_resolver.dart';
 import 'paper_trades_page.dart';
@@ -127,6 +129,12 @@ class _TradePageState extends State<TradePage>
   AutoTradeRuntimeStatus? _runtimeStatus;
   StreamSubscription<AutoTradeRuntimeStatus>? _runtimeStatusSub;
   ServerSidePositions? _serverPositions;
+
+  /// CoinDCX records, read only when the runtime status says the user's
+  /// platform is CoinDCX (2026-09-28).  Kept apart from [_serverPositions],
+  /// which is the Binance book — the Live tab used to show a flat Binance
+  /// account under a trade Lumin had just opened on CoinDCX.
+  CoinDCXPositions? _coindcxPositions;
   StreamSubscription<ServerSidePositions>? _positionsSub;
   // Recent dispatch events (placed + rejected) — same SWR-stream
   // pattern.  Engine endpoint ``/api/auto-trade/recent-events`` is
@@ -207,6 +215,7 @@ class _TradePageState extends State<TradePage>
       (status) {
         if (!mounted) return;
         setState(() => _runtimeStatus = status);
+        if (status.isCoinDCX) unawaited(_loadCoinDCXPositions());
       },
       onError: (Object _, StackTrace __) {
         // Keep whatever we last had — a transient 5xx shouldn't
@@ -238,6 +247,19 @@ class _TradePageState extends State<TradePage>
     );
 
     unawaited(_loadOutcomes());
+  }
+
+  Future<void> _loadCoinDCXPositions() async {
+    try {
+      final book = await AppConfigScope.of(context).repo.fetchCoinDCXPositions();
+      if (!mounted) return;
+      setState(() => _coindcxPositions = book);
+    } catch (_) {
+      if (!mounted) return;
+      // Unreadable is its own state — never an empty book.
+      setState(() => _coindcxPositions =
+          const CoinDCXPositions(readable: false, positions: []));
+    }
   }
 
   /// Best-effort load of what each attempt became on Binance.  A failure
@@ -638,8 +660,14 @@ class _TradePageState extends State<TradePage>
     // Non-traders get a stripped-down Live tab until a key is
     // connected — the status card is the actionable surface and the
     // trade cards would all be structurally empty.
-    final hasBinanceKey = runtime != null && runtime.binanceKeyConnected;
-    final hasAnyTrades = (serverPositions?.positions.isNotEmpty ?? false) ||
+    // The key for the exchange the user trades on — a CoinDCX-only user has
+    // no Binance key, and the Live tab used to hide every trade surface from
+    // them for it (2026-09-28).
+    final onCoinDCX = runtime != null && runtime.isCoinDCX;
+    final hasVenueKey = runtime != null && runtime.keyConnected;
+    final hasAnyTrades = (onCoinDCX &&
+            (_coindcxPositions?.positions.isNotEmpty ?? false)) ||
+        (serverPositions?.positions.isNotEmpty ?? false) ||
         (serverPositions?.unmanaged.isNotEmpty ?? false) ||
         (recentEvents?.isNotEmpty ?? false) ||
         _phoneOrders.isNotEmpty;
@@ -686,6 +714,7 @@ class _TradePageState extends State<TradePage>
           subtitle: liveToggleSubtitle(
             liveActive: liveActive,
             dispatching: liveDispatching,
+            exchange: runtime != null && runtime.isCoinDCX ? 'CoinDCX' : 'Binance',
           ),
           icon: Icons.bolt_rounded,
           activeColor: LuminColors.accent,
@@ -713,11 +742,14 @@ class _TradePageState extends State<TradePage>
           const SizedBox(height: LuminSpacing.md),
         ],
         // Per-user trade surfaces, only once a key is connected.
-        if (hasBinanceKey) ...[
+        if (hasVenueKey) ...[
           if (!hasAnyTrades && serverPositions != null && recentEvents != null)
             const _NoTradesYetCard()
           else ...[
-            if (serverPositions != null) ...[
+            if (onCoinDCX) ...[
+              CoinDCXPositionsCard(book: _coindcxPositions),
+              const SizedBox(height: LuminSpacing.md),
+            ] else if (serverPositions != null) ...[
               _ServerPositionsCard(
                 book: serverPositions,
                 // A close is the one action on this page that changes what
@@ -799,7 +831,7 @@ class _TradePageState extends State<TradePage>
             description: 'Flip the toggle above to start simulating fills '
                 'against the engine\'s paper book.  Server-side live '
                 'auto-trade is configured separately in Settings → '
-                'Server-side auto-trade.',
+                'Auto-trade & execution.',
           )
         else ...[
           const SizedBox(height: LuminSpacing.md),

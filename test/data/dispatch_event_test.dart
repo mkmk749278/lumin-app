@@ -320,4 +320,43 @@ void main() {
       expect(tx.action.toLowerCase(), contains('support'));
     });
   });
+
+  // Owner screenshot 2026-09-28: a CoinDCX placement read "Placed on
+  // Binance / Binance accepted the order", and a CoinDCX size refusal told
+  // the user "at least \$10" (Binance's floor) when CoinDCX needed ~\$27.
+  group('the row names the exchange the order went to', () {
+    Map<String, dynamic> ev(String outcome, {Map<String, dynamic> extra = const {}}) => {
+          'event_id': 'e', 'signal_id': 's', 'symbol': 'HBARUSDT',
+          'direction': 'LONG', 'outcome': outcome,
+          'timestamp': '2026-09-28T06:01:00Z', 'entry_price': 0.097,
+          'total_qty': 102, ...extra,
+        };
+
+    test('CoinDCX placement says CoinDCX', () {
+      final e = DispatchEvent.fromJson(ev('placed', extra: {'venue': 'coindcx'}));
+      final t = DispatchEventTranslation.forEvent(e);
+      expect(t.headline, 'Placed on CoinDCX');
+      expect(t.action, 'CoinDCX accepted the order.');
+    });
+
+    test('an engine that sends no venue is Binance', () {
+      final t = DispatchEventTranslation.forEvent(DispatchEvent.fromJson(ev('placed')));
+      expect(t.headline, 'Placed on Binance');
+    });
+
+    test('a CoinDCX refusal keeps the engine\'s exact sentence', () {
+      const detail = "Position size \$9.94 is below CoinDCX's minimum for "
+          'QNTUSDT (about \$26.78). Increase your position size in Settings.';
+      final e = DispatchEvent.fromJson(ev('rejected', extra: {
+        'venue': 'coindcx',
+        'reject_class': 'NotionalTooSmall',
+        'reject_detail': detail,
+      }));
+      final t = DispatchEventTranslation.forEvent(e);
+      expect(t.headline, 'Position size too small');
+      expect(t.action, detail);
+      expect(t.action, isNot(contains('at least \$10')));
+    });
+  });
 }
+

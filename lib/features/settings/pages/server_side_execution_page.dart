@@ -299,7 +299,7 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
     return Scaffold(
       backgroundColor: LuminColors.bgDeep,
       appBar: AppBar(
-        title: const Text('Server-side auto-trade'),
+        title: const Text('Binance API key'),
         backgroundColor: LuminColors.bgDeep,
       ),
       // Region gate (Play Store launch A6, 2026-05-20).  Replaces
@@ -690,7 +690,7 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
             TextField(
               controller: _apiKeyCtrl,
               decoration: const InputDecoration(
-                labelText: 'API key',
+                labelText: 'Binance API key',
                 border: OutlineInputBorder(),
               ),
               style: const TextStyle(color: LuminColors.textPrimary),
@@ -701,7 +701,7 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
             TextField(
               controller: _apiSecretCtrl,
               decoration: const InputDecoration(
-                labelText: 'API secret',
+                labelText: 'Binance API secret',
                 border: OutlineInputBorder(),
               ),
               style: const TextStyle(color: LuminColors.textPrimary),

@@ -18,6 +18,7 @@ import '../../shared/widgets/lumin_card.dart';
 import '../settings/pages/server_side_execution_page.dart';
 import '../settings/pages/subscription_page.dart';
 import '../settings/pages/symbol_preference_page.dart';
+import '../settings/pages/trading_platform_page.dart';
 import '../settings/pages/auto_trade_settings_page.dart';
 import 'live_status_resolver.dart';
 
@@ -55,6 +56,11 @@ class _LiveStatusCardState extends State<LiveStatusCard> {
 
   // ---- reason → copy + action -----------------------------------------
 
+  /// The exchange this user trades on — every key sentence names it
+  /// (2026-09-28: a CoinDCX user was told to connect a Binance account).
+  bool get _dcx => widget.runtime.isCoinDCX;
+  String get _exchange => _dcx ? 'CoinDCX' : 'Binance';
+
   String _title(LiveBlockReason r) => switch (r) {
         LiveBlockReason.userDisabled => 'Trading paused on your account',
         LiveBlockReason.autoPaused =>
@@ -63,9 +69,10 @@ class _LiveStatusCardState extends State<LiveStatusCard> {
               : 'Paused on your account',
         LiveBlockReason.globalOff => 'Trading briefly paused for everyone',
         LiveBlockReason.statusUnknown => 'We can\'t confirm your trading status',
-        LiveBlockReason.keyNotConnected => 'Connect your Binance account',
+        LiveBlockReason.keyNotConnected => 'Connect your $_exchange account',
         LiveBlockReason.keyStatusUnknown =>
-          'We can\'t confirm your Binance connection',
+          'We can\'t confirm your $_exchange connection',
+        LiveBlockReason.venueNotOpen => 'CoinDCX trading is paused',
         LiveBlockReason.modeOff => 'Live trading is switched off',
         LiveBlockReason.tierBlocked => 'Auto plan needed for hands-off trading',
         LiveBlockReason.filtersBlockAll => 'Your filters exclude every signal',
@@ -78,7 +85,7 @@ class _LiveStatusCardState extends State<LiveStatusCard> {
               're-enable trading. If it keeps happening, email support.',
         LiveBlockReason.autoPaused =>
           widget.userSettings.pausedReason == 'insufficient_margin'
-              ? 'Your Binance Futures wallet doesn\'t have enough USDT for '
+              ? 'Your $_exchange Futures wallet doesn\'t have enough USDT for '
                   'your position size. Top it up, then tap Resume.'
               : 'Lumin paused placing orders for you. Fix the underlying '
                   'issue, then tap Resume.',
@@ -96,13 +103,20 @@ class _LiveStatusCardState extends State<LiveStatusCard> {
               'account and nothing is needed from you — but this will not '
               'clear on its own, so contact support if it lasts.',
         LiveBlockReason.keyNotConnected =>
-          'Link a Binance API key so Lumin can place and manage trades '
+          'Link a $_exchange API key so Lumin can place and manage trades '
               'for you. Takes about two minutes.',
+        // Chosen CoinDCX, and CoinDCX is not open for this account: nothing
+        // is placed on EITHER exchange, so it must not read as armed or as
+        // an automatic resume.
+        LiveBlockReason.venueNotOpen =>
+          'Your trading platform is CoinDCX, and CoinDCX auto-trade is not '
+              'open for your account right now, so no orders are being '
+              'placed. Switch to Binance to keep trading.',
         // The owner saw "Connect your Binance account" over an account whose
         // key was connected. Telling somebody to redo finished work on the
         // screen that spends their money is worse than saying nothing.
         LiveBlockReason.keyStatusUnknown =>
-          'We couldn\'t check whether your Binance key is connected. If you '
+          'We couldn\'t check whether your $_exchange key is connected. If you '
               'have already added one, don\'t add it again — this is on our '
               'side and should clear shortly. Contact support if it doesn\'t.',
         LiveBlockReason.modeOff =>
@@ -110,7 +124,7 @@ class _LiveStatusCardState extends State<LiveStatusCard> {
               'orders on the next signal.',
         LiveBlockReason.tierBlocked =>
           'Signals stay free — the Auto plan unlocks hands-off '
-              'execution on your own Binance account.',
+              'execution on your own $_exchange account.',
         LiveBlockReason.filtersBlockAll =>
           'Your setup/market filters currently match no signals, so '
               'nothing will ever trade. Loosen them to resume.',
@@ -155,7 +169,15 @@ class _LiveStatusCardState extends State<LiveStatusCard> {
         return _button(
           'Connect key',
           Icons.link_rounded,
-          () => _push(const ServerSideExecutionPage()),
+          () => _push(_dcx
+              ? const TradingPlatformPage()
+              : const ServerSideExecutionPage()),
+        );
+      case LiveBlockReason.venueNotOpen:
+        return _button(
+          'Trading platform',
+          Icons.swap_horiz,
+          () => _push(const TradingPlatformPage()),
         );
       case LiveBlockReason.tierBlocked:
         return _button(

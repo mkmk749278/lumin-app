@@ -21,6 +21,16 @@
 /// CoinDCX's API cannot report whether a key can withdraw or is locked to our
 /// server, so connecting asks the user to confirm both (owner decision) —
 /// the checklist is the engine's own wording, fetched from `/api/coindcx/info`.
+///
+/// **One place for both exchanges (owner, 2026-09-28):** *"fully separate
+/// Binance and CoinDCX … show same place for two api as binance api and coin
+/// dcx API clearly."*  The Binance key used to live only on a separately
+/// named "Exchange connection" page, so this page read as CoinDCX-only and
+/// nothing on it said which key the chosen platform uses.  It now shows the
+/// platform picker and then two labelled sections, BINANCE API and COINDCX
+/// API, each with its own status — the Binance section links to its existing
+/// connect page rather than duplicating the connect flow.  A Binance status
+/// we could not read renders "Couldn't check", never "not connected".
 library;
 
 
@@ -33,7 +43,10 @@ import '../../../data/coindcx_models.dart';
 import '../../../shared/friendly_error.dart';
 import '../../../shared/tokens.dart';
 import '../../../shared/widgets/page_skeleton.dart';
+import '../../../data/server_side_execution_models.dart';
 import '../../launch/region_gate.dart';
+import '../../trade/coindcx_positions_card.dart';
+import 'server_side_execution_page.dart';
 import 'tos_acceptance_page.dart';
 
 class TradingPlatformPage extends StatefulWidget {
@@ -48,6 +61,11 @@ class _TradingPlatformPageState extends State<TradingPlatformPage> {
   CoinDCXInfo? _info;
   CoinDCXConnectStatus? _status;
   CoinDCXPositions? _positions;
+
+  /// Binance server-side key.  `null` while loading; [_binanceReadable]
+  /// false when the status read failed (an unknown is not a "no").
+  BinanceConnectStatus? _binance;
+  bool _binanceReadable = true;
   bool? _tosAccepted;
   String? _loadError;
   String? _actionMessage;
@@ -83,8 +101,17 @@ class _TradingPlatformPageState extends State<TradingPlatformPage> {
         repo.fetchCoinDCXPositions().catchError(
             (Object _) => const CoinDCXPositions(readable: false, positions: [])),
       ]);
+      BinanceConnectStatus? binance;
+      var binanceReadable = true;
+      try {
+        binance = await repo.fetchBinanceConnectStatus();
+      } catch (_) {
+        binanceReadable = false;
+      }
       if (!mounted) return;
       setState(() {
+        _binance = binance;
+        _binanceReadable = binanceReadable;
         _tosAccepted = tos;
         _venue = results[0] as VenueSettings;
         _info = results[1] as CoinDCXInfo;
@@ -286,7 +313,9 @@ class _TradingPlatformPageState extends State<TradingPlatformPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: LuminColors.bgDeep,
-      appBar: AppBar(title: const Text('Trading platform'), backgroundColor: LuminColors.bgDeep),
+      appBar: AppBar(
+          title: const Text('Trading platform & API keys'),
+          backgroundColor: LuminColors.bgDeep),
       body: RegionGate(
         child: RefreshIndicator(
           onRefresh: _load,
@@ -320,7 +349,8 @@ class _TradingPlatformPageState extends State<TradingPlatformPage> {
       _platformTile(
         id: 'binance',
         title: 'Binance',
-        subtitle: 'USDT futures. Pre-TP, TP ladder and trailing exits available.',
+        subtitle: 'USDT futures. Pre-TP, TP ladder and trailing exits available. '
+            'Uses your Binance API key.',
         selected: !venue.isCoinDCX,
         enabled: true,
       ),
@@ -328,7 +358,8 @@ class _TradingPlatformPageState extends State<TradingPlatformPage> {
       _platformTile(
         id: 'coindcx',
         title: 'CoinDCX',
-        subtitle: 'Indian exchange. Margin and P&L in ₹ or USDT.',
+        subtitle: 'Indian exchange. Margin and P&L in ₹ or USDT. '
+            'Uses your CoinDCX API key.',
         selected: venue.isCoinDCX,
         enabled: venue.coindcxConnected == true &&
             venue.coindcxAttested == true &&
@@ -338,7 +369,19 @@ class _TradingPlatformPageState extends State<TradingPlatformPage> {
       const SizedBox(height: LuminSpacing.sm),
       _coindcxAvailability(venue, info),
       const SizedBox(height: LuminSpacing.xl),
-      _sectionTitle('COINDCX CONNECTION'),
+      _sectionTitle('API KEYS'),
+      const Padding(
+        padding: EdgeInsets.only(bottom: LuminSpacing.sm),
+        child: Text(
+          'Each exchange has its own key. Lumin only trades on the platform '
+          'selected above; a key for the other exchange is kept but not used.',
+          style: TextStyle(color: LuminColors.textSecondary, fontSize: 12),
+        ),
+      ),
+      _apiHeader('Binance API', active: !venue.isCoinDCX),
+      _binanceSection(),
+      const SizedBox(height: LuminSpacing.lg),
+      _apiHeader('CoinDCX API', active: venue.isCoinDCX),
       _connectionSection(info),
       if (_status?.connected == true) ...[
         const SizedBox(height: LuminSpacing.xl),
@@ -374,6 +417,83 @@ class _TradingPlatformPageState extends State<TradingPlatformPage> {
           color: LuminColors.textSecondary);
     }
     return const SizedBox.shrink();
+  }
+
+  Widget _apiHeader(String title, {required bool active}) => Padding(
+        key: Key('api-header-$title'),
+        padding: const EdgeInsets.only(bottom: LuminSpacing.xs),
+        child: Row(children: [
+          Text(title,
+              style: const TextStyle(
+                  color: LuminColors.textPrimary, fontWeight: FontWeight.w700, fontSize: 14)),
+          const SizedBox(width: LuminSpacing.sm),
+          if (active)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: LuminColors.accent.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(LuminRadii.sm),
+              ),
+              child: const Text('IN USE',
+                  style: TextStyle(
+                      color: LuminColors.accent, fontSize: 11, fontWeight: FontWeight.w700)),
+            ),
+        ]),
+      );
+
+  Widget _binanceSection() {
+    Future<void> open() async {
+      await Navigator.of(context).push(
+          MaterialPageRoute<void>(builder: (_) => const ServerSideExecutionPage()));
+      if (mounted) await _load();
+    }
+
+    if (!_binanceReadable) {
+      return _card([
+        const Text("Couldn't check your Binance key right now.",
+            style: TextStyle(color: LuminColors.warn, fontSize: 13)),
+        const SizedBox(height: LuminSpacing.xs),
+        const Text('Your key is not affected — this is only the status check.',
+            style: TextStyle(color: LuminColors.textSecondary, fontSize: 12)),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton(onPressed: open, child: const Text('Open Binance API key')),
+        ),
+      ]);
+    }
+    final b = _binance;
+    if (b == null) return const PageSkeleton(inline: true, cards: 1, padding: EdgeInsets.zero);
+    if (b.connected) {
+      return _card([
+        Row(children: [
+          const Icon(Icons.check_circle, color: LuminColors.success, size: 18),
+          const SizedBox(width: LuminSpacing.sm),
+          Expanded(
+            child: Text('Connected · key ${b.keyPublicIdFirst8 ?? ''}…',
+                key: const Key('binance-key-status'),
+                style: const TextStyle(color: LuminColors.textPrimary, fontWeight: FontWeight.w600)),
+          ),
+        ]),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton(
+              key: const Key('binance-key-manage'),
+              onPressed: open,
+              child: const Text('Manage Binance key')),
+        ),
+      ]);
+    }
+    return _card([
+      const Text('No Binance API key connected.',
+          key: Key('binance-key-status'),
+          style: TextStyle(color: LuminColors.textPrimary, fontSize: 13)),
+      const SizedBox(height: LuminSpacing.sm),
+      FilledButton(
+        key: const Key('binance-key-connect'),
+        onPressed: open,
+        child: const Text('Connect Binance key'),
+      ),
+    ]);
   }
 
   Widget _platformTile({
@@ -510,7 +630,7 @@ class _TradingPlatformPageState extends State<TradingPlatformPage> {
       TextField(
         key: const Key('coindcx-key'),
         controller: _keyCtrl,
-        decoration: const InputDecoration(labelText: 'API key'),
+        decoration: const InputDecoration(labelText: 'CoinDCX API key'),
         autocorrect: false,
         enableSuggestions: false,
       ),
@@ -518,7 +638,7 @@ class _TradingPlatformPageState extends State<TradingPlatformPage> {
       TextField(
         key: const Key('coindcx-secret'),
         controller: _secretCtrl,
-        decoration: const InputDecoration(labelText: 'API secret'),
+        decoration: const InputDecoration(labelText: 'CoinDCX API secret'),
         obscureText: true,
         autocorrect: false,
         enableSuggestions: false,
@@ -616,61 +736,8 @@ class _TradingPlatformPageState extends State<TradingPlatformPage> {
     if (!p.readable) {
       return _note("Couldn't load your CoinDCX trades right now.", color: LuminColors.warn);
     }
-    return Column(children: [for (final pos in p.positions) _positionRow(pos)]);
+    return Column(children: [for (final pos in p.positions) CoinDCXPositionTile(position: pos)]);
   }
-
-  Widget _positionRow(CoinDCXPosition p) {
-    final inr = p.marginCurrency == 'INR';
-    // Net of CoinDCX's fees where both fills reported one; otherwise the
-    // gross move, labelled as such — never a gross figure passed off as net.
-    final net = inr ? p.netPnlInr : p.netPnlUsdt;
-    final isNet = net != null;
-    final pnl = net ?? (inr ? p.realizedPnlInr : p.realizedPnlUsdt);
-    final pnlText = pnl == null
-        ? (p.isLive ? 'Open' : '—')
-        : '${pnl >= 0 ? '+' : ''}${inr ? '₹' : ''}${pnl.toStringAsFixed(2)}${inr ? '' : ' USDT'}';
-    final pnlNote = pnl == null ? null : (isNet ? 'after fees' : 'before fees');
-    final color = pnl == null
-        ? LuminColors.textSecondary
-        : (pnl >= 0 ? LuminColors.success : LuminColors.loss);
-    final reason = p.isLive
-        ? (p.slResting ? 'Stop placed on CoinDCX' : 'Placing stop…')
-        : (p.closeReason.isEmpty ? p.state : _reasonLabel(p.closeReason));
-    return Container(
-      margin: const EdgeInsets.only(bottom: LuminSpacing.sm),
-      padding: const EdgeInsets.all(LuminSpacing.md),
-      decoration: BoxDecoration(
-          color: LuminColors.bgCard, borderRadius: BorderRadius.circular(LuminRadii.sm)),
-      child: Row(children: [
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('${p.symbol} · ${p.side}',
-                style: const TextStyle(color: LuminColors.textPrimary, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 2),
-            Text('$reason · ${p.leverage.toStringAsFixed(0)}x ${p.marginCurrency}',
-                style: const TextStyle(color: LuminColors.textSecondary, fontSize: 12)),
-          ]),
-        ),
-        Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-          Text(pnlText, style: TextStyle(color: color, fontWeight: FontWeight.w700)),
-          if (pnlNote != null)
-            Text(pnlNote, style: const TextStyle(color: LuminColors.textMuted, fontSize: 11)),
-        ]),
-      ]),
-    );
-  }
-
-  static String _reasonLabel(String r) => const {
-        'SL': 'Stopped out',
-        'TP1': 'Target hit',
-        'EXIT': 'Closed',
-        'AGE_CAP': 'Closed (time limit)',
-        'LIQUIDATED': 'Liquidated',
-        'PROTECTION_FAILED': 'Closed — stop could not be placed',
-        'LIQUIDATION_INSIDE_STOP': 'Closed — liquidation was nearer than the stop',
-        'EXTERNAL': 'Closed on CoinDCX',
-      }[r] ??
-      r;
 
   // --------------------------------------------------------------- pieces
 

@@ -160,6 +160,10 @@ class AutoTradeRuntimeStatus {
     this.preferencesBlockAll = false,
     this.globalFlagsReadable,
     this.binanceKeyReadable,
+    this.venue = 'binance',
+    this.venueKeyConnected,
+    this.venueKeyReadable,
+    this.venueOpen,
   });
 
   final bool autoTradeGloballyEnabled;
@@ -233,6 +237,26 @@ class AutoTradeRuntimeStatus {
 
   final bool armed;
 
+  /// The exchange this user trades on (`binance` | `coindcx`) and THAT
+  /// exchange's key gate (engine 2026-09-28).  `armed` used to require a
+  /// Binance key whatever the venue, so a CoinDCX user whose orders were
+  /// being placed read "not armed".  The three gate fields are tri-state:
+  /// `null` is an engine predating them, which means Binance, and the
+  /// Binance fields above keep answering.
+  final String venue;
+  final bool? venueKeyConnected;
+  final bool? venueKeyReadable;
+  final bool? venueOpen;
+
+  bool get isCoinDCX => venue == 'coindcx';
+
+  /// The key gate for the chosen exchange.
+  bool get keyConnected =>
+      isCoinDCX ? (venueKeyConnected ?? false) : binanceKeyConnected;
+
+  /// Whether that key gate could be observed (`null` = engine did not say).
+  bool? get keyReadable => isCoinDCX ? venueKeyReadable : binanceKeyReadable;
+
   factory AutoTradeRuntimeStatus.fromJson(Map<String, dynamic> j) {
     List<String> parseList(Object? raw) => raw is List
         ? raw.map((s) => s.toString()).toList(growable: false)
@@ -272,6 +296,10 @@ class AutoTradeRuntimeStatus {
       preferencesBlockAll: j['preferences_block_all'] as bool? ?? false,
       globalFlagsReadable: j['global_flags_readable'] as bool?,
       binanceKeyReadable: j['binance_key_readable'] as bool?,
+      venue: (j['venue'] as String?) ?? 'binance',
+      venueKeyConnected: j['venue_key_connected'] as bool?,
+      venueKeyReadable: j['venue_key_readable'] as bool?,
+      venueOpen: j['venue_open'] as bool?,
     );
   }
 }
@@ -298,6 +326,7 @@ class TakeSignalResult {
     this.rejectBinanceCode,
     this.rejectBinanceMsg,
     this.detail,
+    this.venue = 'binance',
   });
 
   final String outcome; // 'placed' | 'rejected' | 'skipped' | 'queued'
@@ -312,6 +341,9 @@ class TakeSignalResult {
   final String? rejectBinanceMsg;
 
   /// Server-provided guidance for the 'queued' outcome.
+  /// Exchange the engine routed this take to (`binance` | `coindcx`).
+  /// Engines predating the field send none, which is Binance.
+  final String venue;
   final String? detail;
 
   bool get placed => outcome == 'placed';
@@ -329,6 +361,7 @@ class TakeSignalResult {
         rejectBinanceCode: (j['reject_binance_code'] as num?)?.toInt(),
         rejectBinanceMsg: j['reject_binance_msg'] as String?,
         detail: j['detail'] as String?,
+        venue: (j['venue'] as String?) ?? 'binance',
       );
 }
 
@@ -903,6 +936,7 @@ class DispatchEvent {
     this.rejectBinanceMsg,
     this.skipReason,
     this.source,
+    this.venue = 'binance',
   });
 
   final String eventId;
@@ -927,6 +961,14 @@ class DispatchEvent {
   /// 'manual_take' (one-tap take).  Null on engines that pre-date the
   /// field (2026-07-17).
   final String? source;
+
+  /// Where the order went: `binance` | `coindcx` (engine 2026-09-27).  An
+  /// engine predating the field sends none, which is Binance.  Every
+  /// sentence on the row names this exchange — a CoinDCX placement once
+  /// read "Placed on Binance" (owner screenshot, 2026-09-28).
+  final String venue;
+
+  String get venueName => venue == 'coindcx' ? 'CoinDCX' : 'Binance';
 
   bool get isPlaced => outcome == 'placed';
   bool get isRejected => outcome == 'rejected';
@@ -954,6 +996,7 @@ class DispatchEvent {
         rejectBinanceMsg: j['reject_binance_msg'] as String?,
         skipReason: j['skip_reason'] as String?,
         source: j['source'] as String?,
+        venue: (j['venue'] as String?) ?? 'binance',
       );
 }
 
@@ -1024,7 +1067,7 @@ class DispatchEventTranslation {
             'realised ${pnl >= 0 ? '+' : '-'}\$${pnl.abs().toStringAsFixed(2)}',
         ];
         return DispatchEventTranslation(
-          headline: 'Closed on Binance',
+          headline: 'Closed on ${e.venueName}',
           action: bits.isEmpty ? 'The position has closed.' : bits.join(' · '),
           severity: DispatchEventSeverity.success,
         );
@@ -1032,7 +1075,7 @@ class DispatchEventTranslation {
       if (outcome != null && outcome.isOpen) {
         final filled = outcome.entryPriceFilled;
         return DispatchEventTranslation(
-          headline: 'Placed on Binance',
+          headline: 'Placed on ${e.venueName}',
           action: filled != null && filled > 0
               ? 'Open at $filled — Lumin manages it from here.'
               : 'Position is open — Lumin manages it from here.',
@@ -1040,8 +1083,8 @@ class DispatchEventTranslation {
         );
       }
       return DispatchEventTranslation(
-        headline: 'Placed on Binance',
-        action: 'Binance accepted the order.',
+        headline: 'Placed on ${e.venueName}',
+        action: '${e.venueName} accepted the order.',
         severity: DispatchEventSeverity.success,
       );
     }
@@ -1063,6 +1106,7 @@ class DispatchEventTranslation {
       binanceCode: e.rejectBinanceCode,
       binanceMsg: e.rejectBinanceMsg,
       symbol: e.symbol,
+      venue: e.venue,
     );
   }
 
@@ -1075,7 +1119,24 @@ class DispatchEventTranslation {
     int? binanceCode,
     String? binanceMsg,
     String symbol = '',
+    String venue = 'binance',
   }) {
+    // CoinDCX (2026-09-28): the class names are shared with Binance, but the
+    // Binance copy under them is not true there — "at least \$10" is
+    // Binance's floor, while CoinDCX's minimum for QNTUSDT was ~\$27, and the
+    // CoinDCX executor already writes an exact, user-ready sentence.  Keep
+    // the headline and colour from the class; take the action from the
+    // engine.  Binance codes never apply to a CoinDCX order.
+    if (venue == 'coindcx') {
+      final base = forReject(rejectClass: rejectClass, symbol: symbol);
+      return DispatchEventTranslation(
+        headline: base.headline,
+        // Sanitised like every other engine sentence: the shared safety
+        // gates can still phrase a refusal in engine vocabulary.
+        action: sanitizeEngineDetail(rejectDetail) ?? base.action,
+        severity: base.severity,
+      );
+    }
     // Binance-side rejections are switched on by code (stable
     // numeric contract from Binance Futures docs).
     final code = binanceCode;

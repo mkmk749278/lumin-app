@@ -19,6 +19,7 @@ import 'package:lumin/data/api_client.dart';
 import 'package:lumin/data/app_config.dart';
 import 'package:lumin/data/auth_service.dart';
 import 'package:lumin/data/coindcx_models.dart';
+import 'package:lumin/data/server_side_execution_models.dart';
 import 'package:lumin/data/repository.dart';
 import 'package:lumin/data/tos_service.dart';
 import 'package:lumin/features/settings/pages/trading_platform_page.dart';
@@ -47,6 +48,8 @@ class _Repo extends MockRepository {
   bool executionOpen;
   String venue;
   bool statusReadable;
+  bool binanceConnected = false;
+  bool binanceReadable = true;
   final venueWrites = <Map<String, Object?>>[];
   int connects = 0;
   ApiError? refuseVenue;
@@ -98,6 +101,14 @@ class _Repo extends MockRepository {
       const CoinDCXPositions(readable: true, positions: []);
 
   int venueReads = 0;
+
+  @override
+  Future<BinanceConnectStatus> fetchBinanceConnectStatus() async {
+    if (!binanceReadable) throw ApiError(0, 'offline');
+    return binanceConnected
+        ? const BinanceConnectStatus(connected: true, keyPublicIdFirst8: 'BNBKEY12')
+        : BinanceConnectStatus.notConnected;
+  }
 
   @override
   Future<VenueSettings> fetchVenue() async {
@@ -306,5 +317,37 @@ void main() {
     await tester.tap(find.byKey(const Key('platform-binance')));
     await tester.pumpAndSettle();
     expect(repo.venueWrites.single['venue'], 'binance');
+  });
+
+  // Owner, 2026-09-28: "show same place for two api as binance api and coin
+  // dcx API clearly".
+  testWidgets('both exchanges\' keys are on this page, each labelled, the one '
+      'in use badged', (tester) async {
+    final repo = _Repo(connected: true, venue: 'coindcx')..binanceConnected = true;
+    await _pump(tester, repo);
+    expect(find.byKey(const Key('api-header-Binance API')), findsOneWidget);
+    expect(find.byKey(const Key('api-header-CoinDCX API')), findsOneWidget);
+    final text = _allText(tester);
+    expect(text, contains('Connected · key BNBKEY12'));
+    expect(text, contains('Connected · key PUBKEY12'));
+    expect(
+        find.descendant(
+            of: find.byKey(const Key('api-header-CoinDCX API')),
+            matching: find.text('IN USE')),
+        findsOneWidget);
+    expect(
+        find.descendant(
+            of: find.byKey(const Key('api-header-Binance API')),
+            matching: find.text('IN USE')),
+        findsNothing);
+  });
+
+  testWidgets('an unreadable Binance status is "couldn\'t check", never '
+      '"not connected"', (tester) async {
+    final repo = _Repo()..binanceReadable = false;
+    await _pump(tester, repo);
+    final text = _allText(tester);
+    expect(text, contains("Couldn't check your Binance key right now."));
+    expect(text, isNot(contains('No Binance API key connected.')));
   });
 }

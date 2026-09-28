@@ -33,7 +33,8 @@ void main() {
       // These five rows were the root Menu's entire AUTO-TRADE section. The
       // restructure is only defensible because none of them was removed.
       expect(find.text('Auto-trade'), findsOneWidget);
-      expect(find.text('Exchange connection'), findsOneWidget);
+      expect(find.text('Binance API key'), findsOneWidget);
+      expect(find.text('Trading platform & API keys'), findsOneWidget);
       expect(find.text('Symbol preference'), findsOneWidget);
       expect(find.text('Pre-TP grab'), findsOneWidget);
       expect(find.text('Invalidation'), findsOneWidget);

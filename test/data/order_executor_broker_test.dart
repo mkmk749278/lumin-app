@@ -650,8 +650,7 @@ void main() {
       final executor =
           OrderExecutor(logService: logService, clientFactory: (_) => fake);
 
-      final logEntry = _liveLongEntry().copyWith(); // base
-      // Re-build as SHORT — _liveLongEntry hardcodes side='BUY'; we need a fresh.
+      // Built as SHORT here — _liveLongEntry hardcodes side='BUY'.
       final shortEntry = OrderLogEntry(
         signalId: 'sig-short',
         symbol: 'BTCUSDT',

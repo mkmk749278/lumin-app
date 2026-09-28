@@ -48,18 +48,21 @@ class TradingSettingsPage extends StatelessWidget {
                 subtitle: 'Position size, leverage, and how much Lumin manages',
                 onTap: () => _push(context, const AutoTradeSettingsPage()),
               ),
+              // One row for platform + both API keys (owner, 2026-09-28:
+              // "show same place for two api as binance api and coin dcx
+              // API clearly"). The Binance key page stays one tap further in
+              // from there, and keeps its own row so nothing moved is lost.
               SettingsRow(
                 icon: Icons.swap_horiz,
-                label: 'Trading platform',
-                subtitle: 'Trade on Binance or CoinDCX (₹ or USDT margin)',
+                label: 'Trading platform & API keys',
+                subtitle: 'Choose Binance or CoinDCX, and connect each '
+                    "exchange's API key",
                 onTap: () => _push(context, const TradingPlatformPage()),
               ),
               SettingsRow(
                 icon: Icons.cloud_done_outlined,
-                label: 'Exchange connection',
-                subtitle:
-                    "Lumin's engine can manage eligible trades even when your "
-                    'phone is offline',
+                label: 'Binance API key',
+                subtitle: 'The key Lumin uses when your platform is Binance',
                 onTap: () => _push(context, const ServerSideExecutionPage()),
               ),
             ],

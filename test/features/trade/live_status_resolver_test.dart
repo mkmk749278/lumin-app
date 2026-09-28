@@ -298,4 +298,49 @@ void main() {
       expect(s.reason, isNull);
     }
   });
+
+  // 2026-09-28: a CoinDCX user read "Binance key connected ✗" and "not
+  // armed" while the engine was placing their CoinDCX orders.
+  group('the key gate follows the chosen exchange', () {
+    AutoTradeRuntimeStatus dcx({bool? key = true, bool? readable = true, bool? open = true}) =>
+        AutoTradeRuntimeStatus(
+          autoTradeGloballyEnabled: true,
+          autoTradeUserDisabled: false,
+          binanceKeyConnected: false,
+          userMode: 'live',
+          tierAllowsAuto: true,
+          autoPaused: false,
+          allowedSymbols: const [],
+          effectiveAllowedSymbols: const [],
+          armed: key == true && open == true,
+          venue: 'coindcx',
+          venueKeyConnected: key,
+          venueKeyReadable: readable,
+          venueOpen: open,
+        );
+
+    test('a CoinDCX user with no Binance key is not blocked on Binance', () {
+      final s = resolveLiveStatus(runtime: dcx(), userSettings: _settings);
+      expect(s.active, isTrue);
+      expect(s.reason, isNull);
+      expect(s.gates.map((g) => g.label), contains('CoinDCX key connected'));
+      expect(s.gates.map((g) => g.label), isNot(contains('Binance key connected')));
+    });
+
+    test('an unreadable CoinDCX key is "unknown", never "connect one"', () {
+      final s = resolveLiveStatus(
+          runtime: dcx(key: false, readable: false), userSettings: _settings);
+      expect(s.reason, LiveBlockReason.keyStatusUnknown);
+    });
+
+    test('CoinDCX closed for the account is its own reason', () {
+      final s = resolveLiveStatus(runtime: dcx(open: false), userSettings: _settings);
+      expect(s.reason, LiveBlockReason.venueNotOpen);
+    });
+
+    test('an engine predating the venue fields is read as Binance', () {
+      final s = resolveLiveStatus(runtime: _runtime(), userSettings: _settings);
+      expect(s.gates.map((g) => g.label), contains('Binance key connected'));
+    });
+  });
 }
