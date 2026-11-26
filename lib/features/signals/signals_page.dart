@@ -470,7 +470,7 @@ class _SignalsPageState extends State<SignalsPage>
     final isLive = AppConfigScope.of(context).repo.isLive;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Signals'),
+        title: const Text('Setups'),
         // Engine-wide feed disclaimer — prevents subscribers from
         // confusing "ACTIVE" engine signals with their personal open
         // positions.  The Trade tab is the per-user execution view.

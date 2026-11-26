@@ -45,6 +45,8 @@ ThemeData buildLuminTheme() {
   return ThemeData(
     useMaterial3: true,
     brightness: Brightness.dark,
+    // Inter everywhere unless a role asks for the mono numeric face.
+    fontFamily: LuminType.ui,
     scaffoldBackgroundColor: bg,
     // M3 tints elevated surfaces with the primary colour by default, which
     // washes every dialog and sheet cyan. Lumin separates depth with the
@@ -68,16 +70,17 @@ ThemeData buildLuminTheme() {
     ),
 
     // ---------------------------------------------------------------
-    // Type — consumer register (owner, 2026-09-02).  Body sits at 15/14
+    // Type — consumer register (owner, 2026-09-02); Inter with -0.02em
+    // headline tracking and 0.06em eyebrows from Lumin 2.0 (2026-11-26).  Body sits at 15/14
     // rather than the 11-13px the app had drifted to, and `labelSmall` is
     // the floor: 11px, never 9 or 10.  Numeric roles carry tabular figures
     // so a live price stops shifting sideways as its digits change.
     // ---------------------------------------------------------------
     textTheme: const TextTheme(
-      displayLarge: TextStyle(color: LuminColors.textPrimary, fontSize: 36, fontWeight: FontWeight.w800, letterSpacing: -0.5, height: 1.1),
-      displayMedium: TextStyle(color: LuminColors.textPrimary, fontSize: 32, fontWeight: FontWeight.w800, letterSpacing: -0.5),
-      headlineLarge: TextStyle(color: LuminColors.textPrimary, fontSize: 24, fontWeight: FontWeight.w700, letterSpacing: -0.3),
-      headlineMedium: TextStyle(color: LuminColors.textPrimary, fontSize: 20, fontWeight: FontWeight.w700, letterSpacing: -0.2),
+      displayLarge: TextStyle(color: LuminColors.textPrimary, fontSize: 36, fontWeight: FontWeight.w800, letterSpacing: -0.72, height: 1.1),
+      displayMedium: TextStyle(color: LuminColors.textPrimary, fontSize: 32, fontWeight: FontWeight.w800, letterSpacing: -0.64),
+      headlineLarge: TextStyle(color: LuminColors.textPrimary, fontSize: 24, fontWeight: FontWeight.w700, letterSpacing: -0.48),
+      headlineMedium: TextStyle(color: LuminColors.textPrimary, fontSize: 20, fontWeight: FontWeight.w700, letterSpacing: -0.4),
       titleLarge: TextStyle(color: LuminColors.textPrimary, fontSize: 17, fontWeight: FontWeight.w600),
       titleMedium: TextStyle(color: LuminColors.textPrimary, fontSize: 15, fontWeight: FontWeight.w600),
       bodyLarge: TextStyle(color: LuminColors.textPrimary, fontSize: 15, height: 1.45),
@@ -85,7 +88,7 @@ ThemeData buildLuminTheme() {
       bodySmall: TextStyle(color: LuminColors.textSecondary, fontSize: 13, height: 1.4),
       labelLarge: TextStyle(color: LuminColors.textPrimary, fontSize: 15, fontWeight: FontWeight.w600, letterSpacing: 0.2),
       labelMedium: TextStyle(color: LuminColors.textSecondary, fontSize: 13, fontWeight: FontWeight.w500),
-      labelSmall: TextStyle(color: LuminColors.textMuted, fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 1.0),
+      labelSmall: TextStyle(color: LuminColors.textMuted, fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 0.66),
     ),
 
     // ---------------------------------------------------------------
@@ -241,7 +244,7 @@ ThemeData buildLuminTheme() {
       activeTrackColor: accent,
       inactiveTrackColor: LuminColors.bgElevated,
       thumbColor: accent,
-      overlayColor: Color(0x1A7BD3F7),
+      overlayColor: Color(0x1A38BDF8),
     ),
     listTileTheme: const ListTileThemeData(
       iconColor: LuminColors.textSecondary,

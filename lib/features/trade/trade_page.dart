@@ -554,7 +554,7 @@ class _TradePageState extends State<TradePage>
     // preserves the other tab's state — enabling live while paper is on
     // sends 'both' rather than overwriting paper with 'off'.
     return Scaffold(
-      appBar: AppBar(title: const Text('Trade')),
+      appBar: AppBar(title: const Text('Execution')),
       body: Column(
         children: [
           _SubTabStrip(

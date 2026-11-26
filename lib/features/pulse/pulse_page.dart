@@ -26,6 +26,7 @@ import '../../shared/widgets/shimmer.dart';
 import '../../shared/widgets/upsell_banners.dart';
 import '../trade/paper_trades_page.dart';
 import '../trial/trial_gate.dart';
+import '../desk/desk_brief_card.dart';
 import 'alerts_tab.dart';
 import 'track_record_month_card.dart';
 import '../signals/signal_language.dart';
@@ -44,6 +45,8 @@ class PulsePage extends StatefulWidget {
 class _PulsePageState extends State<PulsePage>
     with SingleTickerProviderStateMixin
     implements ForegroundRefreshable, ScrollToTop {
+  final GlobalKey<DeskBriefCardState> _deskKey = GlobalKey<DeskBriefCardState>();
+
   /// Dashboard's own scroll view. Pulse has TWO top tabs and `TabBarView`
   /// keeps both alive, so one controller cannot serve them: it would be
   /// attached to two positions at once and a tap would scroll the tab the
@@ -168,6 +171,7 @@ class _PulsePageState extends State<PulsePage>
     // current bundle stays on screen until fresh data lands (no skeleton).
     if (!mounted) return;
     AppConfigScope.of(context).repo.invalidatePulseBundleCache();
+    _deskKey.currentState?.refresh();
     _resubscribe();
     // Alerts top-tab refreshes silently too (no-op when never mounted).
     _alertsKey.currentState?.refreshSilently();
@@ -181,6 +185,9 @@ class _PulsePageState extends State<PulsePage>
     // the refresh actually triggered).  Timeout at 5s so a backend
     // stall doesn't strand the UI in spin-forever.
     final repo = AppConfigScope.of(context).repo;
+    // The bundle invalidation below also drops the desk entry.
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => _deskKey.currentState?.refresh());
     final completer = Completer<void>();
     _refreshDone = completer;
     repo.invalidatePulseBundleCache();
@@ -272,6 +279,9 @@ class _PulsePageState extends State<PulsePage>
       padding: const EdgeInsets.only(top: LuminSpacing.md, bottom: LuminSpacing.xl),
       children: [
         if (!isLive) const PreviewBadge(),
+        // Lumin 2.0: the analyst's hourly read leads the Desk tab.
+        DeskBriefCard(key: _deskKey),
+        const SizedBox(height: LuminSpacing.md),
         _RegimeBar(engine: data.engine),
         const SizedBox(height: LuminSpacing.md),
         // Free trial: pops the welcome offer for a new customer (engine

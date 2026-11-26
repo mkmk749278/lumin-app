@@ -29,12 +29,12 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <style>
-    html, body { margin: 0; padding: 0; height: 100%; background: #0a0e1a; overflow: hidden; }
+    html, body { margin: 0; padding: 0; height: 100%; background: #090b10; overflow: hidden; }
     #chart { position: absolute; top: 0; left: 0; right: 0; bottom: 16px; }
     #legend {
       position: absolute; top: 4px; left: 6px; z-index: 3; pointer-events: none;
       font: 600 11px -apple-system, Roboto, sans-serif; color: #94a3b8;
-      text-shadow: 0 0 3px #0a0e1a; white-space: nowrap; letter-spacing: 0.1px;
+      text-shadow: 0 0 3px #090b10; white-space: nowrap; letter-spacing: 0.1px;
     }
     #legend .up { color: #22e39b; }
     #legend .dn { color: #ff5c7a; }
@@ -85,7 +85,7 @@
       var dark = true;
       function theme() {
         return dark
-          ? { bg: "#0a0e1a", text: "#94a3b8", grid: "rgba(123,211,247,0.06)", border: "rgba(123,211,247,0.14)" }
+          ? { bg: "#090b10", text: "#94a3b8", grid: "rgba(56,189,248,0.06)", border: "rgba(56,189,248,0.14)" }
           : { bg: "#ffffff", text: "#33414f", grid: "#eef1f4", border: "#d6dde4" };
       }
 
@@ -93,7 +93,7 @@
       // library's stock teal/red.
       var UP = "#22e39b", DOWN = "#ff4d6d";
       var VOL_UP = "rgba(34,227,155,0.28)", VOL_DOWN = "rgba(255,77,109,0.28)";
-      var ACCENT = "#7bd3f7";
+      var ACCENT = "#38bdf8";
       // How many bars a fresh chart opens on. 500 bars on a phone is a smear
       // of hairlines; ~100 reads as candles and still shows the trend.
       var INITIAL_BARS = 100;
@@ -102,16 +102,16 @@
       var legendEl = document.getElementById("legend");
       var chart = LightweightCharts.createChart(el, {
         layout: { background: { color: theme().bg }, textColor: theme().text,
-                  panes: { separatorColor: theme().border, separatorHoverColor: "rgba(123,211,247,0.3)" } },
+                  panes: { separatorColor: theme().border, separatorHoverColor: "rgba(56,189,248,0.3)" } },
         grid: { vertLines: { color: theme().grid }, horzLines: { color: theme().grid } },
         rightPriceScale: { borderColor: theme().border, scaleMargins: { top: 0.08, bottom: 0.22 } },
         timeScale: { borderColor: theme().border, timeVisible: true, secondsVisible: false,
                      rightOffset: 6, barSpacing: 8, minBarSpacing: 2 },
         crosshair: {
           mode: LightweightCharts.CrosshairMode.Normal,
-          vertLine: { color: "rgba(123,211,247,0.45)", width: 1, style: LightweightCharts.LineStyle.Dashed,
+          vertLine: { color: "rgba(56,189,248,0.45)", width: 1, style: LightweightCharts.LineStyle.Dashed,
                       labelBackgroundColor: "#1e293b" },
-          horzLine: { color: "rgba(123,211,247,0.45)", width: 1, style: LightweightCharts.LineStyle.Dashed,
+          horzLine: { color: "rgba(56,189,248,0.45)", width: 1, style: LightweightCharts.LineStyle.Dashed,
                       labelBackgroundColor: "#1e293b" },
         },
         autoSize: true,

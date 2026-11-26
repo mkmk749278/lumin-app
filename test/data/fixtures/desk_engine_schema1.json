@@ -1,0 +1,228 @@
+{
+ "desk": {
+  "brief": {
+   "freshness": {
+    "age_sec": 900.0,
+    "fresh_within_sec": 7200,
+    "state": "current"
+   },
+   "market": {
+    "breadth": {
+     "readable": false,
+     "reason": "btc_1d_stale_or_undated"
+    },
+    "btc_atr_1d_pct": null,
+    "btc_change_pct": {
+     "24h": null,
+     "7d": null
+    },
+    "btc_per_tf": {},
+    "btc_price": null,
+    "btc_state": 0.0,
+    "btc_state_status": "insufficient_data",
+    "macro": {
+     "readable": false,
+     "state": "unknown"
+    },
+    "readable": false,
+    "reason": "no_btc_1h",
+    "session_utc": "asia"
+   },
+   "plan": {
+    "accepted": [
+     {
+      "archetype": "breakout_retest",
+      "side": "long",
+      "symbol": "X"
+     }
+    ],
+    "bias": "risk_off",
+    "macro": "unknown",
+    "n_accepted": 1,
+    "n_setups": 2,
+    "notes": "BTC printed a fresh 4h low.",
+    "plan_id": "p",
+    "submitted_at": 1700000000.0
+   }
+  },
+  "counts": {
+   "active": 0,
+   "insufficient": 0,
+   "not_filled": 0,
+   "not_walked": 0,
+   "pending": 0,
+   "sl_hit": 0,
+   "time_exit": 0,
+   "tp_hit": 1,
+   "waiting_data": 0
+  },
+  "generated_at": 1700000900.0,
+  "labels": {
+   "archetype": {
+    "breakout_retest": "Breakout Retest",
+    "level_reclaim": "Level Reclaim",
+    "range_fade": "Range Fade",
+    "sweep_reversal": "Sweep & Reclaim",
+    "trend_pullback": "Trend Pullback"
+   },
+   "bias": {
+    "neutral": "Balanced",
+    "risk_off": "Risk-off",
+    "risk_on": "Risk-on",
+    "stand_aside": "Stand aside"
+   },
+   "state": {
+    "active": "Active",
+    "insufficient": "Not measurable",
+    "not_filled": "Never filled",
+    "not_walked": "Queued",
+    "pending": "Pending limit",
+    "sl_hit": "Stopped out",
+    "time_exit": "Time exit",
+    "tp_hit": "Target hit",
+    "waiting_data": "Waiting for data"
+   }
+  },
+  "ledger": "ok",
+  "n_accepted_total": 1,
+  "plans": [
+   {
+    "accepted": [
+     {
+      "archetype": "breakout_retest",
+      "side": "long",
+      "symbol": "X"
+     }
+    ],
+    "bias": "risk_off",
+    "macro": "unknown",
+    "n_accepted": 1,
+    "n_setups": 2,
+    "notes": "BTC printed a fresh 4h low.",
+    "plan_id": "p",
+    "submitted_at": 1700000000.0
+   }
+  ],
+  "record": {
+   "analyst": {
+    "avg_net_pct": 3.9704,
+    "insufficient": 0,
+    "n": 1,
+    "no_valid_trade": 0,
+    "open": 0,
+    "total_net_pct": 3.9704,
+    "unfilled_scored_at_market": 0,
+    "win_rate": 1.0,
+    "without_top_1pct": {
+     "avg_net_pct": null,
+     "dropped": 1,
+     "n": 0
+    }
+   },
+   "basis": "forward_walk",
+   "basis_note": "Measured forward on real prices, net of a 0.07% round trip. No order was placed: these are not fills.",
+   "calibration": {
+    "brier": 0.36,
+    "brier_of_base_rate": 0.0,
+    "excluded_unfilled": 0,
+    "hit_rate": 1.0,
+    "mean_p_target": 0.4,
+    "n": 1
+   },
+   "market": {
+    "avg_net_pct": 2.93,
+    "insufficient": 0,
+    "n": 1,
+    "no_valid_trade": 0,
+    "open": 0,
+    "total_net_pct": 2.93,
+    "unfilled_scored_at_market": 0,
+    "win_rate": 1.0,
+    "without_top_1pct": {
+     "avg_net_pct": null,
+     "dropped": 1,
+     "n": 0
+    }
+   },
+   "readable": true,
+   "split": {
+    "fill_rate": 1.0,
+    "filled": {
+     "avg_net_pct": 3.9704,
+     "n": 1,
+     "total_net_pct": 3.9704,
+     "win_rate": 1.0,
+     "without_top_1pct": {
+      "avg_net_pct": null,
+      "dropped": 1,
+      "n": 0
+     }
+    },
+    "filled_by_exit": {
+     "target": {
+      "avg_net_pct": 3.9704,
+      "n": 1,
+      "share": 1.0
+     }
+    },
+    "scored_at_market": {
+     "n": 0
+    }
+   }
+  },
+  "schema": 1,
+  "setups": [
+   {
+    "analyst": {
+     "entry": 99.0,
+     "entry_at": 1700000300.0,
+     "exit": 103.0,
+     "exit_at": 1700000600.0,
+     "exit_reason": "target",
+     "filled_frac": 1.0,
+     "gross_pct": 4.0404,
+     "mae_pct": 0.202,
+     "mfe_pct": 4.5455,
+     "net_pct": 3.9704,
+     "reason": null,
+     "status": "resolved",
+     "unfilled": 0,
+     "updated_at": 1700000900.0
+    },
+    "archetype": "breakout_retest",
+    "bias": "risk_off",
+    "entries": [
+     {
+      "price": 99.0,
+      "weight": 0.4
+     },
+     {
+      "price": 98.5,
+      "weight": 0.6
+     }
+    ],
+    "expired": false,
+    "expires_at": 1700014400.0,
+    "invalidation": "1h close below 97",
+    "p_target": 0.4,
+    "plan_id": "p",
+    "price_at_submit": 100.0,
+    "rr_tp1": 2.0,
+    "scenario": "Retest of the broken shelf.",
+    "setup_id": "p:0",
+    "side": "long",
+    "state": "tp_hit",
+    "stop": 97.0,
+    "stop_atr": null,
+    "submitted_at": 1700000000.0,
+    "symbol": "X",
+    "targets": [
+     103.0,
+     105.0
+    ],
+    "tp1_pct": null
+   }
+  ]
+ },
+ "state": "ok"
+}
