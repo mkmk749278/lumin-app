@@ -428,7 +428,7 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
           padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.sm, vertical: 3),
           decoration: BoxDecoration(
             color: (isLong ? LuminColors.success : LuminColors.loss)
-                .withOpacity(0.15),
+                .withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(LuminRadii.sm),
           ),
           child: Text(
@@ -534,9 +534,9 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
           vertical: LuminSpacing.sm,
         ),
         decoration: BoxDecoration(
-          color: LuminColors.accent.withOpacity(0.10),
+          color: LuminColors.accent.withValues(alpha: 0.10),
           borderRadius: BorderRadius.circular(LuminRadii.sm),
-          border: Border.all(color: LuminColors.accent.withOpacity(0.30)),
+          border: Border.all(color: LuminColors.accent.withValues(alpha: 0.30)),
         ),
         child: Row(
           children: [
@@ -568,9 +568,9 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
         vertical: LuminSpacing.sm,
       ),
       decoration: BoxDecoration(
-        color: colour.withOpacity(0.10),
+        color: colour.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(LuminRadii.sm),
-        border: Border.all(color: colour.withOpacity(0.30)),
+        border: Border.all(color: colour.withValues(alpha: 0.30)),
       ),
       child: Row(
         children: [
@@ -718,9 +718,9 @@ class _TakeSignalSheetState extends State<TakeSignalSheet> {
         vertical: LuminSpacing.sm,
       ),
       decoration: BoxDecoration(
-        color: colour.withOpacity(0.10),
+        color: colour.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(LuminRadii.sm),
-        border: Border.all(color: colour.withOpacity(0.30)),
+        border: Border.all(color: colour.withValues(alpha: 0.30)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

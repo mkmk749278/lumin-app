@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import '../data/app_config.dart';
 import '../data/notification_service.dart';
+import '../shared/widgets/notification_soft_prompt.dart';
 import '../features/auth/widgets/account_required.dart';
 import '../features/charts/charts_page.dart';
 import '../features/install/install_banner.dart';
@@ -84,7 +85,12 @@ class _NavShellState extends State<NavShell> with WidgetsBindingObserver {
         .addListener(_onNotificationRoute);
     // A push tapped before this shell mounted (cold start) is already
     // sitting in the notifier — consume it on first frame.
-    WidgetsBinding.instance.addPostFrameCallback((_) => _onNotificationRoute());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _onNotificationRoute();
+      // The notification permission is asked here, inside the signed-in
+      // app, never on the splash (2026-11-26).
+      maybeOfferNotificationPrompt(context);
+    });
   }
 
   @override

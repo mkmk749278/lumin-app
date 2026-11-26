@@ -84,7 +84,7 @@ class _HeaderCard extends StatelessWidget {
                   width: 40,
                   height: 40,
                   decoration: BoxDecoration(
-                    color: iconColor.withOpacity(0.15),
+                    color: iconColor.withValues(alpha: 0.15),
                     shape: BoxShape.circle,
                   ),
                   alignment: Alignment.center,
@@ -123,7 +123,7 @@ class _HeaderCard extends StatelessWidget {
                               vertical: 2,
                             ),
                             decoration: BoxDecoration(
-                              color: sideColor.withOpacity(0.15),
+                              color: sideColor.withValues(alpha: 0.15),
                               borderRadius:
                                   BorderRadius.circular(LuminRadii.sm),
                             ),
@@ -205,9 +205,9 @@ class _HeaderCard extends StatelessWidget {
                     vertical: 6,
                   ),
                   decoration: BoxDecoration(
-                    color: roiColor.withOpacity(0.15),
+                    color: roiColor.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(LuminRadii.sm),
-                    border: Border.all(color: roiColor.withOpacity(0.45)),
+                    border: Border.all(color: roiColor.withValues(alpha: 0.45)),
                   ),
                   child: Text(
                     roiLabel,
@@ -526,7 +526,7 @@ class _FillRow extends StatelessWidget {
                 vertical: 3,
               ),
               decoration: BoxDecoration(
-                color: LuminColors.success.withOpacity(0.15),
+                color: LuminColors.success.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(LuminRadii.sm),
               ),
               child: Text(

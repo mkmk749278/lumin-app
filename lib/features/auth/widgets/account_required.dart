@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import '../../../data/app_config.dart';
 import '../../../shared/tokens.dart';
 import '../pages/phone_signin_page.dart';
+import '../../../shared/entitlement_copy.dart';
 
 /// True when the current session is an anonymous guest.  Mock / preview
 /// scopes have no auth and are never guests.
@@ -111,7 +112,7 @@ class AccountRequiredView extends StatelessWidget {
             ),
             const SizedBox(height: LuminSpacing.sm),
             const Text(
-              'New accounts get 3 days of live signals free.',
+              EntitlementCopy.newAccount,
               style: TextStyle(color: LuminColors.textMuted, fontSize: 12),
             ),
           ],

@@ -132,9 +132,9 @@ class AboutPage extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(LuminSpacing.md),
         decoration: BoxDecoration(
-          color: LuminColors.loss.withOpacity(0.06),
+          color: LuminColors.loss.withValues(alpha: 0.06),
           borderRadius: BorderRadius.circular(LuminRadii.md),
-          border: Border.all(color: LuminColors.loss.withOpacity(0.25)),
+          border: Border.all(color: LuminColors.loss.withValues(alpha: 0.25)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -170,7 +170,7 @@ class AboutPage extends StatelessWidget {
               'and forward-tested figures may not reflect realistic execution '
               'cost (fees, slippage, funding) at retail order sizes.\n\n'
               'You are solely responsible for trades executed on your '
-              'Binance account, whether placed manually or via the app\'s '
+              'exchange account, whether placed manually or via the app\'s '
               'auto-trade module.  Verify every order before authorising '
               'live execution.  Never trade with capital you cannot afford '
               'to lose.',
@@ -289,7 +289,7 @@ class AboutPage extends StatelessWidget {
         'Powered by 360 Crypto Eye signal intelligence.',
         textAlign: TextAlign.center,
         style: TextStyle(
-          color: LuminColors.textMuted.withOpacity(0.75),
+          color: LuminColors.textMuted.withValues(alpha: 0.75),
           fontSize: 12,
           height: 1.6,
         ),

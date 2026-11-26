@@ -648,7 +648,7 @@ class _ServerSideExecutionPageState extends State<ServerSideExecutionPage> {
         vertical: LuminSpacing.xs,
       ),
       decoration: BoxDecoration(
-        color: colour.withOpacity(0.12),
+        color: colour.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(LuminRadii.pill),
       ),
       child: Row(

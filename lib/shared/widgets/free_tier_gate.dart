@@ -165,7 +165,7 @@ class UpgradeSheet extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(LuminSpacing.sm),
                   decoration: BoxDecoration(
-                    color: LuminColors.accent.withOpacity(0.12),
+                    color: LuminColors.accent.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(LuminRadii.sm),
                   ),
                   child: const Icon(Icons.lock_open_rounded,

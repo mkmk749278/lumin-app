@@ -141,8 +141,7 @@ class _SymbolPreferenceBodyState extends State<_SymbolPreferenceBody> {
     final partial = _isPaper
         ? AutoTradeSettings(
             paperSymbolPreference: value, paperSymbolPreferenceSet: true)
-        : AutoTradeSettings(
-            symbolPreference: value, symbolPreferenceSet: true);
+        : AutoTradeSettings(symbolPreference: value, symbolPreferenceSet: true);
 
     try {
       await repo.updateUserAutoTradeSettings(partial);
@@ -158,7 +157,8 @@ class _SymbolPreferenceBodyState extends State<_SymbolPreferenceBody> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(friendlyActionError(e, action: 'save your symbol choices')),
+          content:
+              Text(friendlyActionError(e, action: 'save your symbol choices')),
           backgroundColor: LuminColors.loss,
         ),
       );
@@ -166,7 +166,8 @@ class _SymbolPreferenceBodyState extends State<_SymbolPreferenceBody> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(friendlyActionError(e, action: 'save your symbol choices')),
+          content:
+              Text(friendlyActionError(e, action: 'save your symbol choices')),
           backgroundColor: LuminColors.loss,
         ),
       );
@@ -319,20 +320,17 @@ class _SymbolPreferenceBodyState extends State<_SymbolPreferenceBody> {
               preset: _Preset.all,
               icon: Icons.all_inclusive,
               label: 'All allowed symbols',
-              subtitle:
-                  'Every pair Lumin trades (${_engineAllowed.length}). '
+              subtitle: 'Every pair Lumin trades (${_engineAllowed.length}). '
                   'Recommended — you get every paid signal that\'s eligible.',
             ),
-            const Divider(
-                color: LuminColors.cardBorder, height: 1, indent: 56),
+            const Divider(color: LuminColors.cardBorder, height: 1, indent: 56),
             _presetRow(
               preset: _Preset.custom,
               icon: Icons.tune,
               label: 'Custom',
               subtitle: 'Pick specific pairs below.',
             ),
-            const Divider(
-                color: LuminColors.cardBorder, height: 1, indent: 56),
+            const Divider(color: LuminColors.cardBorder, height: 1, indent: 56),
             _presetRow(
               preset: _Preset.blockAll,
               icon: Icons.block,
@@ -374,7 +372,7 @@ class _SymbolPreferenceBodyState extends State<_SymbolPreferenceBody> {
               width: 32,
               height: 32,
               decoration: BoxDecoration(
-                color: accent.withOpacity(0.10),
+                color: accent.withValues(alpha: 0.10),
                 borderRadius: BorderRadius.circular(LuminRadii.sm),
               ),
               alignment: Alignment.center,
@@ -407,10 +405,8 @@ class _SymbolPreferenceBodyState extends State<_SymbolPreferenceBody> {
                 ],
               ),
             ),
-            Radio<_Preset>(
-              value: preset,
+            RadioGroup<_Preset>(
               groupValue: _preset,
-              activeColor: accent,
               onChanged: (v) {
                 if (v != null) {
                   setState(() {
@@ -423,6 +419,10 @@ class _SymbolPreferenceBodyState extends State<_SymbolPreferenceBody> {
                   });
                 }
               },
+              child: Radio<_Preset>(
+                value: preset,
+                activeColor: accent,
+              ),
             ),
           ],
         ),
@@ -449,13 +449,11 @@ class _SymbolPreferenceBodyState extends State<_SymbolPreferenceBody> {
               TextButton(
                 onPressed: () =>
                     setState(() => _selected = _engineAllowed.toSet()),
-                child: const Text('Select all',
-                    style: TextStyle(fontSize: 11)),
+                child: const Text('Select all', style: TextStyle(fontSize: 11)),
               ),
               TextButton(
                 onPressed: () => setState(() => _selected = <String>{}),
-                child: const Text('Clear',
-                    style: TextStyle(fontSize: 11)),
+                child: const Text('Clear', style: TextStyle(fontSize: 11)),
               ),
             ],
           ),
@@ -489,12 +487,12 @@ class _SymbolPreferenceBodyState extends State<_SymbolPreferenceBody> {
         ),
         decoration: BoxDecoration(
           color: on
-              ? LuminColors.accent.withOpacity(0.16)
+              ? LuminColors.accent.withValues(alpha: 0.16)
               : LuminColors.bgDeep,
           borderRadius: BorderRadius.circular(LuminRadii.pill),
           border: Border.all(
             color: on
-                ? LuminColors.accent.withOpacity(0.60)
+                ? LuminColors.accent.withValues(alpha: 0.60)
                 : LuminColors.cardBorder,
           ),
         ),

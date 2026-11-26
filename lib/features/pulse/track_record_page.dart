@@ -985,7 +985,7 @@ class _SeriesPainter extends CustomPainter {
       Offset(0, zeroY),
       Offset(size.width, zeroY),
       Paint()
-        ..color = LuminColors.textMuted.withOpacity(0.25)
+        ..color = LuminColors.textMuted.withValues(alpha: 0.25)
         ..strokeWidth = 1,
     );
 
@@ -998,7 +998,7 @@ class _SeriesPainter extends CustomPainter {
           Offset(x, 0),
           Offset(x, size.height),
           Paint()
-            ..color = LuminColors.accent.withOpacity(0.35)
+            ..color = LuminColors.accent.withValues(alpha: 0.35)
             ..strokeWidth = 1,
         );
       }
@@ -1049,7 +1049,7 @@ class _SeriesPainter extends CustomPainter {
           const Radius.circular(1.5),
         ),
         Paint()
-          ..color = base.withOpacity(
+          ..color = base.withValues(alpha: 
             // Today is faint because it is still running, not because it is
             // unimportant — the engine says which day that is.
             items[i].inProgress && !isSel ? 0.35 : (isSel ? 1.0 : 0.85),
@@ -1182,9 +1182,9 @@ class _RecordedChip extends StatelessWidget {
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
         decoration: BoxDecoration(
-          color: LuminColors.success.withOpacity(0.12),
+          color: LuminColors.success.withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(LuminRadii.pill),
-          border: Border.all(color: LuminColors.success.withOpacity(0.35)),
+          border: Border.all(color: LuminColors.success.withValues(alpha: 0.35)),
         ),
         child: const Text(
           'RECORDED',
@@ -1244,7 +1244,7 @@ class _ViewToggle extends StatelessWidget {
         onTap: () => onChanged(target),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-          color: on ? LuminColors.accent.withOpacity(0.14) : Colors.transparent,
+          color: on ? LuminColors.accent.withValues(alpha: 0.14) : Colors.transparent,
           child: Icon(
             icon,
             size: 15,
@@ -1278,12 +1278,12 @@ class _Chip extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.md, vertical: 5),
             decoration: BoxDecoration(
               color: selected
-                  ? LuminColors.accent.withOpacity(0.14)
+                  ? LuminColors.accent.withValues(alpha: 0.14)
                   : Colors.transparent,
               borderRadius: BorderRadius.circular(LuminRadii.pill),
               border: Border.all(
                 color: selected
-                    ? LuminColors.accent.withOpacity(0.5)
+                    ? LuminColors.accent.withValues(alpha: 0.5)
                     : LuminColors.cardBorder,
               ),
             ),

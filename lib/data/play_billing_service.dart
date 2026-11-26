@@ -1,6 +1,7 @@
 /// Google Play Billing integration (B16).
 ///
-/// Telegram is banned in-region, so the bot paywall reaches no one.
+/// The app is the only delivery surface (Telegram broadcast channels were
+/// deleted 2026-09-16), so the paywall lives here.
 /// Subscriptions are purchased through Google Play Billing; the resulting
 /// `purchaseToken` is verified **server-side** by the engine
 /// (`POST /api/billing/play/verify`) which is the entitlement source of
@@ -103,7 +104,12 @@ class PlayBillingService {
   Stream<PlayBillingEvent> get events => _events.stream;
 
   /// True when the device can transact (Play Store present + signed in).
-  Future<bool> isAvailable() => _iap.isAvailable();
+  Future<bool> isAvailable() => _iap.isAvailable().timeout(storeTimeout);
+
+  /// How long a store call may take before the paywall gives up and offers
+  /// a retry. Play Billing can hang (no Play Services, a stalled connection)
+  /// and the page used to show its skeleton forever (2026-11-26).
+  static const Duration storeTimeout = Duration(seconds: 15);
 
   /// Begin listening to the purchase stream.  Idempotent.
   void start() {
@@ -128,7 +134,7 @@ class PlayBillingService {
   /// (Play returns them in `notFoundIDs`); the caller renders whatever
   /// came back.
   Future<List<ProductDetails>> loadProducts(Set<String> ids) async {
-    final resp = await _iap.queryProductDetails(ids);
+    final resp = await _iap.queryProductDetails(ids).timeout(storeTimeout);
     return resp.productDetails;
   }
 

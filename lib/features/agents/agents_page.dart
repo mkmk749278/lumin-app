@@ -177,7 +177,7 @@ class _AgentCard extends StatelessWidget {
             width: 56,
             height: 56,
             decoration: BoxDecoration(
-              color: LuminColors.accent.withOpacity(0.10),
+              color: LuminColors.accent.withValues(alpha: 0.10),
               borderRadius: BorderRadius.circular(LuminRadii.md),
               border: Border.all(color: LuminColors.cardBorder),
             ),

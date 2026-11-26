@@ -172,7 +172,8 @@ class _EligibilityPickerPageState extends State<_EligibilityPickerPage> {
   /// Map stored tokens onto the displayed universe.  Paths match 1:1.
   /// Regimes: a stored backend label maps onto its UI bucket so a
   /// previously-saved selection lights the right chips.
-  Set<String> _foldStoredOntoUniverse(List<String> stored, List<String> universe) {
+  Set<String> _foldStoredOntoUniverse(
+      List<String> stored, List<String> universe) {
     if (_isPath) return stored.toSet();
     const backendToBucket = <String, String>{
       'TRENDING_UP': 'TRENDING',
@@ -252,7 +253,9 @@ class _EligibilityPickerPageState extends State<_EligibilityPickerPage> {
     if (!_isPath) {
       // TRENDING / RANGING / CHOPPY → Trending / Ranging / Choppy.
       final lower = token.toLowerCase();
-      return lower.isEmpty ? token : '${lower[0].toUpperCase()}${lower.substring(1)}';
+      return lower.isEmpty
+          ? token
+          : '${lower[0].toUpperCase()}${lower.substring(1)}';
     }
     return token
         .split('_')
@@ -311,7 +314,8 @@ class _EligibilityPickerPageState extends State<_EligibilityPickerPage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.cloud_off, color: LuminColors.textMuted, size: 36),
+              const Icon(Icons.cloud_off,
+                  color: LuminColors.textMuted, size: 36),
               const SizedBox(height: LuminSpacing.md),
               Text(
                 'Could not load $_title',
@@ -425,7 +429,9 @@ class _EligibilityPickerPageState extends State<_EligibilityPickerPage> {
               preset: _Preset.custom,
               icon: Icons.tune,
               label: 'Custom',
-              subtitle: _isPath ? 'Pick specific paths below.' : 'Pick specific regimes below.',
+              subtitle: _isPath
+                  ? 'Pick specific paths below.'
+                  : 'Pick specific regimes below.',
             ),
             const Divider(color: LuminColors.cardBorder, height: 1, indent: 56),
             _presetRow(
@@ -461,7 +467,7 @@ class _EligibilityPickerPageState extends State<_EligibilityPickerPage> {
               width: 32,
               height: 32,
               decoration: BoxDecoration(
-                color: accent.withOpacity(0.10),
+                color: accent.withValues(alpha: 0.10),
                 borderRadius: BorderRadius.circular(LuminRadii.sm),
               ),
               alignment: Alignment.center,
@@ -475,7 +481,9 @@ class _EligibilityPickerPageState extends State<_EligibilityPickerPage> {
                   Text(
                     label,
                     style: TextStyle(
-                      color: destructive ? LuminColors.loss : LuminColors.textPrimary,
+                      color: destructive
+                          ? LuminColors.loss
+                          : LuminColors.textPrimary,
                       fontSize: 14,
                       fontWeight: FontWeight.w500,
                     ),
@@ -492,13 +500,15 @@ class _EligibilityPickerPageState extends State<_EligibilityPickerPage> {
                 ],
               ),
             ),
-            Radio<_Preset>(
-              value: preset,
+            RadioGroup<_Preset>(
               groupValue: _preset,
-              activeColor: accent,
               onChanged: (v) {
                 if (v != null) _applyPreset(v);
               },
+              child: Radio<_Preset>(
+                value: preset,
+                activeColor: accent,
+              ),
             ),
           ],
         ),
@@ -559,7 +569,8 @@ class _EligibilityPickerPageState extends State<_EligibilityPickerPage> {
               spacing: LuminSpacing.xs,
               runSpacing: LuminSpacing.xs,
               children: [
-                for (final tok in _universe) _chip(tok, _selected.contains(tok)),
+                for (final tok in _universe)
+                  _chip(tok, _selected.contains(tok)),
               ],
             ),
         ],
@@ -582,10 +593,14 @@ class _EligibilityPickerPageState extends State<_EligibilityPickerPage> {
           vertical: 6,
         ),
         decoration: BoxDecoration(
-          color: on ? LuminColors.accent.withOpacity(0.16) : LuminColors.bgDeep,
+          color: on
+              ? LuminColors.accent.withValues(alpha: 0.16)
+              : LuminColors.bgDeep,
           borderRadius: BorderRadius.circular(LuminRadii.pill),
           border: Border.all(
-            color: on ? LuminColors.accent.withOpacity(0.60) : LuminColors.cardBorder,
+            color: on
+                ? LuminColors.accent.withValues(alpha: 0.60)
+                : LuminColors.cardBorder,
           ),
         ),
         child: Row(

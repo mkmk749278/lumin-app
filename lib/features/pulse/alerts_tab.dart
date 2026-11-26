@@ -351,7 +351,7 @@ class _AlertCard extends StatelessWidget {
               width: 36,
               height: 36,
               decoration: BoxDecoration(
-                color: color.withOpacity(0.12),
+                color: color.withValues(alpha: 0.12),
                 shape: BoxShape.circle,
               ),
               child: Icon(_iconFor(alert.alertType), color: color, size: 19),

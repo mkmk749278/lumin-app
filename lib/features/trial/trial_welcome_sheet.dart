@@ -67,7 +67,7 @@ List<({IconData icon, String title, String body})> trialBenefits(String tier) {
     (
       icon: Icons.key_off_rounded,
       title: 'Your keys, your exchange',
-      body: 'Trades run on your own Binance account. We can never withdraw — '
+      body: 'Trades run on your own Binance or CoinDCX account. We can never withdraw — '
           'keys with withdrawal permission are rejected outright.',
     ),
   ];
@@ -125,10 +125,10 @@ class TrialWelcomeCard extends StatelessWidget {
                 vertical: LuminSpacing.xs,
               ),
               decoration: BoxDecoration(
-                color: LuminColors.success.withOpacity(0.12),
+                color: LuminColors.success.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(LuminRadii.sm),
                 border: Border.all(
-                  color: LuminColors.success.withOpacity(0.35),
+                  color: LuminColors.success.withValues(alpha: 0.35),
                 ),
               ),
               child: const Text(
@@ -177,7 +177,7 @@ class TrialWelcomeCard extends StatelessWidget {
               decoration: BoxDecoration(
                 color: LuminColors.bgCard,
                 borderRadius: BorderRadius.circular(LuminRadii.md),
-                border: Border.all(color: LuminColors.accent.withOpacity(0.25)),
+                border: Border.all(color: LuminColors.accent.withValues(alpha: 0.25)),
               ),
               child: const Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -301,7 +301,7 @@ class _Benefit extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(LuminSpacing.sm),
           decoration: BoxDecoration(
-            color: LuminColors.accent.withOpacity(0.12),
+            color: LuminColors.accent.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(LuminRadii.sm),
           ),
           child: Icon(icon, color: LuminColors.accent, size: 18),

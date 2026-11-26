@@ -48,7 +48,7 @@ class TrialOfferTile extends StatelessWidget {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(LuminRadii.lg),
               border: Border.all(
-                color: LuminColors.success.withOpacity(0.35),
+                color: LuminColors.success.withValues(alpha: 0.35),
               ),
             ),
             child: Row(
@@ -57,7 +57,7 @@ class TrialOfferTile extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(LuminSpacing.sm),
                   decoration: BoxDecoration(
-                    color: LuminColors.success.withOpacity(0.12),
+                    color: LuminColors.success.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(LuminRadii.sm),
                   ),
                   child: const Icon(

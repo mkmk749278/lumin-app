@@ -101,7 +101,7 @@ class SettingsRow extends StatelessWidget {
               width: 32,
               height: 32,
               decoration: BoxDecoration(
-                color: fg.withOpacity(0.10),
+                color: fg.withValues(alpha: 0.10),
                 borderRadius: BorderRadius.circular(LuminRadii.sm),
               ),
               alignment: Alignment.center,

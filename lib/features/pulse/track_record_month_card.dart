@@ -173,10 +173,10 @@ class _TrackRecordMonthCardState extends State<TrackRecordMonthCard> {
                       const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                   margin: const EdgeInsets.only(right: LuminSpacing.sm),
                   decoration: BoxDecoration(
-                    color: LuminColors.success.withOpacity(0.12),
+                    color: LuminColors.success.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(LuminRadii.pill),
                     border:
-                        Border.all(color: LuminColors.success.withOpacity(0.35)),
+                        Border.all(color: LuminColors.success.withValues(alpha: 0.35)),
                   ),
                   child: const Text(
                     'RECORDED',

@@ -938,12 +938,12 @@ class _SubTabButton extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
             color: selected
-                ? LuminColors.accent.withOpacity(0.15)
+                ? LuminColors.accent.withValues(alpha: 0.15)
                 : LuminColors.bgElevated,
             borderRadius: BorderRadius.circular(LuminRadii.md),
             border: Border.all(
               color: selected
-                  ? LuminColors.accent.withOpacity(0.50)
+                  ? LuminColors.accent.withValues(alpha: 0.50)
                   : LuminColors.cardBorder,
             ),
           ),
@@ -1004,6 +1004,11 @@ class _ModePnlCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final mode = autoMode.mode;
+    // An unreadable status arrives as mode 'off' with zeros. Saying
+    // "Auto-trade is off" over it would state a fact nobody observed.
+    if (autoMode.isUnreadable) {
+      return const _UnreadableStateCard();
+    }
     if (mode == 'off') {
       return _OffStateCard();
     }
@@ -1069,7 +1074,7 @@ class _ModePnlCard extends StatelessWidget {
             Text(
               '${positive ? '+' : ''}${autoMode.dailyLossPct.toStringAsFixed(2)}% on equity',
               style: TextStyle(
-                color: accent.withOpacity(0.85),
+                color: accent.withValues(alpha: 0.85),
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
               ),
@@ -1128,6 +1133,54 @@ class _ModePnlCard extends StatelessWidget {
               style: const TextStyle(
                 color: LuminColors.textSecondary,
                 fontSize: 11,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The engine answered but could not read the auto-trade status. No cause
+/// is named and no automatic recovery is promised: the app cannot observe
+/// either (CLAUDE.md, "an engine unknown is not an engine no").
+class _UnreadableStateCard extends StatelessWidget {
+  const _UnreadableStateCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
+      child: LuminCard(
+        child: Row(
+          children: const [
+            Icon(Icons.help_outline, size: 22, color: LuminColors.warn),
+            SizedBox(width: LuminSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Couldn't read your auto-trade status",
+                    key: Key('trade.mode.unreadable'),
+                    style: TextStyle(
+                      color: LuminColors.textPrimary,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  SizedBox(height: 2),
+                  Text(
+                    "We can't confirm whether it is on or off right now, so "
+                    'no figures are shown. Pull down to try again.',
+                    style: TextStyle(
+                      color: LuminColors.textSecondary,
+                      fontSize: 12,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -1307,7 +1360,7 @@ class _PositionRow extends StatelessWidget {
               ),
               decoration: BoxDecoration(
                 color: (isLong ? LuminColors.success : LuminColors.loss)
-                    .withOpacity(0.15),
+                    .withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(LuminRadii.sm),
               ),
               child: Text(
@@ -1531,7 +1584,7 @@ class _BinaryModeToggle extends StatelessWidget {
               width: 36,
               height: 36,
               decoration: BoxDecoration(
-                color: iconColor.withOpacity(0.12),
+                color: iconColor.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(LuminRadii.sm),
               ),
               child: Icon(icon, color: iconColor, size: 20),
@@ -1662,9 +1715,9 @@ class _SettingsUnknownBanner extends StatelessWidget {
           vertical: LuminSpacing.sm,
         ),
         decoration: BoxDecoration(
-          color: LuminColors.warn.withOpacity(0.10),
+          color: LuminColors.warn.withValues(alpha: 0.10),
           borderRadius: BorderRadius.circular(LuminRadii.sm),
-          border: Border.all(color: LuminColors.warn.withOpacity(0.35)),
+          border: Border.all(color: LuminColors.warn.withValues(alpha: 0.35)),
         ),
         child: Row(
           children: [
@@ -1937,7 +1990,7 @@ class _UnmanagedPositionRow extends StatelessWidget {
                   vertical: 2,
                 ),
                 decoration: BoxDecoration(
-                  color: dirColor.withOpacity(0.16),
+                  color: dirColor.withValues(alpha: 0.16),
                   borderRadius: BorderRadius.circular(LuminRadii.sm),
                 ),
                 child: Text(
@@ -2159,7 +2212,7 @@ class _ServerPositionRowState extends State<_ServerPositionRow> {
                   vertical: 2,
                 ),
                 decoration: BoxDecoration(
-                  color: dirColor.withOpacity(0.16),
+                  color: dirColor.withValues(alpha: 0.16),
                   borderRadius: BorderRadius.circular(LuminRadii.sm),
                 ),
                 child: Text(
@@ -2487,7 +2540,7 @@ class _PhoneOrderRow extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
-              color: LuminColors.accent.withOpacity(0.16),
+              color: LuminColors.accent.withValues(alpha: 0.16),
               borderRadius: BorderRadius.circular(LuminRadii.sm),
             ),
             child: const Text(
@@ -2628,7 +2681,7 @@ class _DispatchEventRow extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
-              color: chipColor.withOpacity(0.16),
+              color: chipColor.withValues(alpha: 0.16),
               borderRadius: BorderRadius.circular(LuminRadii.sm),
             ),
             child: Text(

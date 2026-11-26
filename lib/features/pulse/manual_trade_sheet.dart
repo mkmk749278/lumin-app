@@ -293,7 +293,7 @@ class _ManualTradeSheetState extends State<ManualTradeSheet> {
         ),
       ),
       selected: selected,
-      selectedColor: color.withOpacity(0.15),
+      selectedColor: color.withValues(alpha: 0.15),
       backgroundColor: LuminColors.bgElevated,
       onSelected: (_) => onTap(),
     );
@@ -355,9 +355,9 @@ class _ManualTradeSheetState extends State<ManualTradeSheet> {
     return Container(
       padding: const EdgeInsets.all(LuminSpacing.sm),
       decoration: BoxDecoration(
-        color: LuminColors.loss.withOpacity(0.08),
+        color: LuminColors.loss.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(LuminRadii.sm),
-        border: Border.all(color: LuminColors.loss.withOpacity(0.35)),
+        border: Border.all(color: LuminColors.loss.withValues(alpha: 0.35)),
       ),
       child: const Text(
         'No stop-loss set — this position is yours to manage and close. '
@@ -397,7 +397,7 @@ class _ManualTradeSheetState extends State<ManualTradeSheet> {
     return Container(
       padding: const EdgeInsets.all(LuminSpacing.md),
       decoration: BoxDecoration(
-        color: (ok ? LuminColors.success : LuminColors.loss).withOpacity(0.10),
+        color: (ok ? LuminColors.success : LuminColors.loss).withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(LuminRadii.sm),
       ),
       child: Text(

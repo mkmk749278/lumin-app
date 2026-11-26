@@ -39,6 +39,7 @@ class AutoModeStatus {
     this.simulatedPnlUsd,
     this.weeklyPnlUsd = 0.0,
     this.monthlyPnlUsd = 0.0,
+    this.readable,
   });
 
   final String mode;
@@ -57,6 +58,17 @@ class AutoModeStatus {
   /// Realised PnL over the last 30 UTC days (rolling).
   final double monthlyPnlUsd;
 
+  /// Whether the engine could actually read this status (engine #1102).
+  /// When it cannot, it returns a synthetic ``mode: off`` with zeros so the
+  /// tab does not break, and sets this false: every other field is then a
+  /// placeholder, not a reading. Tri-state: ``null`` is an engine predating
+  /// the field, which keeps the old rendering.
+  final bool? readable;
+
+  /// True only when the engine said outright that it could not read the
+  /// status. Never true for an older engine.
+  bool get isUnreadable => readable == false;
+
   factory AutoModeStatus.fromJson(Map<String, dynamic> j) => AutoModeStatus(
         mode: j['mode'] as String,
         openPositions: (j['open_positions'] as num?)?.toInt() ?? 0,
@@ -69,6 +81,7 @@ class AutoModeStatus {
         simulatedPnlUsd: (j['simulated_pnl_usd'] as num?)?.toDouble(),
         weeklyPnlUsd: (j['weekly_pnl_usd'] as num?)?.toDouble() ?? 0.0,
         monthlyPnlUsd: (j['monthly_pnl_usd'] as num?)?.toDouble() ?? 0.0,
+        readable: j['readable'] as bool?,
       );
 }
 
