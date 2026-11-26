@@ -29,6 +29,7 @@ import '../../../shared/widgets/free_tier_gate.dart';
 import '../../../shared/widgets/lumin_card.dart';
 import '../../trial/trial_offer_tile.dart';
 import '../../../shared/widgets/page_skeleton.dart';
+import '../../../shared/entitlement_copy.dart';
 
 /// Play Console subscription product ids.  Keep in lockstep with the
 /// engine's GOOGLE_PLAY_{SIGNALS,ASSIST,AUTO}_PRODUCT_IDS env.
@@ -131,6 +132,14 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     }
   }
 
+  void _retry() {
+    setState(() {
+      _loading = true;
+      _loadError = null;
+    });
+    _bootstrap();
+  }
+
   Future<void> _bootstrap() async {
     final billing = _billing!;
     try {
@@ -206,8 +215,10 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
       if (mounted) {
         setState(() {
           _loading = false;
-          _loadError =
-              'Could not load plans — check your connection and try again.';
+          _loadError = e is TimeoutException
+              ? 'Google Play did not answer in time. Check your connection '
+                  'and try again.'
+              : 'Could not load plans — check your connection and try again.';
         });
       }
     }
@@ -343,14 +354,14 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
         decoration: BoxDecoration(
           gradient: LinearGradient(
             colors: [
-              LuminColors.accent.withOpacity(0.18),
-              LuminColors.accent.withOpacity(0.05),
+              LuminColors.accent.withValues(alpha: 0.18),
+              LuminColors.accent.withValues(alpha: 0.05),
             ],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
           borderRadius: BorderRadius.circular(LuminRadii.lg),
-          border: Border.all(color: LuminColors.accent.withOpacity(0.30)),
+          border: Border.all(color: LuminColors.accent.withValues(alpha: 0.30)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -410,7 +421,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
             _featureRow('Per-agent & risk controls', false, false, false, true),
             const SizedBox(height: LuminSpacing.xs),
             const Text(
-              'New accounts get 3 days of live signals free.',
+              EntitlementCopy.newAccount,
               style: TextStyle(color: LuminColors.textMuted, fontSize: 11),
             ),
           ],
@@ -464,13 +475,26 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
         child: LuminCard(
-          child: Text(
-            _loadError ?? 'Subscription plans are unavailable right now.',
-            style: const TextStyle(
-              color: LuminColors.textSecondary,
-              fontSize: 13,
-              height: 1.4,
-            ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _loadError ?? 'Subscription plans are unavailable right now.',
+                style: const TextStyle(
+                  color: LuminColors.textSecondary,
+                  fontSize: 13,
+                  height: 1.4,
+                ),
+              ),
+              if (_billing != null) ...[
+                const SizedBox(height: LuminSpacing.sm),
+                TextButton(
+                  key: const Key('subscription.retry'),
+                  onPressed: _retry,
+                  child: const Text('Try again'),
+                ),
+              ],
+            ],
           ),
         ),
       );
@@ -535,16 +559,16 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
             padding: const EdgeInsets.all(LuminSpacing.md),
             decoration: BoxDecoration(
               color: owned
-                  ? LuminColors.success.withOpacity(0.08)
+                  ? LuminColors.success.withValues(alpha: 0.08)
                   : isAuto
-                      ? LuminColors.accent.withOpacity(0.10)
+                      ? LuminColors.accent.withValues(alpha: 0.10)
                       : LuminColors.bgCard,
               borderRadius: BorderRadius.circular(LuminRadii.md),
               border: Border.all(
                 color: owned
-                    ? LuminColors.success.withOpacity(0.55)
+                    ? LuminColors.success.withValues(alpha: 0.55)
                     : isAuto
-                        ? LuminColors.accent.withOpacity(0.50)
+                        ? LuminColors.accent.withValues(alpha: 0.50)
                         : LuminColors.cardBorder,
                 width: (owned || isAuto) ? 1.5 : 1,
               ),
@@ -664,7 +688,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
         'automatically until cancelled; manage or cancel anytime in Google '
         'Play › Subscriptions.',
         style: TextStyle(
-          color: LuminColors.textMuted.withOpacity(0.85),
+          color: LuminColors.textMuted.withValues(alpha: 0.85),
           fontSize: 12,
           height: 1.5,
         ),
@@ -716,14 +740,14 @@ class CurrentPlanCard extends StatelessWidget {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            LuminColors.success.withOpacity(0.16),
-            LuminColors.success.withOpacity(0.04),
+            LuminColors.success.withValues(alpha: 0.16),
+            LuminColors.success.withValues(alpha: 0.04),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(LuminRadii.lg),
-        border: Border.all(color: LuminColors.success.withOpacity(0.35)),
+        border: Border.all(color: LuminColors.success.withValues(alpha: 0.35)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -771,7 +795,7 @@ class CurrentPlanCard extends StatelessWidget {
             style: OutlinedButton.styleFrom(
               foregroundColor: LuminColors.textPrimary,
               side: BorderSide(
-                color: LuminColors.success.withOpacity(0.45),
+                color: LuminColors.success.withValues(alpha: 0.45),
               ),
               padding: const EdgeInsets.symmetric(
                 horizontal: LuminSpacing.lg,
@@ -797,13 +821,20 @@ class _ColHead extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      label,
-      style: const TextStyle(
-        color: LuminColors.textMuted,
-        fontSize: 11,
-        letterSpacing: 0.8,
-        fontWeight: FontWeight.w700,
+    // One line, scaled down to fit: on a narrow phone 'SIGNALS' and
+    // 'ASSIST' used to wrap mid-word in their quarter-width column.
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      child: Text(
+        label,
+        maxLines: 1,
+        softWrap: false,
+        style: const TextStyle(
+          color: LuminColors.textMuted,
+          fontSize: 11,
+          letterSpacing: 0.8,
+          fontWeight: FontWeight.w700,
+        ),
       ),
     );
   }

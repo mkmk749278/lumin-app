@@ -162,8 +162,8 @@ class _Slide1 extends StatelessWidget {
           ),
           const SizedBox(height: LuminSpacing.md),
           const Text(
-            'AI-powered USDT futures signals with '
-            'automatic execution on your Binance account.',
+            'AI-powered USDT futures signals, with optional '
+            'execution on your own Binance or CoinDCX account.',
             style: TextStyle(
               color: LuminColors.textSecondary,
               fontSize: 15,
@@ -247,7 +247,7 @@ class _TermsLine extends StatelessWidget {
         TextSpan(
           style: base,
           children: [
-            const TextSpan(text: 'Continue karke aap confirm karte ho ki aap 18+ ho aur '),
+            const TextSpan(text: 'By continuing you confirm you are 18+ and have read the '),
             TextSpan(
               text: 'Terms',
               style: link,
@@ -259,7 +259,7 @@ class _TermsLine extends StatelessWidget {
               style: link,
               recognizer: TapGestureRecognizer()..onTap = () => _open(LegalUrls.riskUrl),
             ),
-            const TextSpan(text: ' padh liye hain.'),
+            const TextSpan(text: '.'),
           ],
         ),
         textAlign: TextAlign.center,

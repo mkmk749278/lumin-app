@@ -1086,9 +1086,9 @@ class _AutoTradeSettingsPageState extends State<AutoTradeSettingsPage> {
       child: Container(
         padding: const EdgeInsets.all(LuminSpacing.md),
         decoration: BoxDecoration(
-          color: LuminColors.warn.withOpacity(0.08),
+          color: LuminColors.warn.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(LuminRadii.md),
-          border: Border.all(color: LuminColors.warn.withOpacity(0.25)),
+          border: Border.all(color: LuminColors.warn.withValues(alpha: 0.25)),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1275,9 +1275,9 @@ class _StaleDataBanner extends StatelessWidget {
           vertical: LuminSpacing.sm,
         ),
         decoration: BoxDecoration(
-          color: LuminColors.warn.withOpacity(0.08),
+          color: LuminColors.warn.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(LuminRadii.sm),
-          border: Border.all(color: LuminColors.warn.withOpacity(0.35)),
+          border: Border.all(color: LuminColors.warn.withValues(alpha: 0.35)),
         ),
         child: Row(
           children: [
@@ -1329,10 +1329,10 @@ class _StatusChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.sm, vertical: 3),
       decoration: BoxDecoration(
-        color: filled ? color.withOpacity(0.15) : Colors.transparent,
+        color: filled ? color.withValues(alpha: 0.15) : Colors.transparent,
         borderRadius: BorderRadius.circular(LuminRadii.pill),
         border: Border.all(
-          color: filled ? color.withOpacity(0.50) : Colors.transparent,
+          color: filled ? color.withValues(alpha: 0.50) : Colors.transparent,
         ),
       ),
       child: Text(
@@ -1373,9 +1373,9 @@ class _PauseBanner extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(LuminSpacing.md),
       decoration: BoxDecoration(
-        color: LuminColors.warn.withOpacity(0.08),
+        color: LuminColors.warn.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(LuminRadii.sm),
-        border: Border.all(color: LuminColors.warn.withOpacity(0.40)),
+        border: Border.all(color: LuminColors.warn.withValues(alpha: 0.40)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,

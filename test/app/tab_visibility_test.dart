@@ -40,7 +40,10 @@ void main() {
       final src = f.readAsStringSync();
       if (!src.contains('Timer.periodic(')) continue;
       if (_exempt.containsKey(f.path)) continue;
+      // TickerMode.of was deprecated (Flutter 3.35) for valuesOf; either
+      // reads the same visibility.
       final watches = src.contains('TickerMode.of(') ||
+          src.contains('TickerMode.valuesOf(') ||
           src.contains('didChangeAppLifecycleState');
       if (!watches) offenders.add(f.path);
     }
@@ -54,7 +57,7 @@ void main() {
     final src = File('lib/features/signals/signals_page.dart').readAsStringSync();
     final restart = src.substring(src.indexOf('void _restartPricePolling()'));
     expect(restart.substring(0, 300), contains('if (!_pollingAllowed) return;'));
-    expect(src, contains('TickerMode.of(context)'));
+    expect(src, contains('TickerMode.valuesOf(context).enabled'));
     expect(src, contains('didChangeAppLifecycleState'));
   });
 }

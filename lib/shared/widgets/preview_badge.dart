@@ -33,9 +33,9 @@ class PreviewBadge extends StatelessWidget {
         vertical: LuminSpacing.sm,
       ),
       decoration: BoxDecoration(
-        color: LuminColors.warn.withOpacity(0.10),
+        color: LuminColors.warn.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(LuminRadii.sm),
-        border: Border.all(color: LuminColors.warn.withOpacity(0.30)),
+        border: Border.all(color: LuminColors.warn.withValues(alpha: 0.30)),
       ),
       child: Row(
         children: [

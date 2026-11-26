@@ -65,7 +65,7 @@ class _ShimmerState extends State<Shimmer>
   Widget build(BuildContext context) {
     final base = widget.baseColor ?? LuminColors.bgElevated;
     final highlight =
-        widget.highlightColor ?? LuminColors.cardBorder.withOpacity(0.6);
+        widget.highlightColor ?? LuminColors.cardBorder.withValues(alpha: 0.6);
     return AnimatedBuilder(
       animation: _ctl,
       builder: (context, child) {

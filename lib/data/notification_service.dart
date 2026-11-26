@@ -84,13 +84,13 @@ class NotificationService {
       final messaging = FirebaseMessaging.instance;
 
       if (!kIsWeb) {
-        // Android 13+ runtime permission (needs POST_NOTIFICATIONS in the
-        // manifest — injected by the CI build).  On earlier Android this
-        // resolves as granted without UI.  NOT requested on web at boot:
-        // browsers (Apple especially) require a user gesture, and the
-        // topic proxy needs the post-auth Bearer anyway — see
-        // [enableWebPush] / [syncWebPush].
-        await messaging.requestPermission();
+        // The Android 13+ permission is NOT requested here (2026-11-26).
+        // Asking on the splash, before the user has seen what Lumin sends,
+        // is the dialog most people deny — and a denial is sticky. The
+        // signed-in shell offers it once with a sentence of context
+        // ([shouldOfferAndroidPrompt] / [requestAndroidPermission]).
+        // Topic subscription below does not need the permission: pushes
+        // are delivered either way and simply not displayed until granted.
 
         // Apply persisted topic choices (default: both ON).  Re-running
         // subscribe on every boot is idempotent and re-arms topics after
@@ -115,6 +115,50 @@ class NotificationService {
       if (initial != null) _routeFromMessage(initial);
     } catch (e) {
       debugPrint('NotificationService.init failed (non-fatal): $e');
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Android notification permission (deferred past onboarding)
+  // ------------------------------------------------------------------
+
+  static const String _kAndroidPromptAsked = 'notifications.android_prompt_asked';
+
+  /// True when the signed-in shell should offer the soft prompt: native
+  /// only, never asked before, and the system has not already granted it
+  /// (Android < 13 reports granted without UI, so it is never offered there).
+  Future<bool> shouldOfferAndroidPrompt() async {
+    if (kIsWeb) return false;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getBool(_kAndroidPromptAsked) ?? false) return false;
+      final settings =
+          await FirebaseMessaging.instance.getNotificationSettings();
+      return settings.authorizationStatus != AuthorizationStatus.authorized;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Records that the soft prompt was answered, so it is offered once.
+  Future<void> markAndroidPromptAsked() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_kAndroidPromptAsked, true);
+    } catch (_) {}
+  }
+
+  /// The system dialog, after the user tapped "Turn on". Returns whether
+  /// notifications ended up allowed.
+  Future<bool> requestAndroidPermission() async {
+    if (kIsWeb) return false;
+    await markAndroidPromptAsked();
+    try {
+      final settings = await FirebaseMessaging.instance.requestPermission();
+      return settings.authorizationStatus == AuthorizationStatus.authorized;
+    } catch (e) {
+      debugPrint('NotificationService.requestAndroidPermission failed: $e');
+      return false;
     }
   }
 

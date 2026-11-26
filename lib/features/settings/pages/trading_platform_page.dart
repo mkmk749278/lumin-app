@@ -431,7 +431,7 @@ class _TradingPlatformPageState extends State<TradingPlatformPage> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
-                color: LuminColors.accent.withOpacity(0.15),
+                color: LuminColors.accent.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(LuminRadii.sm),
               ),
               child: const Text('IN USE',

@@ -27,7 +27,9 @@ class ConsentStorage {
   /// category, new permission, new feature with separate risk).
   /// Patch-level edits (typos, formatting) do NOT bump — the user
   /// shouldn't have to re-tap for cosmetic changes.
-  static const int currentConsentVersion = 1;
+  /// 2 (2026-11-26): the responsibility line named only a Binance account;
+  /// it now covers any exchange account, CoinDCX included.
+  static const int currentConsentVersion = 2;
 
   static const String _kVersionKey = 'consent.version';
   static const String _kAtKey = 'consent.acceptedAt';

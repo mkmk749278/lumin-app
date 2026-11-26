@@ -485,12 +485,12 @@ class _RegimeBar extends StatelessWidget {
                         Container(
                           height: 6,
                           decoration: BoxDecoration(
-                            color: active ? c : c.withOpacity(0.18),
+                            color: active ? c : c.withValues(alpha: 0.18),
                             borderRadius: BorderRadius.circular(3),
                             boxShadow: active
                                 ? [
                                     BoxShadow(
-                                      color: c.withOpacity(0.5),
+                                      color: c.withValues(alpha: 0.5),
                                       blurRadius: 6,
                                       spreadRadius: 0,
                                     ),
@@ -669,7 +669,7 @@ class _NotTradingYetCard extends StatelessWidget {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: LuminColors.accent.withOpacity(0.10),
+                color: LuminColors.accent.withValues(alpha: 0.10),
                 shape: BoxShape.circle,
               ),
               child: const Icon(
@@ -939,7 +939,7 @@ class _PnlChartEmptyState extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: LuminColors.bgElevated.withOpacity(0.5),
+        color: LuminColors.bgElevated.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(LuminRadii.sm),
       ),
       alignment: Alignment.center,
@@ -979,7 +979,7 @@ class _PnlBarChartPainter extends CustomPainter {
     final winPaint = Paint()..color = LuminColors.success;
     final lossPaint = Paint()..color = LuminColors.loss;
     final zeroPaint = Paint()
-      ..color = LuminColors.textMuted.withOpacity(0.35);
+      ..color = LuminColors.textMuted.withValues(alpha: 0.35);
     final axisPaint = Paint()
       ..color = LuminColors.cardBorder
       ..strokeWidth = 1;

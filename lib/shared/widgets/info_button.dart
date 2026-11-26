@@ -96,7 +96,7 @@ class _InfoSheet extends StatelessWidget {
                     width: 36,
                     height: 4,
                     decoration: BoxDecoration(
-                      color: LuminColors.textMuted.withOpacity(0.4),
+                      color: LuminColors.textMuted.withValues(alpha: 0.4),
                       borderRadius: BorderRadius.circular(LuminRadii.pill),
                     ),
                   ),

@@ -25,6 +25,7 @@ import '../../../shared/widgets/lumin_card.dart';
 import '../../../shared/widgets/free_tier_gate.dart';
 import '../../../shared/friendly_error.dart';
 import '../../../shared/widgets/page_skeleton.dart';
+import '../../../shared/entitlement_copy.dart';
 
 class WebPaywallPage extends StatefulWidget {
   const WebPaywallPage({super.key});
@@ -205,9 +206,9 @@ class _WebPaywallPageState extends State<WebPaywallPage> {
     return Container(
       padding: const EdgeInsets.all(LuminSpacing.md),
       decoration: BoxDecoration(
-        color: LuminColors.success.withOpacity(0.10),
+        color: LuminColors.success.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(LuminRadii.md),
-        border: Border.all(color: LuminColors.success.withOpacity(0.45)),
+        border: Border.all(color: LuminColors.success.withValues(alpha: 0.45)),
       ),
       child: Row(
         children: [
@@ -270,14 +271,15 @@ class _WebPaywallPageState extends State<WebPaywallPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Signals, levels & charts are free.',
+            Text(EntitlementCopy.free,
                 style: TextStyle(
                     color: LuminColors.textPrimary,
                     fontSize: 18,
                     fontWeight: FontWeight.w700)),
             SizedBox(height: LuminSpacing.xs),
-            Text('Upgrade to trade the signals — one-tap or hands-off, on '
-                'your own exchange. Lumin never holds your funds.',
+            Text('${EntitlementCopy.live} Assist and Auto add one-tap and '
+                'hands-off trading on your own exchange. Lumin never holds '
+                'your funds.',
                 style: TextStyle(color: LuminColors.textSecondary)),
           ],
         ),

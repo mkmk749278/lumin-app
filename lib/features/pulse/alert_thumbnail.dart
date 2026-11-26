@@ -304,9 +304,9 @@ class AlertThumbnailPainter extends CustomPainter {
       final y1 = yAt(data.zoneHigh!);
       final y2 = yAt(data.zoneLow!);
       final rect = Rect.fromLTRB(x1, y1, size.width, y2);
-      canvas.drawRect(rect, Paint()..color = _biasColor.withOpacity(0.12));
+      canvas.drawRect(rect, Paint()..color = _biasColor.withValues(alpha: 0.12));
       final border = Paint()
-        ..color = _biasColor.withOpacity(0.55)
+        ..color = _biasColor.withValues(alpha: 0.55)
         ..strokeWidth = 1;
       canvas.drawLine(Offset(x1, y1), Offset(size.width, y1), border);
       canvas.drawLine(Offset(x1, y2), Offset(size.width, y2), border);
@@ -319,7 +319,7 @@ class AlertThumbnailPainter extends CustomPainter {
         Offset(0, y),
         Offset(size.width, y),
         Paint()
-          ..color = _biasColor.withOpacity(0.9)
+          ..color = _biasColor.withValues(alpha: 0.9)
           ..strokeWidth = 1,
       );
     }

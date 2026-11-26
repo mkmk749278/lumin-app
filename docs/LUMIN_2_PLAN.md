@@ -14,30 +14,22 @@ pair (engine + app) and updates the status table at the bottom.
 | Desk forecast | **Measured + stated**: the analyst's own `p_target`, labelled as its estimate, beside what its past setups actually did. No invented numbers. |
 | Live execution on analyst setups | **Yes, dark-first**: built behind a default-OFF engine flag, shadow-measured, switched on only with owner sign-off. |
 
-## 2. How 2.0 ships without touching the live app
+## 2. How 2.0 ships
 
-The live app ships from `main` three ways: a sideload release the in-app
-updater installs, the PWA at `app.luminapp.org`, and the AAB the owner
-uploads to Play. A 2.0 screen merged to `main` naively would reach all three.
+**Updated 2026-11-26 (owner):** there are no users or subscribers yet, so 2.0
+is built **in place on `main`**, under the same package id, and tested through
+Play's **internal testing track** (plus sideload APKs). No edition switch: each
+phase merges and reaches the testers, replacing the old screens as it goes.
+When the owner signs off, the build is promoted to production on the existing
+listing. A new listing was ruled out — a new app on a personal developer
+account must first run a 12-tester, 14-day closed test, and would lose the
+listing's history, signing key and billing products.
 
-So 2.0 is a **compile-time edition**, the same mechanism as the distribution
-channel (`lib/app/distribution.dart`):
-
-```
---dart-define=LUMIN_EDITION=next     # 2.0 shell
-(default)            legacy          # today's app, byte-for-byte the same screens
-```
-
-* `main` keeps building `legacy` for the release, the PWA and the AAB.
-* CI also builds **`lumin-next-<run>.apk`** (same package id, same signing key)
-  as a workflow artifact only — never attached to the release, never
-  deployed to the web. A tester installs it over the live app; the updater is
-  inert in that build so it cannot "update" itself back to legacy.
-* **Launch** = one PR flipping the default to `next`, after the owner signs off
-  on the test build. Then the owner uploads the AAB.
-* Shared code (repository, auth, billing, execution) is not forked. 2.0 adds
-  new pages and a new theme; the legacy pages stay until launch, then are
-  deleted in a cleanup PR.
+Signal source (owner, 2026-11-26): **engine signal paths stay the signal
+source**; the analyst is the Desk layer and its setups are labelled
+forward-measured. The analyst is promoted to a signal source only if it beats
+the paths on a pre-agreed test of ~100 filled setups, net, same window, with
+confidence intervals.
 
 ## 3. What the handoff assumed vs what exists
 
@@ -52,8 +44,8 @@ Verified 2026-11-25. These change what gets built.
 | Post-trade review: fill, hold time, MFE/MAE, net PnL, exit | Walk records entry/exit price+time, exit reason, gross/net, MFE/MAE, `unfilled`. | Rendered as is. `not_filled` is never shown as a fill — its PnL is the market's, not the setup's. |
 | Setup archetypes `Breakout Retest`, `Sweep & Reclaim`… | Analyst archetypes: `level_reclaim`, `breakout_retest`, `range_fade`, `trend_pullback`, `sweep_reversal`. Engine signals carry bot names (`The Crusher`…). | One label map; bot names removed from 2.0 surfaces. |
 | "Verified net-of-fees performance" | Track record is recorded engine signals (net of 0.07%). Analyst outcomes are a **dark walk** (forward-measured, no real fills). | Two records, never pooled. The analyst's is labelled "forward-measured, not executed" until live execution exists. |
-| Notification permission on splash | True: `notification_service.dart` requests it at init. | Fixed in Phase 1 (both editions). |
-| Paywall `SIGNALS`/`ASSIST` wrap, "Signals stay free" contradiction, Binance-only onboarding copy, 19 specialists | All present in code. | Phase 1 (copy/layout bugs, both editions) and Phase 4 (methodology screen, 2.0). |
+| Notification permission on splash | True: `notification_service.dart` requests it at init. | Fixed in Phase 1b. |
+| Paywall `SIGNALS`/`ASSIST` wrap, "Signals stay free" contradiction, Binance-only onboarding copy, 19 specialists | All present in code. | Phase 1b (copy/layout bugs) and Phase 4 (methodology screen, 2.0). |
 
 ## 4. Rules every phase follows
 
@@ -66,8 +58,8 @@ Verified 2026-11-25. These change what gets built.
 * **Numbers use tabular figures**; percentages say gross or net.
 * **Cost:** no new Firestore read on any path; new engine work runs on the
   snapshot writer's 60s timer, not per request.
-* Legacy edition behaviour is unchanged unless the change is a bug fix that
-  should reach live users too (Phase 1b), and the PR says which.
+* The old screens are replaced as each 2.0 phase lands; nothing ships that
+  has not been tested on the internal track.
 
 ## 5. Phases
 
@@ -88,24 +80,27 @@ Verified 2026-11-25. These change what gets built.
 * Tests: builder on a real ledger fixture, route states, a contract test
   pinning every key the app reads.
 
-**1b. App — bug fixes for both editions** (handoff P0 list)
+**1b. App — bug fixes** (handoff P0 list)
 * Defer the notification permission until after login, with a soft prompt.
 * Paywall column heads: `maxLines: 1` + `FittedBox`.
 * Play Billing: timeout + retry instead of endless shimmer.
 * One entitlement sentence used by Signals, Trade and Subscription.
 * Onboarding names the user's exchange (Binance or CoinDCX), not Binance only.
 * `AutoModeStatus.readable` (OPEN item in engine `ACTIVE_CONTEXT.md`).
+* Hinglish consent footer in English; consent version bumped (the
+  responsibility line now covers any exchange account).
+* **Open:** the logged-out banner flash on Signals after sign-in. Suspected
+  cause: the guest's `liveFeedAccess` value survives until the next
+  `/api/signals` read. Not fixed until it can be reproduced on a device.
 * Flutter SDK installed in the session so `flutter test` + `flutter analyze` run before every push.
 
-**1c. App — 2.0 skeleton** (`next` edition only)
-* `lib/app/edition.dart` (compile-time, legacy default).
+**1c. App — 2.0 skeleton** (in place)
 * `lib/theme/lumin_theme.dart`: obsidian tokens (`#090B10` / `#11151E` /
   `#171C28` / `#222938`), Inter + JetBrains Mono **bundled as assets** (no
   runtime font download), tabular figures, 12% tinted status pills.
 * `NextNavShell` with five tabs — Desk, Setups, Markets, Execution, Account.
   Markets/Execution/Account host today's pages under the new theme until their phases.
 * Repository: `fetchDesk()` / `fetchDeskSetup(id)` on both `HttpRepository` and `MockRepository`.
-* CI: `next` test APK artifact.
 
 ### Phase 2 — Desk tab
 * Desk Brief hero: bias pill, BTC price + state, breadth, "updated Xm ago", notes; drawer with per-timeframe state, 24h/7d, macro status (`unknown`, never "no events"), setups this plan.
@@ -138,14 +133,14 @@ Money path. Ships with the measurement flag ON and the effect flag OFF.
 ### Phase 6 — pre-launch
 * In-app review prompt after real engagement.
 * Android Vitals check, `--split-per-abi` test APKs, six 1080×1920 screenshots, disclaimer typo.
-* Flip the default edition to `next`; delete legacy pages in a follow-up PR; owner uploads the AAB.
+* Promote the tested internal-track build to production on the existing listing (owner).
 
 ## 6. Status
 
 | Phase | State | PRs |
 |---|---|---|
-| 1a engine desk read model | planned | |
-| 1b app bug fixes (both editions) | planned | |
+| 1a engine desk read model | in review | 360-v2 #1106 |
+| 1b app bug fixes | in review | lumin-app (this branch) |
 | 1c 2.0 skeleton | planned | |
 | 2 Desk | planned | |
 | 3 Setups / Dossier / Markets | planned | |

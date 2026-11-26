@@ -33,7 +33,7 @@ class LuminSwitch extends StatelessWidget {
     final cb = onChanged;
     return Switch(
       value: value,
-      activeColor: activeColor,
+      activeThumbColor: activeColor,
       materialTapTargetSize: materialTapTargetSize,
       onChanged: cb == null
           ? null

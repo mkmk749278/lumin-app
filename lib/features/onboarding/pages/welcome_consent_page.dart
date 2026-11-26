@@ -113,7 +113,7 @@ class _WelcomeConsentPageState extends State<WelcomeConsentPage> {
                         onChanged: (v) =>
                             setState(() => _notAdvice = v ?? false),
                         text:
-                            'I understand that Lumin signals are informational only and are NOT personalised investment advice. I am solely responsible for my own trading decisions and any funds in my Binance account.',
+                            'I understand that Lumin signals are informational only and are NOT personalised investment advice. I am solely responsible for my own trading decisions and any funds in my exchange account.',
                       ),
                     ],
                   ),

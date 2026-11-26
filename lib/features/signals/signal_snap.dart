@@ -301,10 +301,10 @@ class SignalSnapPainter extends CustomPainter {
     for (var i = 0; i < tps.length; i++) {
       final tp = tps[i];
       if (tp == null) continue;
-      level(tp, LuminColors.success.withOpacity(_tpOpacity[i]));
+      level(tp, LuminColors.success.withValues(alpha: _tpOpacity[i]));
     }
-    level(data.stop, LuminColors.loss.withOpacity(0.9));
-    level(data.entry, LuminColors.accent.withOpacity(0.9));
+    level(data.stop, LuminColors.loss.withValues(alpha: 0.9));
+    level(data.entry, LuminColors.accent.withValues(alpha: 0.9));
 
     // 2. Candles.
     paintMiniCandles(canvas, candles, xAt, yAt, xStep);

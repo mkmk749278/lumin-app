@@ -266,9 +266,9 @@ class _ReferralPageState extends State<ReferralPage> {
       child: Container(
         padding: const EdgeInsets.all(LuminSpacing.md),
         decoration: BoxDecoration(
-          color: LuminColors.success.withOpacity(0.10),
+          color: LuminColors.success.withValues(alpha: 0.10),
           borderRadius: BorderRadius.circular(LuminRadii.md),
-          border: Border.all(color: LuminColors.success.withOpacity(0.45)),
+          border: Border.all(color: LuminColors.success.withValues(alpha: 0.45)),
         ),
         child: Row(
           children: [

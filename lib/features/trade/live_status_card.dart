@@ -21,6 +21,7 @@ import '../settings/pages/symbol_preference_page.dart';
 import '../settings/pages/trading_platform_page.dart';
 import '../settings/pages/auto_trade_settings_page.dart';
 import 'live_status_resolver.dart';
+import '../../shared/entitlement_copy.dart';
 
 class LiveStatusCard extends StatefulWidget {
   const LiveStatusCard({
@@ -123,8 +124,8 @@ class _LiveStatusCardState extends State<LiveStatusCard> {
           'Flip the Live auto-trade toggle above to start placing real '
               'orders on the next signal.',
         LiveBlockReason.tierBlocked =>
-          'Signals stay free — the Auto plan unlocks hands-off '
-              'execution on your own $_exchange account.',
+          'Hands-off execution on your own $_exchange account needs the '
+              'Auto plan. ${EntitlementCopy.summary}',
         LiveBlockReason.filtersBlockAll =>
           'Your setup/market filters currently match no signals, so '
               'nothing will ever trade. Loosen them to resume.',
@@ -316,7 +317,7 @@ class _LiveStatusCardState extends State<LiveStatusCard> {
       padding: const EdgeInsets.symmetric(horizontal: LuminSpacing.lg),
       child: LuminCard(
         padding: const EdgeInsets.all(LuminSpacing.md),
-        border: Border.all(color: accent.withOpacity(0.45)),
+        border: Border.all(color: accent.withValues(alpha: 0.45)),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

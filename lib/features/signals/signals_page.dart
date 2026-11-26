@@ -223,7 +223,7 @@ class _SignalsPageState extends State<SignalsPage>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final visible = TickerMode.of(context);
+    final visible = TickerMode.valuesOf(context).enabled;
     if (visible != _tabVisible) {
       _tabVisible = visible;
       _applyPollingGate();
@@ -703,12 +703,12 @@ class _Chip extends StatelessWidget {
           ),
           decoration: BoxDecoration(
             color: selected
-                ? LuminColors.accent.withOpacity(0.15)
+                ? LuminColors.accent.withValues(alpha: 0.15)
                 : LuminColors.bgCard,
             borderRadius: BorderRadius.circular(LuminRadii.pill),
             border: Border.all(
               color: selected
-                  ? LuminColors.accent.withOpacity(0.40)
+                  ? LuminColors.accent.withValues(alpha: 0.40)
                   : LuminColors.cardBorder,
             ),
           ),
@@ -952,9 +952,9 @@ class _AccountStrip extends StatelessWidget {
         vertical: LuminSpacing.xs,
       ),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
+        color: color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(LuminRadii.sm),
-        border: Border.all(color: color.withOpacity(0.22)),
+        border: Border.all(color: color.withValues(alpha: 0.22)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1105,7 +1105,7 @@ class _SignalCard extends StatelessWidget {
                       ),
                       decoration: BoxDecoration(
                         color: (isLong ? LuminColors.success : LuminColors.loss)
-                            .withOpacity(0.15),
+                            .withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(LuminRadii.sm),
                       ),
                       child: Text(
@@ -1130,7 +1130,7 @@ class _SignalCard extends StatelessWidget {
                           vertical: 2,
                         ),
                         decoration: BoxDecoration(
-                          color: LuminColors.success.withOpacity(0.15),
+                          color: LuminColors.success.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(LuminRadii.sm),
                         ),
                         child: const Text(
@@ -1323,7 +1323,7 @@ class _SignalCard extends StatelessWidget {
                     Text(
                       '↑${formatPct(sig.maxFavorableExcursionPct)}',
                       style: TextStyle(
-                        color: LuminColors.success.withOpacity(0.70),
+                        color: LuminColors.success.withValues(alpha: 0.70),
                         fontSize: 11,
                         fontWeight: FontWeight.w500,
                       ),
@@ -1829,10 +1829,10 @@ class _ManagementOption extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(LuminSpacing.md),
         decoration: BoxDecoration(
-          color: selected ? accent.withOpacity(0.12) : LuminColors.bgDeep,
+          color: selected ? accent.withValues(alpha: 0.12) : LuminColors.bgDeep,
           borderRadius: BorderRadius.circular(LuminRadii.md),
           border: Border.all(
-            color: selected ? accent.withOpacity(0.6) : LuminColors.cardBorder,
+            color: selected ? accent.withValues(alpha: 0.6) : LuminColors.cardBorder,
             width: selected ? 1.5 : 1,
           ),
         ),
@@ -1924,9 +1924,9 @@ class _OutcomeSummaryCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(LuminSpacing.md),
       decoration: BoxDecoration(
-        color: accent.withOpacity(0.06),
+        color: accent.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(LuminRadii.md),
-        border: Border.all(color: accent.withOpacity(0.35)),
+        border: Border.all(color: accent.withValues(alpha: 0.35)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2042,9 +2042,9 @@ class _PreTpCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(LuminSpacing.md),
       decoration: BoxDecoration(
-        color: accent.withOpacity(0.08),
+        color: accent.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(LuminRadii.md),
-        border: Border.all(color: accent.withOpacity(0.4)),
+        border: Border.all(color: accent.withValues(alpha: 0.4)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2301,7 +2301,7 @@ class _ConfidenceBadge extends StatelessWidget {
           vertical: 3,
         ),
         decoration: BoxDecoration(
-          color: LuminColors.accent.withOpacity(0.10),
+          color: LuminColors.accent.withValues(alpha: 0.10),
           borderRadius: BorderRadius.circular(LuminRadii.sm),
         ),
         child: Column(
@@ -2416,9 +2416,9 @@ class _ConfidenceBadge extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(LuminSpacing.md),
               decoration: BoxDecoration(
-                color: LuminColors.warn.withOpacity(0.10),
+                color: LuminColors.warn.withValues(alpha: 0.10),
                 borderRadius: BorderRadius.circular(LuminRadii.sm),
-                border: Border.all(color: LuminColors.warn.withOpacity(0.30)),
+                border: Border.all(color: LuminColors.warn.withValues(alpha: 0.30)),
               ),
               child: const Text(
                 'It is not a probability of profit. A high score does not '

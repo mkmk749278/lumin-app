@@ -276,7 +276,7 @@ class MonthCalendar extends StatelessWidget {
           borderRadius: BorderRadius.circular(LuminRadii.sm),
           border: Border.all(
             color: isSel
-                ? LuminColors.accent.withOpacity(0.7)
+                ? LuminColors.accent.withValues(alpha: 0.7)
                 : LuminColors.cardBorder,
           ),
         ),
@@ -355,7 +355,7 @@ class _StepButton extends StatelessWidget {
                   // Dimmed rather than hidden: a control that vanishes at the
                   // edge of the record leaves the reader wondering whether it
                   // was ever there.
-                  : LuminColors.textMuted.withOpacity(0.3),
+                  : LuminColors.textMuted.withValues(alpha: 0.3),
             ),
           ),
         ),

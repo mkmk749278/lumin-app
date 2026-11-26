@@ -106,7 +106,7 @@ class TrialCountdownCard extends StatelessWidget {
             padding: const EdgeInsets.all(LuminSpacing.md),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(LuminRadii.lg),
-              border: Border.all(color: accent.withOpacity(0.35)),
+              border: Border.all(color: accent.withValues(alpha: 0.35)),
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -114,7 +114,7 @@ class TrialCountdownCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(LuminSpacing.sm),
                   decoration: BoxDecoration(
-                    color: accent.withOpacity(0.12),
+                    color: accent.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(LuminRadii.sm),
                   ),
                   child: Icon(
