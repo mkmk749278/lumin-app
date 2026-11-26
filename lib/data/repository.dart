@@ -15,8 +15,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../shared/tokens.dart';
 import 'api_client.dart';
 import 'coindcx_models.dart';
+import 'desk_models.dart';
 import 'live_feed_access.dart';
 import 'pair_context.dart';
+export 'desk_models.dart';
 export 'live_feed_access.dart';
 export 'pair_context.dart';
 import 'market_alert.dart';
@@ -2106,6 +2108,12 @@ abstract class LuminRepository {
     double? amount,
   });
 
+  /// The Desk (Lumin 2.0): the analyst's latest brief, its plan log, its
+  /// setups and their forward-measured record, as the engine published it.
+  /// Never throws on a "not published" or "disabled" desk — those are
+  /// [DeskResponse.state]s; it throws only when the request itself failed.
+  Future<DeskResponse> fetchDesk();
+
   /// The individual closed signals behind [fetchTrackRecord]'s buckets.
   ///
   /// `date` (`YYYY-MM-DD`, UTC) narrows to one day; empty means the whole
@@ -2776,6 +2784,76 @@ class MockRepository implements LuminRepository {
       weeklyPnlUsd: weekly,
       monthlyPnlUsd: monthly,
     );
+  }
+
+  @override
+  Future<DeskResponse> fetchDesk() async {
+    // Preview mode: one current risk-off brief, a pending short and a closed
+    // long, so the Desk exercises its real branches offline. Shaped like the
+    // engine's payload; never shown as live (the preview badge says so).
+    final now = DateTime.now().toUtc().millisecondsSinceEpoch / 1000.0;
+    return DeskResponse.fromJson({
+      'state': 'ok',
+      'desk': {
+        'schema': 1,
+        'generated_at': now,
+        'ledger': 'ok',
+        'brief': {
+          'plan': {
+            'plan_id': 'preview',
+            'submitted_at': now - 12 * 60,
+            'bias': 'risk_off',
+            'notes': 'BTC printed a fresh 4h low with weak alt breadth. The '
+                'desk is standing aside on alt longs and watching clean '
+                'overhead retests only.',
+            'n_setups': 1,
+            'n_accepted': 1,
+            'accepted': [
+              {'symbol': 'XLMUSDT', 'side': 'short', 'archetype': 'breakout_retest'},
+            ],
+          },
+          'freshness': {'state': 'current', 'age_sec': 720},
+          'market': {
+            'readable': true,
+            'btc_price': 59212.0,
+            'btc_state': -0.42,
+            'btc_change_pct': {'24h': -2.1, '7d': -6.4},
+            'breadth': {'readable': true, 'share_beating_btc_7d': 0.46, 'n': 78},
+          },
+        },
+        'plans': [],
+        'setups': [
+          {
+            'setup_id': 'preview:0', 'symbol': 'XLMUSDT', 'side': 'short',
+            'archetype': 'breakout_retest', 'state': 'pending',
+            'submitted_at': now - 12 * 60, 'expires_at': now + 5 * 3600,
+            'entries': [
+              {'price': 0.1242, 'weight': 0.4},
+              {'price': 0.1246, 'weight': 0.6},
+            ],
+            'stop': 0.1256, 'targets': [0.1214, 0.1196], 'rr_tp1': 2.1,
+            'scenario': 'Retest of the broken 0.1240-0.1248 shelf in a '
+                'risk-off BTC regime.',
+            'invalidation': '1h close above 0.1256 or BTC reclaims 60,300.',
+            'p_target': 0.36, 'price_at_submit': 0.1231,
+          },
+        ],
+        'record': {
+          'readable': true,
+          'basis': 'forward_walk',
+          'basis_note': 'Measured forward on real prices, net of a 0.07% '
+              'round trip. No order was placed: these are not fills.',
+          'analyst': {'n': 0},
+          'split': {},
+          'calibration': {'n': 0},
+        },
+        'labels': {
+          'archetype': {'breakout_retest': 'Breakout Retest'},
+          'bias': {'risk_off': 'Risk-off'},
+          'state': {'pending': 'Pending limit'},
+        },
+      },
+    });
   }
 
   @override
@@ -4430,6 +4508,9 @@ class HttpRepository implements LuminRepository {
   @override
   void invalidatePulseBundleCache() {
     _swr.invalidate(_kPulseBundleKey);
+    // The Desk brief sits on the same tab; a pull-to-refresh that left it
+    // cached would refresh everything on screen except the top card.
+    _swr.invalidate('desk');
     // The bundle CONTAINS a track-record read, and that read is cached under
     // its own argument-keyed name.  Dropping only the bundle key would
     // re-assemble it and be handed the cached track record straight back —
@@ -4788,6 +4869,21 @@ class HttpRepository implements LuminRepository {
           .toList(),
       weeklyPnlUsd: (j['weekly_pnl_usd'] as num?)?.toDouble() ?? 0.0,
       monthlyPnlUsd: (j['monthly_pnl_usd'] as num?)?.toDouble() ?? 0.0,
+    );
+  }
+
+  @override
+  Future<DeskResponse> fetchDesk() {
+    // The same payload for every caller, republished by the engine every
+    // 60s; the engine sends max-age=30, so a tab switch within that reuses
+    // the answer instead of re-fetching it.
+    return _swr.read<DeskResponse>(
+      'desk',
+      ttl: const Duration(seconds: 30),
+      fetch: () async {
+        final j = (await client.get('/api/desk')) as Map<String, dynamic>;
+        return DeskResponse.fromJson(j);
+      },
     );
   }
 

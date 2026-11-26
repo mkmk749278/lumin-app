@@ -26,7 +26,7 @@ class ContextChartOverlay {
 
   static const String _green = '#22e39b';
   static const String _red = '#ff4d6d';
-  static const String _accent = '#7bd3f7';
+  static const String _accent = '#38bdf8';
 
   /// [tfSeconds] snaps each past signal to the start of the bar it opened in
   /// (a marker off the bar grid is dropped by the chart). [oldestBar] /

@@ -100,7 +100,34 @@ dependency_overrides:
 
 flutter:
   uses-material-design: true
+  # Lumin 2.0 type (2026-11-26): Inter for UI, JetBrains Mono for every
+  # price, PnL, R:R and timestamp. Bundled rather than fetched at runtime so
+  # the first frame is already in the right face and no font CDN is a
+  # dependency of a trading screen. SIL OFL 1.1 (assets/fonts/OFL-*.txt).
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-400.ttf
+          weight: 400
+        - asset: assets/fonts/Inter-500.ttf
+          weight: 500
+        - asset: assets/fonts/Inter-600.ttf
+          weight: 600
+        - asset: assets/fonts/Inter-700.ttf
+          weight: 700
+        - asset: assets/fonts/Inter-800.ttf
+          weight: 800
+    - family: JetBrainsMono
+      fonts:
+        - asset: assets/fonts/JetBrainsMono-400.ttf
+          weight: 400
+        - asset: assets/fonts/JetBrainsMono-500.ttf
+          weight: 500
+        - asset: assets/fonts/JetBrainsMono-700.ttf
+          weight: 700
   assets:
+    - assets/fonts/OFL-Inter.txt
+    - assets/fonts/OFL-JetBrainsMono.txt
     # Market Charts — vendored TradingView Lightweight Charts + WebView host.
     - assets/chart/
     # Coin icons for the Markets list (CC0, see assets/coins/LICENSE.md).

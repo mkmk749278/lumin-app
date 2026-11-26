@@ -80,7 +80,7 @@ class _SettingsPageState extends State<SettingsPage> implements ScrollToTop {
     // every row that would open a per-user page opens sign-up instead.
     final guest = isGuestSession(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Menu')),
+      appBar: AppBar(title: const Text('Account')),
       body: ListView(
         controller: _listController,
         physics: const BouncingScrollPhysics(),

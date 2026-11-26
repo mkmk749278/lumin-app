@@ -162,7 +162,7 @@ class _FirstRunGateState extends State<_FirstRunGate> {
         // Same blank-splash convention as [_AuthGate] to avoid a
         // visible flicker on the very first flag read.
         return const Scaffold(
-          backgroundColor: Color(0xFF0A0E1A),
+          backgroundColor: Color(0xFF090B10),
           body: SizedBox.shrink(),
         );
       case true:
@@ -365,7 +365,7 @@ class _AuthGateState extends State<_AuthGate> {
   }
 
   Widget _blankSplash() => const Scaffold(
-        backgroundColor: Color(0xFF0A0E1A),
+        backgroundColor: Color(0xFF090B10),
         body: SizedBox.shrink(),
       );
 

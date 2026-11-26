@@ -415,21 +415,21 @@ const mockActivity = <MockActivityEvent>[
     title: 'ETHUSDT LONG opened',
     subtitle: 'qty 0.0429 @ 2,329.00 — The Architect',
     minutesAgo: 18,
-    color: Color(0xFF7BD3F7),
+    color: Color(0xFF38BDF8),
   ),
   MockActivityEvent(
     kind: 'TP1',
     title: 'BTCUSDT SHORT — TP1 hit',
     subtitle: '+0.56% on 33% partial — SL → breakeven',
     minutesAgo: 96,
-    color: Color(0xFF4ADE80),
+    color: Color(0xFF10B981),
   ),
   MockActivityEvent(
     kind: 'OPEN',
     title: 'BTCUSDT SHORT opened',
     subtitle: 'qty 0.0009 @ 78,240.00 — The Counter-Puncher',
     minutesAgo: 142,
-    color: Color(0xFF7BD3F7),
+    color: Color(0xFF38BDF8),
   ),
   MockActivityEvent(
     kind: 'INVAL',
@@ -443,7 +443,7 @@ const mockActivity = <MockActivityEvent>[
     title: 'BNBUSDT LONG — TP3 hit',
     subtitle: '+2.78% — full close, signal lifecycle complete',
     minutesAgo: 880,
-    color: Color(0xFF4ADE80),
+    color: Color(0xFF10B981),
   ),
 ];
 

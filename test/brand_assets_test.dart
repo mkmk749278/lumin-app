@@ -118,9 +118,20 @@ void main() {
     });
 
     test('the colours are the app tokens, not near-misses', () {
+      // Read the hex off tokens.dart rather than restating it here: a
+      // palette change (Lumin 2.0, 2026-11-26) must fail this test until the
+      // Android resources follow, instead of the test pinning the old one.
+      final tokens = File('lib/shared/tokens.dart').readAsStringSync();
+      String hexOf(String name) {
+        final m = RegExp('Color $name = Color\\(0xFF([0-9A-Fa-f]{6})\\)')
+            .firstMatch(tokens);
+        expect(m, isNotNull, reason: 'LuminColors.$name not found');
+        return '#${m!.group(1)!.toUpperCase()}';
+      }
+
       final s = File('$_resRoot/values/ic_launcher_background.xml').readAsStringSync();
-      expect(s, contains('#7BD3F7')); // LuminColors.accent
-      expect(s, contains('#0A0E1A')); // LuminColors.bgDeep
+      expect(s, contains(hexOf('accent')));
+      expect(s, contains(hexOf('bgDeep')));
     });
   });
 
