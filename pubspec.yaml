@@ -88,6 +88,15 @@ dependency_overrides:
   # Remove once jni publishes a release whose Android build script does
   # not require the Kotlin plugin.
   jni: 1.0.0
+  # The jni pin holds only while nothing above it demands a newer jni.
+  # jni_flutter 1.1.0 (bindings expect jni ^1.2.0) and
+  # shared_preferences_android 2.5.5 (^1.1.0) did, and `flutter create`
+  # re-resolved to them: every APK build from 2026-11-20 on failed at
+  # kernel compile with "The generated bindings expect package:jni ^1.x,
+  # but 1.0.x was imported". Held at the versions in pubspec.lock, which
+  # built green on 2026-09-28. Remove together with the jni pin.
+  jni_flutter: 1.0.1
+  shared_preferences_android: 2.4.23
 
 flutter:
   uses-material-design: true
